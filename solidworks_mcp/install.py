@@ -1,0 +1,341 @@
+"""
+SolidWorks MCP Multi-Client Auto-Installer
+-----------------------------------------
+Auto-detects installed AI agents and IDEs on the user's Windows system,
+registers the SolidWorks MCP server in their respective configuration files,
+and installs all bundled SolidWorks CAD/FEA/Drafting skills.
+
+Supported Clients:
+- Claude Desktop
+- Claude Code
+- Antigravity / Gemini CLI
+- Cursor
+- Windsurf (Codeium)
+- Codex / OpenAI CLI
+- VS Code / GitHub Copilot
+"""
+
+import os
+import sys
+import json
+import shutil
+import logging
+import argparse
+from pathlib import Path
+from typing import Dict, List, Any, Optional, Tuple
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+logger = logging.getLogger("solidworks_mcp.install")
+
+
+def get_bundled_skills_dir() -> Path:
+    """Locate the bundled skills directory inside the solidworks_mcp package."""
+    pkg_dir = Path(__file__).resolve().parent
+    bundled = pkg_dir / "skills"
+    if bundled.exists() and bundled.is_dir():
+        return bundled
+    # Fallback to workspace root 'skills' directory if running in-tree
+    workspace_skills = pkg_dir.parent / "skills"
+    if workspace_skills.exists() and workspace_skills.is_dir():
+        return workspace_skills
+    return bundled
+
+
+class ClientTarget:
+    """Represents a supported AI assistant / MCP client."""
+
+    def __init__(
+        self,
+        name: str,
+        config_path: Path,
+        config_format: str = "json_mcpServers",
+        skills_dirs: Optional[List[Path]] = None,
+        detection_hint: Optional[Path] = None,
+    ):
+        self.name = name
+        self.config_path = config_path
+        self.config_format = config_format
+        self.skills_dirs = skills_dirs or []
+        self.detection_hint = detection_hint or config_path.parent
+
+    def is_installed(self) -> bool:
+        """Check whether the client or its parent application directory exists on the system."""
+        return self.config_path.exists() or (self.detection_hint and self.detection_hint.exists())
+
+
+def get_detected_clients() -> List[ClientTarget]:
+    """Inspect standard Windows filesystem paths to detect installed AI agents."""
+    user_profile = Path(os.environ.get("USERPROFILE", os.path.expanduser("~")))
+    app_data = Path(os.environ.get("APPDATA", user_profile / "AppData" / "Roaming"))
+    local_app_data = Path(os.environ.get("LOCALAPPDATA", user_profile / "AppData" / "Local"))
+
+    clients = [
+        ClientTarget(
+            name="Claude Desktop",
+            config_path=app_data / "Claude" / "claude_desktop_config.json",
+            config_format="json_mcpServers",
+            skills_dirs=[],
+            detection_hint=app_data / "Claude",
+        ),
+        ClientTarget(
+            name="Claude Code",
+            config_path=user_profile / ".claude.json",
+            config_format="json_mcpServers",
+            skills_dirs=[user_profile / ".claude" / "skills"],
+            detection_hint=user_profile / ".claude",
+        ),
+        ClientTarget(
+            name="Antigravity / Gemini",
+            config_path=user_profile / ".gemini" / "antigravity" / "mcp_config.json",
+            config_format="json_mcpServers",
+            skills_dirs=[
+                user_profile / ".gemini" / "config" / "skills",
+                user_profile / ".gemini" / "antigravity" / "skills",
+            ],
+            detection_hint=user_profile / ".gemini",
+        ),
+        ClientTarget(
+            name="Cursor",
+            config_path=user_profile / ".cursor" / "mcp.json",
+            config_format="json_mcpServers",
+            skills_dirs=[user_profile / ".cursor" / "skills"],
+            detection_hint=user_profile / ".cursor",
+        ),
+        ClientTarget(
+            name="Windsurf",
+            config_path=user_profile / ".codeium" / "windsurf" / "mcp_config.json",
+            config_format="json_mcpServers",
+            skills_dirs=[user_profile / ".codeium" / "windsurf" / "skills"],
+            detection_hint=user_profile / ".codeium" / "windsurf",
+        ),
+        ClientTarget(
+            name="Codex CLI",
+            config_path=user_profile / ".codex" / "mcp.json",
+            config_format="json_mcpServers",
+            skills_dirs=[user_profile / ".codex" / "skills"],
+            detection_hint=user_profile / ".codex",
+        ),
+        ClientTarget(
+            name="VS Code / GitHub Copilot",
+            config_path=app_data / "Code" / "User" / "mcp.json",
+            config_format="json_mcpServers",
+            skills_dirs=[],
+            detection_hint=app_data / "Code",
+        ),
+    ]
+
+    return clients
+
+
+def register_mcp_server(
+    client: ClientTarget,
+    python_exe: str,
+    allow_exec: bool = False,
+    dry_run: bool = False,
+) -> bool:
+    """
+    Safely merges the solidworks MCP server configuration into client's config file
+    without destroying existing entries.
+    """
+    server_key = "solidworks"
+    env_vars: Dict[str, str] = {}
+    if allow_exec:
+        env_vars["SW_MCP_ALLOW_EXEC"] = "1"
+
+    server_entry: Dict[str, Any] = {
+        "command": python_exe,
+        "args": ["-m", "solidworks_mcp.server"],
+    }
+    if env_vars:
+        server_entry["env"] = env_vars
+
+    config_data: Dict[str, Any] = {}
+    if client.config_path.exists():
+        try:
+            with open(client.config_path, "r", encoding="utf-8") as f:
+                config_data = json.load(f)
+        except Exception as e:
+            logger.warning(f"Could not parse existing {client.config_path}: {e}. Creating fresh config.")
+            config_data = {}
+
+    if "mcpServers" not in config_data:
+        config_data["mcpServers"] = {}
+
+    config_data["mcpServers"][server_key] = server_entry
+
+    if dry_run:
+        logger.info(f"[DRY-RUN] Would update {client.name} config at: {client.config_path}")
+        return True
+
+    try:
+        client.config_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(client.config_path, "w", encoding="utf-8") as f:
+            json.dump(config_data, f, indent=2)
+        logger.info(f"Registered SolidWorks MCP in {client.name} ({client.config_path})")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to write configuration for {client.name}: {e}")
+        return False
+
+
+def _force_remove_readonly(func, path, exc_info):
+    """Error handler for shutil.rmtree to unset read-only permissions on Windows."""
+    import stat
+    try:
+        os.chmod(path, stat.S_IWRITE)
+        func(path)
+    except Exception:
+        pass
+
+
+def install_skills(client: ClientTarget, bundled_skills: Path, dry_run: bool = False) -> int:
+    """Installs all bundled SolidWorks skills into the client's skill directories."""
+    if not bundled_skills.exists():
+        logger.warning(f"Bundled skills directory not found: {bundled_skills}")
+        return 0
+
+    installed_count = 0
+    for target_skills_dir in client.skills_dirs:
+        if dry_run:
+            logger.info(f"[DRY-RUN] Would copy bundled skills to {target_skills_dir}")
+            continue
+
+        try:
+            target_skills_dir.mkdir(parents=True, exist_ok=True)
+            for skill_folder in bundled_skills.iterdir():
+                if skill_folder.is_dir() and (skill_folder / "SKILL.md").exists():
+                    dest = target_skills_dir / skill_folder.name
+                    if dest.exists():
+                        shutil.rmtree(dest, onerror=_force_remove_readonly)
+                    shutil.copytree(skill_folder, dest)
+                    installed_count += 1
+            logger.info(f"Installed {installed_count} SolidWorks skills into: {target_skills_dir}")
+        except Exception as e:
+            logger.warning(f"Failed copying skills into {target_skills_dir}: {e}")
+
+    return installed_count
+
+
+def prompt_execute_python_consent() -> bool:
+    """Interactive CLI prompt explaining benefits and security risks of execute_python."""
+    print("\n" + "=" * 76)
+    print(" [!] SECURITY GATING CONFIGURATION: `execute_python`")
+    print("=" * 76)
+    print(
+        "The `execute_python` tool allows the AI assistant to run arbitrary Python code\n"
+        "directly on your Windows system with access to the SolidWorks COM API.\n\n"
+        "BENEFITS:\n"
+        "- Full access to `sw_app`, `model`, and `SelectionMgr` for custom macros.\n"
+        "- Batch geometry calculations and specialized COM methods not in standard tools.\n\n"
+        "RISKS:\n"
+        "- Arbitrary code execution running with your current Windows user privileges.\n"
+        "- Bypasses filesystem policy and tool validation safeguards.\n\n"
+        "RECOMMENDATION:\n"
+        "Keep disabled by default (N). When needed in chat, the AI will prompt you for\n"
+        "one-time explicit consent before executing any Python script.\n"
+    )
+    choice = input("Do you want to enable SW_MCP_ALLOW_EXEC=1 permanently in client configs? (y/N): ").strip().lower()
+    return choice in ("y", "yes", "1")
+
+
+def run_installer(
+    python_exe: Optional[str] = None,
+    allow_exec: Optional[bool] = None,
+    client_name: Optional[str] = None,
+    dry_run: bool = False,
+    non_interactive: bool = False,
+) -> int:
+    """Execute full multi-client installation workflow."""
+    if hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+    print("=" * 76)
+    print(" [*] SOLIDWORKS MCP MULTI-CLIENT AUTO-INSTALLER")
+    print("=" * 76)
+
+    resolved_python = python_exe or sys.executable
+    logger.info(f"Target Python executable: {resolved_python}")
+
+    bundled_skills = get_bundled_skills_dir()
+    logger.info(f"Bundled skills source: {bundled_skills}")
+
+    all_clients = get_detected_clients()
+    detected = [c for c in all_clients if c.is_installed()]
+
+    if not detected:
+        logger.warning("No installed AI clients detected in standard locations.")
+        print("Available detection paths checked:")
+        for c in all_clients:
+            print(f"  - {c.name}: {c.config_path}")
+        # Default to installing for Claude Desktop and Antigravity
+        detected = [c for c in all_clients if c.name in ("Claude Desktop", "Antigravity / Gemini")]
+
+    print(f"\nDetected AI clients ready for MCP registration ({len(detected)}):")
+    for c in detected:
+        print(f"  [x] {c.name} (config: {c.config_path.name})")
+
+    # Filter by specific client if requested
+    if client_name:
+        detected = [c for c in detected if client_name.lower() in c.name.lower()]
+        if not detected:
+            logger.error(f"Specified client '{client_name}' not found among detected targets.")
+            return 1
+
+    # Security consent for execute_python
+    final_allow_exec = False
+    if allow_exec is not None:
+        final_allow_exec = allow_exec
+    elif not non_interactive and sys.stdin.isatty():
+        final_allow_exec = prompt_execute_python_consent()
+    else:
+        logger.info("Non-interactive mode: keeping SW_MCP_ALLOW_EXEC=0 (default secure gated state).")
+
+    print("\nRegistering SolidWorks MCP and installing skills...")
+    success_count = 0
+    total_skills_installed = 0
+
+    for client in detected:
+        ok = register_mcp_server(
+            client=client,
+            python_exe=resolved_python,
+            allow_exec=final_allow_exec,
+            dry_run=dry_run,
+        )
+        if ok:
+            success_count += 1
+        n_skills = install_skills(client, bundled_skills, dry_run=dry_run)
+        total_skills_installed += n_skills
+
+    print("\n" + "=" * 76)
+    print(f" [OK] Installation complete: {success_count}/{len(detected)} clients configured.")
+    print(f" [*] Bundled SolidWorks skills installed across {total_skills_installed} destinations.")
+    print("=" * 76)
+    print("To use: Restart your AI client(s) (Claude Desktop, Antigravity, Cursor, etc.).\n")
+    return 0
+
+
+def main():
+    parser = argparse.ArgumentParser(description="SolidWorks MCP Auto-Installer for AI Clients")
+    parser.add_argument("--python", type=str, default=None, help="Path to Python executable to use in MCP config")
+    parser.add_argument("--allow-exec", action="store_true", default=None, help="Permanently enable SW_MCP_ALLOW_EXEC=1 in configs")
+    parser.add_argument("--no-allow-exec", action="store_false", dest="allow_exec", help="Enforce SW_MCP_ALLOW_EXEC=0 in configs")
+    parser.add_argument("--client", type=str, default=None, help="Target a specific client by name")
+    parser.add_argument("--dry-run", action="store_true", help="Preview installation without modifying files")
+    parser.add_argument("--non-interactive", action="store_true", help="Run without interactive prompts")
+
+    args = parser.parse_args()
+    ret = run_installer(
+        python_exe=args.python,
+        allow_exec=args.allow_exec,
+        client_name=args.client,
+        dry_run=args.dry_run,
+        non_interactive=args.non_interactive,
+    )
+    sys.exit(ret)
+
+
+if __name__ == "__main__":
+    main()

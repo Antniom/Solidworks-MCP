@@ -1,0 +1,2594 @@
+[
+  {
+    "tool": "connect_solidworks",
+    "doc_state": "no_doc",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Global infrastructure tool succeeds across all document states",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "get_solidworks_info",
+    "doc_state": "no_doc",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Global infrastructure tool succeeds across all document states",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "get_capabilities",
+    "doc_state": "no_doc",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Global infrastructure tool succeeds across all document states",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "create_new_part",
+    "doc_state": "no_doc",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Document creation succeeds in any application state",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "create_new_assembly",
+    "doc_state": "no_doc",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Document creation succeeds in any application state",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "open_document",
+    "doc_state": "no_doc",
+    "expected_success": false,
+    "expected_code": 2,
+    "reason": "Target file does not exist",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "save_document",
+    "doc_state": "no_doc",
+    "expected_success": false,
+    "expected_code": 101,
+    "reason": "Operation requires an active document (swNoActiveDocument)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "close_document",
+    "doc_state": "no_doc",
+    "expected_success": false,
+    "expected_code": 101,
+    "reason": "Operation requires an active document (swNoActiveDocument)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "get_document_info",
+    "doc_state": "no_doc",
+    "expected_success": false,
+    "expected_code": 101,
+    "reason": "Operation requires an active document (swNoActiveDocument)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "list_open_documents",
+    "doc_state": "no_doc",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Global infrastructure tool succeeds across all document states",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "create_sketch",
+    "doc_state": "no_doc",
+    "expected_success": false,
+    "expected_code": 101,
+    "reason": "Operation requires an active document (swNoActiveDocument)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "create_sketch_on_face",
+    "doc_state": "no_doc",
+    "expected_success": false,
+    "expected_code": 101,
+    "reason": "Operation requires an active document (swNoActiveDocument)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "draw_line",
+    "doc_state": "no_doc",
+    "expected_success": false,
+    "expected_code": 101,
+    "reason": "Operation requires an active document (swNoActiveDocument)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "draw_circle",
+    "doc_state": "no_doc",
+    "expected_success": false,
+    "expected_code": 101,
+    "reason": "Operation requires an active document (swNoActiveDocument)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "draw_rectangle",
+    "doc_state": "no_doc",
+    "expected_success": false,
+    "expected_code": 101,
+    "reason": "Operation requires an active document (swNoActiveDocument)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "draw_arc",
+    "doc_state": "no_doc",
+    "expected_success": false,
+    "expected_code": 101,
+    "reason": "Operation requires an active document (swNoActiveDocument)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "draw_polygon",
+    "doc_state": "no_doc",
+    "expected_success": false,
+    "expected_code": 101,
+    "reason": "Operation requires an active document (swNoActiveDocument)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "extrude_sketch",
+    "doc_state": "no_doc",
+    "expected_success": false,
+    "expected_code": 101,
+    "reason": "Operation requires an active document (swNoActiveDocument)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "cut_extrude",
+    "doc_state": "no_doc",
+    "expected_success": false,
+    "expected_code": 101,
+    "reason": "Operation requires an active document (swNoActiveDocument)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "fillet_edges",
+    "doc_state": "no_doc",
+    "expected_success": false,
+    "expected_code": 101,
+    "reason": "Operation requires an active document (swNoActiveDocument)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "chamfer_edges",
+    "doc_state": "no_doc",
+    "expected_success": false,
+    "expected_code": 101,
+    "reason": "Operation requires an active document (swNoActiveDocument)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "list_features",
+    "doc_state": "no_doc",
+    "expected_success": false,
+    "expected_code": 101,
+    "reason": "Operation requires an active document (swNoActiveDocument)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "get_dimensions",
+    "doc_state": "no_doc",
+    "expected_success": false,
+    "expected_code": 101,
+    "reason": "Operation requires an active document (swNoActiveDocument)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "set_dimension",
+    "doc_state": "no_doc",
+    "expected_success": false,
+    "expected_code": 101,
+    "reason": "Operation requires an active document (swNoActiveDocument)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "close_sketch",
+    "doc_state": "no_doc",
+    "expected_success": false,
+    "expected_code": 101,
+    "reason": "Operation requires an active document (swNoActiveDocument)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "get_sketch_status",
+    "doc_state": "no_doc",
+    "expected_success": false,
+    "expected_code": 101,
+    "reason": "Operation requires an active document (swNoActiveDocument)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "set_units",
+    "doc_state": "no_doc",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Units converter updated (doc_updated=False in no_doc; True in doc states)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "execute_python",
+    "doc_state": "no_doc",
+    "expected_success": false,
+    "expected_code": 9,
+    "reason": "execute_python disabled by default for security policy (swInvalidCall, code 9)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "inspect_model",
+    "doc_state": "no_doc",
+    "expected_success": false,
+    "expected_code": 101,
+    "reason": "Operation requires an active document (swNoActiveDocument)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "verify_model",
+    "doc_state": "no_doc",
+    "expected_success": false,
+    "expected_code": 101,
+    "reason": "Operation requires an active document (swNoActiveDocument)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "select_entity",
+    "doc_state": "no_doc",
+    "expected_success": false,
+    "expected_code": 101,
+    "reason": "Operation requires an active document (swNoActiveDocument)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "capture_viewport",
+    "doc_state": "no_doc",
+    "expected_success": false,
+    "expected_code": 101,
+    "reason": "Operation requires an active document (swNoActiveDocument)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "add_component",
+    "doc_state": "no_doc",
+    "expected_success": false,
+    "expected_code": 101,
+    "reason": "Operation requires an active document (swNoActiveDocument)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "add_mate",
+    "doc_state": "no_doc",
+    "expected_success": false,
+    "expected_code": 101,
+    "reason": "Operation requires an active document (swNoActiveDocument)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "check_interference",
+    "doc_state": "no_doc",
+    "expected_success": false,
+    "expected_code": 101,
+    "reason": "Operation requires an active document (swNoActiveDocument)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "list_components",
+    "doc_state": "no_doc",
+    "expected_success": false,
+    "expected_code": 101,
+    "reason": "Operation requires an active document (swNoActiveDocument)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "create_new_drawing",
+    "doc_state": "no_doc",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Document creation succeeds in any application state",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "create_drawing_from_model",
+    "doc_state": "no_doc",
+    "expected_success": false,
+    "expected_code": 2,
+    "reason": "Model file does not exist (swFileNotFoundError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "export_drawing",
+    "doc_state": "no_doc",
+    "expected_success": false,
+    "expected_code": 101,
+    "reason": "Operation requires an active document (swNoActiveDocument)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "create_simulation_study",
+    "doc_state": "no_doc",
+    "expected_success": false,
+    "expected_code": 101,
+    "reason": "Operation requires an active document (swNoActiveDocument)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "set_study_material",
+    "doc_state": "no_doc",
+    "expected_success": false,
+    "expected_code": 101,
+    "reason": "Operation requires an active document (swNoActiveDocument)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "add_study_fixture",
+    "doc_state": "no_doc",
+    "expected_success": false,
+    "expected_code": 101,
+    "reason": "Operation requires an active document (swNoActiveDocument)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "add_study_load",
+    "doc_state": "no_doc",
+    "expected_success": false,
+    "expected_code": 101,
+    "reason": "Operation requires an active document (swNoActiveDocument)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "mesh_and_run_simulation",
+    "doc_state": "no_doc",
+    "expected_success": false,
+    "expected_code": 101,
+    "reason": "Operation requires an active document (swNoActiveDocument)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "get_simulation_results",
+    "doc_state": "no_doc",
+    "expected_success": false,
+    "expected_code": 101,
+    "reason": "Operation requires an active document (swNoActiveDocument)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "search_knowledge",
+    "doc_state": "no_doc",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Global infrastructure tool succeeds across all document states",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "record_knowledge",
+    "doc_state": "no_doc",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Global infrastructure tool succeeds across all document states",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "create_checkpoint",
+    "doc_state": "no_doc",
+    "expected_success": false,
+    "expected_code": 101,
+    "reason": "Operation requires an active document (swNoActiveDocument)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "rollback_checkpoint",
+    "doc_state": "no_doc",
+    "expected_success": false,
+    "expected_code": 101,
+    "reason": "Operation requires an active document (swNoActiveDocument)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "inspect_dialogs",
+    "doc_state": "no_doc",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Global infrastructure tool succeeds across all document states",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "dismiss_dialog",
+    "doc_state": "no_doc",
+    "expected_success": false,
+    "expected_code": 107,
+    "reason": "No active modal dialog detected (swInvalidInput)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "load_addin",
+    "doc_state": "no_doc",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Global infrastructure tool succeeds across all document states",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "inspect_rebuild_errors",
+    "doc_state": "no_doc",
+    "expected_success": false,
+    "expected_code": 101,
+    "reason": "Operation requires an active document (swNoActiveDocument)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "reset_sta_worker",
+    "doc_state": "no_doc",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Global infrastructure tool succeeds across all document states",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "connect_solidworks",
+    "doc_state": "part",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Global infrastructure tool succeeds across all document states",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "get_solidworks_info",
+    "doc_state": "part",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Global infrastructure tool succeeds across all document states",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "get_capabilities",
+    "doc_state": "part",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Global infrastructure tool succeeds across all document states",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "create_new_part",
+    "doc_state": "part",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Document creation succeeds in any application state",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "create_new_assembly",
+    "doc_state": "part",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Document creation succeeds in any application state",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "open_document",
+    "doc_state": "part",
+    "expected_success": false,
+    "expected_code": 2,
+    "reason": "Target file does not exist",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "save_document",
+    "doc_state": "part",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Standard part modeling/query operation",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "close_document",
+    "doc_state": "part",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Standard part modeling/query operation",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "get_document_info",
+    "doc_state": "part",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Standard part modeling/query operation",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "list_open_documents",
+    "doc_state": "part",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Global infrastructure tool succeeds across all document states",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "create_sketch",
+    "doc_state": "part",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Creates new sketch on plane",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "create_sketch_on_face",
+    "doc_state": "part",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Sketch on Front plane extruded +10mm along +X yields measured bbox X[0,10], Y[-10,10], Z[-10,10]mm; face #5 at X=0 contains origin (0,0,0), allowing sketch creation",
+    "expectation_basis": "observed"
+  },
+  {
+    "tool": "draw_line",
+    "doc_state": "part",
+    "expected_success": false,
+    "expected_code": 102,
+    "reason": "Requires active sketch in 3D documents (swSketchError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "draw_circle",
+    "doc_state": "part",
+    "expected_success": false,
+    "expected_code": 102,
+    "reason": "Requires active sketch in 3D documents (swSketchError)",
+    "expectation_basis": "observed"
+  },
+  {
+    "tool": "draw_rectangle",
+    "doc_state": "part",
+    "expected_success": false,
+    "expected_code": 102,
+    "reason": "Requires active sketch in 3D documents (swSketchError)",
+    "expectation_basis": "observed"
+  },
+  {
+    "tool": "draw_arc",
+    "doc_state": "part",
+    "expected_success": false,
+    "expected_code": 102,
+    "reason": "Requires active sketch in 3D documents (swSketchError)",
+    "expectation_basis": "observed"
+  },
+  {
+    "tool": "draw_polygon",
+    "doc_state": "part",
+    "expected_success": false,
+    "expected_code": 102,
+    "reason": "Requires active sketch in 3D documents (swSketchError)",
+    "expectation_basis": "observed"
+  },
+  {
+    "tool": "extrude_sketch",
+    "doc_state": "part",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Reuses unabsorbed Sketch1 feature geometry from boss-extrude",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "cut_extrude",
+    "doc_state": "part",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Reuses unabsorbed Sketch1 feature geometry from boss-extrude",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "fillet_edges",
+    "doc_state": "part",
+    "expected_success": false,
+    "expected_code": 104,
+    "reason": "No edges selected for fillet operation after selection cleared (swSelectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "chamfer_edges",
+    "doc_state": "part",
+    "expected_success": false,
+    "expected_code": 104,
+    "reason": "No edges selected before operation (swSelectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "list_features",
+    "doc_state": "part",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Standard part modeling/query operation",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "get_dimensions",
+    "doc_state": "part",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Standard part modeling/query operation",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "set_dimension",
+    "doc_state": "part",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Standard part modeling/query operation",
+    "expectation_basis": "observed"
+  },
+  {
+    "tool": "close_sketch",
+    "doc_state": "part",
+    "expected_success": false,
+    "expected_code": 9,
+    "reason": "PLAN.md SKT-02: exit when not in a sketch (error) with message 'no active sketch' (tool bug: currently returns True)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "get_sketch_status",
+    "doc_state": "part",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Sketch status query succeeds in all document states",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "set_units",
+    "doc_state": "part",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Units converter updated (doc_updated=False in no_doc; True in doc states)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "execute_python",
+    "doc_state": "part",
+    "expected_success": false,
+    "expected_code": 9,
+    "reason": "execute_python disabled by default for security policy (swInvalidCall, code 9)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "inspect_model",
+    "doc_state": "part",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Standard part modeling/query operation",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "verify_model",
+    "doc_state": "part",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Standard part modeling/query operation",
+    "expectation_basis": "observed"
+  },
+  {
+    "tool": "select_entity",
+    "doc_state": "part",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Standard part modeling/query operation",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "capture_viewport",
+    "doc_state": "part",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Standard part modeling/query operation",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "add_component",
+    "doc_state": "part",
+    "expected_success": false,
+    "expected_code": 6,
+    "reason": "Active document is not an assembly (swInvalidDocumentType)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "add_mate",
+    "doc_state": "part",
+    "expected_success": false,
+    "expected_code": 6,
+    "reason": "Active document is not an assembly (swInvalidDocumentType)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "check_interference",
+    "doc_state": "part",
+    "expected_success": false,
+    "expected_code": 6,
+    "reason": "Active document is not an assembly (swInvalidDocumentType)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "list_components",
+    "doc_state": "part",
+    "expected_success": false,
+    "expected_code": 6,
+    "reason": "Active document is not an assembly (swInvalidDocumentType)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "create_new_drawing",
+    "doc_state": "part",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Document creation succeeds in any application state",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "create_drawing_from_model",
+    "doc_state": "part",
+    "expected_success": false,
+    "expected_code": 2,
+    "reason": "Target file does not exist (swFileNotFoundError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "export_drawing",
+    "doc_state": "part",
+    "expected_success": false,
+    "expected_code": 6,
+    "reason": "Active document is not a drawing (swInvalidDocumentType)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "create_simulation_study",
+    "doc_state": "part",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Standard part modeling/query operation",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "set_study_material",
+    "doc_state": "part",
+    "expected_success": false,
+    "expected_code": 108,
+    "reason": "No simulation study exists in active document (swSimulationError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "add_study_fixture",
+    "doc_state": "part",
+    "expected_success": false,
+    "expected_code": 108,
+    "reason": "No simulation study exists in active document (swSimulationError)",
+    "expectation_basis": "observed"
+  },
+  {
+    "tool": "add_study_load",
+    "doc_state": "part",
+    "expected_success": false,
+    "expected_code": 108,
+    "reason": "No simulation study exists in active document (swSimulationError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "mesh_and_run_simulation",
+    "doc_state": "part",
+    "expected_success": false,
+    "expected_code": 108,
+    "reason": "No simulation study exists in active document (swSimulationError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "get_simulation_results",
+    "doc_state": "part",
+    "expected_success": false,
+    "expected_code": 108,
+    "reason": "No simulation study exists in active document (swSimulationError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "search_knowledge",
+    "doc_state": "part",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Global infrastructure tool succeeds across all document states",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "record_knowledge",
+    "doc_state": "part",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Global infrastructure tool succeeds across all document states",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "create_checkpoint",
+    "doc_state": "part",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Standard part modeling/query operation",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "rollback_checkpoint",
+    "doc_state": "part",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Rolls back to pre-created checkpoint 'swp12_cp' in active document",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "inspect_dialogs",
+    "doc_state": "part",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Global infrastructure tool succeeds across all document states",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "dismiss_dialog",
+    "doc_state": "part",
+    "expected_success": false,
+    "expected_code": 107,
+    "reason": "No active blocking modal dialog detected (swInvalidInput)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "load_addin",
+    "doc_state": "part",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Global infrastructure tool succeeds across all document states",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "inspect_rebuild_errors",
+    "doc_state": "part",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Standard part modeling/query operation",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "reset_sta_worker",
+    "doc_state": "part",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Global infrastructure tool succeeds across all document states",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "connect_solidworks",
+    "doc_state": "assembly",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Global infrastructure tool succeeds across all document states",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "get_solidworks_info",
+    "doc_state": "assembly",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Global infrastructure tool succeeds across all document states",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "get_capabilities",
+    "doc_state": "assembly",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Global infrastructure tool succeeds across all document states",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "create_new_part",
+    "doc_state": "assembly",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Document creation succeeds in any application state",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "create_new_assembly",
+    "doc_state": "assembly",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Document creation succeeds in any application state",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "open_document",
+    "doc_state": "assembly",
+    "expected_success": false,
+    "expected_code": 2,
+    "reason": "Target file does not exist",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "save_document",
+    "doc_state": "assembly",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Assembly inspection / document operation",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "close_document",
+    "doc_state": "assembly",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Assembly inspection / document operation",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "get_document_info",
+    "doc_state": "assembly",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Assembly inspection / document operation",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "list_open_documents",
+    "doc_state": "assembly",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Global infrastructure tool succeeds across all document states",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "create_sketch",
+    "doc_state": "assembly",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Creating layout sketch on assembly reference plane is supported natively by SolidWorks",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "create_sketch_on_face",
+    "doc_state": "assembly",
+    "expected_success": false,
+    "expected_code": 104,
+    "reason": "No face found at target coordinates in empty assembly (swSelectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "draw_line",
+    "doc_state": "assembly",
+    "expected_success": false,
+    "expected_code": 102,
+    "reason": "Requires active sketch in 3D documents (swSketchError)",
+    "expectation_basis": "observed"
+  },
+  {
+    "tool": "draw_circle",
+    "doc_state": "assembly",
+    "expected_success": false,
+    "expected_code": 102,
+    "reason": "Requires active sketch in 3D documents (swSketchError)",
+    "expectation_basis": "observed"
+  },
+  {
+    "tool": "draw_rectangle",
+    "doc_state": "assembly",
+    "expected_success": false,
+    "expected_code": 102,
+    "reason": "Requires active sketch in 3D documents (swSketchError)",
+    "expectation_basis": "observed"
+  },
+  {
+    "tool": "draw_arc",
+    "doc_state": "assembly",
+    "expected_success": false,
+    "expected_code": 102,
+    "reason": "Requires active sketch in 3D documents (swSketchError)",
+    "expectation_basis": "observed"
+  },
+  {
+    "tool": "draw_polygon",
+    "doc_state": "assembly",
+    "expected_success": false,
+    "expected_code": 102,
+    "reason": "Requires active sketch in 3D documents (swSketchError)",
+    "expectation_basis": "observed"
+  },
+  {
+    "tool": "extrude_sketch",
+    "doc_state": "assembly",
+    "expected_success": false,
+    "expected_code": 103,
+    "reason": "Extrusion failed: No sketch found in feature tree (swFeatureError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "cut_extrude",
+    "doc_state": "assembly",
+    "expected_success": false,
+    "expected_code": 103,
+    "reason": "Cut failed: No sketch found in feature tree (swFeatureError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "fillet_edges",
+    "doc_state": "assembly",
+    "expected_success": false,
+    "expected_code": 104,
+    "reason": "No edges selected before operation (swSelectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "chamfer_edges",
+    "doc_state": "assembly",
+    "expected_success": false,
+    "expected_code": 104,
+    "reason": "No edges selected before operation (swSelectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "list_features",
+    "doc_state": "assembly",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Assembly inspection / document operation",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "get_dimensions",
+    "doc_state": "assembly",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Assembly inspection / document operation",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "set_dimension",
+    "doc_state": "assembly",
+    "expected_success": false,
+    "expected_code": 113,
+    "reason": "Dimension not found in active document (swDimensionNotFound)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "close_sketch",
+    "doc_state": "assembly",
+    "expected_success": false,
+    "expected_code": 9,
+    "reason": "PLAN.md SKT-02: exit when not in a sketch (error) with message 'no active sketch' (tool bug: currently returns True)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "get_sketch_status",
+    "doc_state": "assembly",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Sketch status query succeeds in all document states",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "set_units",
+    "doc_state": "assembly",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Units converter updated (doc_updated=False in no_doc; True in doc states)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "execute_python",
+    "doc_state": "assembly",
+    "expected_success": false,
+    "expected_code": 9,
+    "reason": "execute_python disabled by default for security policy (swInvalidCall, code 9)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "inspect_model",
+    "doc_state": "assembly",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Assembly inspection / document operation",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "verify_model",
+    "doc_state": "assembly",
+    "expected_success": false,
+    "expected_code": 103,
+    "reason": "Model verification failed in empty assembly (swFeatureError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "select_entity",
+    "doc_state": "assembly",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Assembly inspection / document operation",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "capture_viewport",
+    "doc_state": "assembly",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Assembly inspection / document operation",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "add_component",
+    "doc_state": "assembly",
+    "expected_success": false,
+    "expected_code": 2,
+    "reason": "Component file does not exist (swFileNotFoundError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "add_mate",
+    "doc_state": "assembly",
+    "expected_success": false,
+    "expected_code": 104,
+    "reason": "Failed to select first mate entity (swSelectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "check_interference",
+    "doc_state": "assembly",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Assembly inspection / document operation",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "list_components",
+    "doc_state": "assembly",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Assembly inspection / document operation",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "create_new_drawing",
+    "doc_state": "assembly",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Document creation succeeds in any application state",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "create_drawing_from_model",
+    "doc_state": "assembly",
+    "expected_success": false,
+    "expected_code": 2,
+    "reason": "Target file does not exist (swFileNotFoundError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "export_drawing",
+    "doc_state": "assembly",
+    "expected_success": false,
+    "expected_code": 6,
+    "reason": "Active document is not a drawing (swInvalidDocumentType)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "create_simulation_study",
+    "doc_state": "assembly",
+    "expected_success": false,
+    "expected_code": 108,
+    "reason": "Failed to create simulation study in empty assembly (swSimulationError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "set_study_material",
+    "doc_state": "assembly",
+    "expected_success": false,
+    "expected_code": 108,
+    "reason": "No simulation study exists in active document (swSimulationError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "add_study_fixture",
+    "doc_state": "assembly",
+    "expected_success": false,
+    "expected_code": 108,
+    "reason": "No simulation study exists in active document (swSimulationError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "add_study_load",
+    "doc_state": "assembly",
+    "expected_success": false,
+    "expected_code": 108,
+    "reason": "No simulation study exists in active document (swSimulationError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "mesh_and_run_simulation",
+    "doc_state": "assembly",
+    "expected_success": false,
+    "expected_code": 108,
+    "reason": "No simulation study exists in active document (swSimulationError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "get_simulation_results",
+    "doc_state": "assembly",
+    "expected_success": false,
+    "expected_code": 108,
+    "reason": "No simulation study exists in active document (swSimulationError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "search_knowledge",
+    "doc_state": "assembly",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Global infrastructure tool succeeds across all document states",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "record_knowledge",
+    "doc_state": "assembly",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Global infrastructure tool succeeds across all document states",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "create_checkpoint",
+    "doc_state": "assembly",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Assembly inspection / document operation",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "rollback_checkpoint",
+    "doc_state": "assembly",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Rolls back to pre-created checkpoint 'swp12_cp' in active document",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "inspect_dialogs",
+    "doc_state": "assembly",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Global infrastructure tool succeeds across all document states",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "dismiss_dialog",
+    "doc_state": "assembly",
+    "expected_success": false,
+    "expected_code": 107,
+    "reason": "No active blocking modal dialog detected (swInvalidInput)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "load_addin",
+    "doc_state": "assembly",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Global infrastructure tool succeeds across all document states",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "inspect_rebuild_errors",
+    "doc_state": "assembly",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Assembly inspection / document operation",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "reset_sta_worker",
+    "doc_state": "assembly",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Global infrastructure tool succeeds across all document states",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "connect_solidworks",
+    "doc_state": "drawing",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Global infrastructure tool succeeds across all document states",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "get_solidworks_info",
+    "doc_state": "drawing",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Global infrastructure tool succeeds across all document states",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "get_capabilities",
+    "doc_state": "drawing",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Global infrastructure tool succeeds across all document states",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "create_new_part",
+    "doc_state": "drawing",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Document creation succeeds in any application state",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "create_new_assembly",
+    "doc_state": "drawing",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Document creation succeeds in any application state",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "open_document",
+    "doc_state": "drawing",
+    "expected_success": false,
+    "expected_code": 2,
+    "reason": "Target file does not exist",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "save_document",
+    "doc_state": "drawing",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Drawing document save succeeds with .slddrw extension",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "close_document",
+    "doc_state": "drawing",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Drawing document / export operation",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "get_document_info",
+    "doc_state": "drawing",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Drawing document / export operation",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "list_open_documents",
+    "doc_state": "drawing",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Global infrastructure tool succeeds across all document states",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "create_sketch",
+    "doc_state": "drawing",
+    "expected_success": false,
+    "expected_code": 104,
+    "reason": "Could not select Front Plane in drawing (swSelectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "create_sketch_on_face",
+    "doc_state": "drawing",
+    "expected_success": false,
+    "expected_code": 104,
+    "reason": "No face found at target coordinates in drawing (swSelectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "draw_line",
+    "doc_state": "drawing",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "2D drafting primitive supported on sheet",
+    "expectation_basis": "observed"
+  },
+  {
+    "tool": "draw_circle",
+    "doc_state": "drawing",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "2D drafting primitive supported on sheet",
+    "expectation_basis": "observed"
+  },
+  {
+    "tool": "draw_rectangle",
+    "doc_state": "drawing",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "2D drafting primitive supported on sheet",
+    "expectation_basis": "observed"
+  },
+  {
+    "tool": "draw_arc",
+    "doc_state": "drawing",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "2D drafting primitive supported on sheet",
+    "expectation_basis": "observed"
+  },
+  {
+    "tool": "draw_polygon",
+    "doc_state": "drawing",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "2D drafting primitive supported on sheet",
+    "expectation_basis": "observed"
+  },
+  {
+    "tool": "extrude_sketch",
+    "doc_state": "drawing",
+    "expected_success": false,
+    "expected_code": 103,
+    "reason": "Extrusion failed: No sketch found in feature tree (swFeatureError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "cut_extrude",
+    "doc_state": "drawing",
+    "expected_success": false,
+    "expected_code": 103,
+    "reason": "Cut failed: No sketch found in feature tree (swFeatureError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "fillet_edges",
+    "doc_state": "drawing",
+    "expected_success": false,
+    "expected_code": 104,
+    "reason": "No edges selected before operation (swSelectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "chamfer_edges",
+    "doc_state": "drawing",
+    "expected_success": false,
+    "expected_code": 104,
+    "reason": "No edges selected before operation (swSelectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "list_features",
+    "doc_state": "drawing",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Drawing document / export operation",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "get_dimensions",
+    "doc_state": "drawing",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Querying dimensions in empty drawing succeeds returning 0 dimensions",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "set_dimension",
+    "doc_state": "drawing",
+    "expected_success": false,
+    "expected_code": 113,
+    "reason": "Dimension not found in active document (swDimensionNotFound)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "close_sketch",
+    "doc_state": "drawing",
+    "expected_success": false,
+    "expected_code": 6,
+    "reason": "close_sketch is not supported for Drawing documents (swInvalidDocumentType)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "get_sketch_status",
+    "doc_state": "drawing",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Sketch status query succeeds in all document states",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "set_units",
+    "doc_state": "drawing",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Units converter updated (doc_updated=False in no_doc; True in doc states)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "execute_python",
+    "doc_state": "drawing",
+    "expected_success": false,
+    "expected_code": 9,
+    "reason": "execute_python disabled by default for security policy (swInvalidCall, code 9)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "inspect_model",
+    "doc_state": "drawing",
+    "expected_success": false,
+    "expected_code": 6,
+    "reason": "inspect_model is not supported for Drawing documents (swInvalidDocumentType)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "verify_model",
+    "doc_state": "drawing",
+    "expected_success": false,
+    "expected_code": 103,
+    "reason": "Model verification failed in drawing (swFeatureError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "select_entity",
+    "doc_state": "drawing",
+    "expected_success": false,
+    "expected_code": 104,
+    "reason": "SelectByID2 failed for plane in drawing (swSelectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "capture_viewport",
+    "doc_state": "drawing",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Drawing document / export operation",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "add_component",
+    "doc_state": "drawing",
+    "expected_success": false,
+    "expected_code": 6,
+    "reason": "Active document is not an assembly (swInvalidDocumentType)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "add_mate",
+    "doc_state": "drawing",
+    "expected_success": false,
+    "expected_code": 6,
+    "reason": "Active document is not an assembly (swInvalidDocumentType)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "check_interference",
+    "doc_state": "drawing",
+    "expected_success": false,
+    "expected_code": 6,
+    "reason": "Active document is not an assembly (swInvalidDocumentType)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "list_components",
+    "doc_state": "drawing",
+    "expected_success": false,
+    "expected_code": 6,
+    "reason": "Active document is not an assembly (swInvalidDocumentType)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "create_new_drawing",
+    "doc_state": "drawing",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Document creation succeeds in any application state",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "create_drawing_from_model",
+    "doc_state": "drawing",
+    "expected_success": false,
+    "expected_code": 2,
+    "reason": "Target file does not exist (swFileNotFoundError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "export_drawing",
+    "doc_state": "drawing",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Drawing document / export operation",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "create_simulation_study",
+    "doc_state": "drawing",
+    "expected_success": false,
+    "expected_code": 6,
+    "reason": "Simulation requires Part or Assembly document (swInvalidDocumentType)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "set_study_material",
+    "doc_state": "drawing",
+    "expected_success": false,
+    "expected_code": 6,
+    "reason": "Simulation requires Part or Assembly document (swInvalidDocumentType)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "add_study_fixture",
+    "doc_state": "drawing",
+    "expected_success": false,
+    "expected_code": 6,
+    "reason": "Simulation requires Part or Assembly document (swInvalidDocumentType)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "add_study_load",
+    "doc_state": "drawing",
+    "expected_success": false,
+    "expected_code": 6,
+    "reason": "Simulation requires Part or Assembly document (swInvalidDocumentType)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "mesh_and_run_simulation",
+    "doc_state": "drawing",
+    "expected_success": false,
+    "expected_code": 6,
+    "reason": "Simulation requires Part or Assembly document (swInvalidDocumentType)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "get_simulation_results",
+    "doc_state": "drawing",
+    "expected_success": false,
+    "expected_code": 6,
+    "reason": "Simulation requires Part or Assembly document (swInvalidDocumentType)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "search_knowledge",
+    "doc_state": "drawing",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Global infrastructure tool succeeds across all document states",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "record_knowledge",
+    "doc_state": "drawing",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Global infrastructure tool succeeds across all document states",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "create_checkpoint",
+    "doc_state": "drawing",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Drawing document / export operation",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "rollback_checkpoint",
+    "doc_state": "drawing",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Rolls back to pre-created checkpoint 'swp12_cp' in active document",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "inspect_dialogs",
+    "doc_state": "drawing",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Global infrastructure tool succeeds across all document states",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "dismiss_dialog",
+    "doc_state": "drawing",
+    "expected_success": false,
+    "expected_code": 107,
+    "reason": "No active blocking modal dialog detected (swInvalidInput)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "load_addin",
+    "doc_state": "drawing",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Global infrastructure tool succeeds across all document states",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "inspect_rebuild_errors",
+    "doc_state": "drawing",
+    "expected_success": false,
+    "expected_code": 6,
+    "reason": "inspect_rebuild_errors is not supported for Drawing documents (swInvalidDocumentType)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "reset_sta_worker",
+    "doc_state": "drawing",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Global infrastructure tool succeeds across all document states",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "connect_solidworks",
+    "doc_state": "sketch_mode",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Global infrastructure tool succeeds across all document states",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "get_solidworks_info",
+    "doc_state": "sketch_mode",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Global infrastructure tool succeeds across all document states",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "get_capabilities",
+    "doc_state": "sketch_mode",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Global infrastructure tool succeeds across all document states",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "create_new_part",
+    "doc_state": "sketch_mode",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Document creation succeeds in any application state",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "create_new_assembly",
+    "doc_state": "sketch_mode",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Document creation succeeds in any application state",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "open_document",
+    "doc_state": "sketch_mode",
+    "expected_success": false,
+    "expected_code": 2,
+    "reason": "Target file does not exist",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "save_document",
+    "doc_state": "sketch_mode",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Valid during sketch editing",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "close_document",
+    "doc_state": "sketch_mode",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Valid during sketch editing",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "get_document_info",
+    "doc_state": "sketch_mode",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Valid during sketch editing",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "list_open_documents",
+    "doc_state": "sketch_mode",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Global infrastructure tool succeeds across all document states",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "create_sketch",
+    "doc_state": "sketch_mode",
+    "expected_success": false,
+    "expected_code": 102,
+    "reason": "Tool invalid or blocked during sketch edit mode",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "create_sketch_on_face",
+    "doc_state": "sketch_mode",
+    "expected_success": false,
+    "expected_code": 104,
+    "reason": "No face found at target coordinates in empty part (swSelectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "draw_line",
+    "doc_state": "sketch_mode",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Sketch geometry primitive drawn in active sketch",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "draw_circle",
+    "doc_state": "sketch_mode",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Sketch geometry primitive drawn in active sketch",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "draw_rectangle",
+    "doc_state": "sketch_mode",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Sketch geometry primitive drawn in active sketch",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "draw_arc",
+    "doc_state": "sketch_mode",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Sketch geometry primitive drawn in active sketch",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "draw_polygon",
+    "doc_state": "sketch_mode",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Sketch geometry primitive drawn in active sketch",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "extrude_sketch",
+    "doc_state": "sketch_mode",
+    "expected_success": false,
+    "expected_code": 103,
+    "reason": "Extrusion failed: No sketch found in feature tree (swFeatureError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "cut_extrude",
+    "doc_state": "sketch_mode",
+    "expected_success": false,
+    "expected_code": 103,
+    "reason": "Cut failed: No sketch found in feature tree (swFeatureError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "fillet_edges",
+    "doc_state": "sketch_mode",
+    "expected_success": false,
+    "expected_code": 103,
+    "reason": "Fillet failed on empty geometry (swFeatureError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "chamfer_edges",
+    "doc_state": "sketch_mode",
+    "expected_success": false,
+    "expected_code": 103,
+    "reason": "Chamfer failed on empty geometry (swFeatureError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "list_features",
+    "doc_state": "sketch_mode",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Valid during sketch editing",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "get_dimensions",
+    "doc_state": "sketch_mode",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Valid during sketch editing",
+    "expectation_basis": "observed"
+  },
+  {
+    "tool": "set_dimension",
+    "doc_state": "sketch_mode",
+    "expected_success": false,
+    "expected_code": 113,
+    "reason": "Dimension not found in active document (swDimensionNotFound)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "close_sketch",
+    "doc_state": "sketch_mode",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Valid during sketch editing",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "get_sketch_status",
+    "doc_state": "sketch_mode",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Sketch status query succeeds in all document states",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "set_units",
+    "doc_state": "sketch_mode",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Units converter updated (doc_updated=False in no_doc; True in doc states)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "execute_python",
+    "doc_state": "sketch_mode",
+    "expected_success": false,
+    "expected_code": 9,
+    "reason": "execute_python disabled by default for security policy (swInvalidCall, code 9)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "inspect_model",
+    "doc_state": "sketch_mode",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Valid during sketch editing",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "verify_model",
+    "doc_state": "sketch_mode",
+    "expected_success": false,
+    "expected_code": 103,
+    "reason": "Model verification failed in sketch mode (swFeatureError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "select_entity",
+    "doc_state": "sketch_mode",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Valid during sketch editing",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "capture_viewport",
+    "doc_state": "sketch_mode",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Valid during sketch editing",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "add_component",
+    "doc_state": "sketch_mode",
+    "expected_success": false,
+    "expected_code": 6,
+    "reason": "Active document is not an assembly (swInvalidDocumentType)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "add_mate",
+    "doc_state": "sketch_mode",
+    "expected_success": false,
+    "expected_code": 6,
+    "reason": "Active document is not an assembly (swInvalidDocumentType)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "check_interference",
+    "doc_state": "sketch_mode",
+    "expected_success": false,
+    "expected_code": 6,
+    "reason": "Active document is not an assembly (swInvalidDocumentType)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "list_components",
+    "doc_state": "sketch_mode",
+    "expected_success": false,
+    "expected_code": 6,
+    "reason": "Active document is not an assembly (swInvalidDocumentType)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "create_new_drawing",
+    "doc_state": "sketch_mode",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Document creation succeeds in any application state",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "create_drawing_from_model",
+    "doc_state": "sketch_mode",
+    "expected_success": false,
+    "expected_code": 2,
+    "reason": "Target file does not exist (swFileNotFoundError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "export_drawing",
+    "doc_state": "sketch_mode",
+    "expected_success": false,
+    "expected_code": 6,
+    "reason": "Active document is not a drawing (swInvalidDocumentType)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "create_simulation_study",
+    "doc_state": "sketch_mode",
+    "expected_success": false,
+    "expected_code": 108,
+    "reason": "Cannot create simulation study while editing sketch (swSimulationError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "set_study_material",
+    "doc_state": "sketch_mode",
+    "expected_success": false,
+    "expected_code": 108,
+    "reason": "No simulation study exists in active document (swSimulationError)",
+    "expectation_basis": "observed"
+  },
+  {
+    "tool": "add_study_fixture",
+    "doc_state": "sketch_mode",
+    "expected_success": false,
+    "expected_code": 108,
+    "reason": "No simulation study exists in active document (swSimulationError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "add_study_load",
+    "doc_state": "sketch_mode",
+    "expected_success": false,
+    "expected_code": 108,
+    "reason": "No simulation study exists in active document (swSimulationError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "mesh_and_run_simulation",
+    "doc_state": "sketch_mode",
+    "expected_success": false,
+    "expected_code": 108,
+    "reason": "No simulation study exists in active document (swSimulationError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "get_simulation_results",
+    "doc_state": "sketch_mode",
+    "expected_success": false,
+    "expected_code": 108,
+    "reason": "No simulation study exists in active document (swSimulationError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "search_knowledge",
+    "doc_state": "sketch_mode",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Global infrastructure tool succeeds across all document states",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "record_knowledge",
+    "doc_state": "sketch_mode",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Global infrastructure tool succeeds across all document states",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "create_checkpoint",
+    "doc_state": "sketch_mode",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Valid during sketch editing",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "rollback_checkpoint",
+    "doc_state": "sketch_mode",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Rolls back to pre-created checkpoint 'swp12_cp' in active document",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "inspect_dialogs",
+    "doc_state": "sketch_mode",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Global infrastructure tool succeeds across all document states",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "dismiss_dialog",
+    "doc_state": "sketch_mode",
+    "expected_success": false,
+    "expected_code": 107,
+    "reason": "No active blocking modal dialog detected (swInvalidInput)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "load_addin",
+    "doc_state": "sketch_mode",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Global infrastructure tool succeeds across all document states",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "inspect_rebuild_errors",
+    "doc_state": "sketch_mode",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Valid during sketch editing",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "reset_sta_worker",
+    "doc_state": "sketch_mode",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Global infrastructure tool succeeds across all document states",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "connect_solidworks",
+    "doc_state": "disconnected",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Connects to SolidWorks when disconnected",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "get_solidworks_info",
+    "doc_state": "disconnected",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Offline system inspection does not require active connection",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "get_capabilities",
+    "doc_state": "disconnected",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Offline capabilities discovery does not require active connection",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "create_new_part",
+    "doc_state": "disconnected",
+    "expected_success": false,
+    "expected_code": 100,
+    "reason": "Not connected to SolidWorks. Call connect_solidworks first (swConnectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "create_new_assembly",
+    "doc_state": "disconnected",
+    "expected_success": false,
+    "expected_code": 100,
+    "reason": "Not connected to SolidWorks. Call connect_solidworks first (swConnectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "open_document",
+    "doc_state": "disconnected",
+    "expected_success": false,
+    "expected_code": 100,
+    "reason": "Not connected to SolidWorks. Call connect_solidworks first (swConnectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "save_document",
+    "doc_state": "disconnected",
+    "expected_success": false,
+    "expected_code": 100,
+    "reason": "Not connected to SolidWorks. Call connect_solidworks first (swConnectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "close_document",
+    "doc_state": "disconnected",
+    "expected_success": false,
+    "expected_code": 100,
+    "reason": "Not connected to SolidWorks. Call connect_solidworks first (swConnectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "get_document_info",
+    "doc_state": "disconnected",
+    "expected_success": false,
+    "expected_code": 100,
+    "reason": "Not connected to SolidWorks. Call connect_solidworks first (swConnectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "list_open_documents",
+    "doc_state": "disconnected",
+    "expected_success": false,
+    "expected_code": 100,
+    "reason": "Not connected to SolidWorks. Call connect_solidworks first (swConnectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "create_sketch",
+    "doc_state": "disconnected",
+    "expected_success": false,
+    "expected_code": 100,
+    "reason": "Not connected to SolidWorks. Call connect_solidworks first (swConnectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "create_sketch_on_face",
+    "doc_state": "disconnected",
+    "expected_success": false,
+    "expected_code": 100,
+    "reason": "Not connected to SolidWorks. Call connect_solidworks first (swConnectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "draw_line",
+    "doc_state": "disconnected",
+    "expected_success": false,
+    "expected_code": 100,
+    "reason": "Not connected to SolidWorks. Call connect_solidworks first (swConnectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "draw_circle",
+    "doc_state": "disconnected",
+    "expected_success": false,
+    "expected_code": 100,
+    "reason": "Not connected to SolidWorks. Call connect_solidworks first (swConnectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "draw_rectangle",
+    "doc_state": "disconnected",
+    "expected_success": false,
+    "expected_code": 100,
+    "reason": "Not connected to SolidWorks. Call connect_solidworks first (swConnectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "draw_arc",
+    "doc_state": "disconnected",
+    "expected_success": false,
+    "expected_code": 100,
+    "reason": "Not connected to SolidWorks. Call connect_solidworks first (swConnectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "draw_polygon",
+    "doc_state": "disconnected",
+    "expected_success": false,
+    "expected_code": 100,
+    "reason": "Not connected to SolidWorks. Call connect_solidworks first (swConnectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "extrude_sketch",
+    "doc_state": "disconnected",
+    "expected_success": false,
+    "expected_code": 100,
+    "reason": "Not connected to SolidWorks. Call connect_solidworks first (swConnectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "cut_extrude",
+    "doc_state": "disconnected",
+    "expected_success": false,
+    "expected_code": 100,
+    "reason": "Not connected to SolidWorks. Call connect_solidworks first (swConnectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "fillet_edges",
+    "doc_state": "disconnected",
+    "expected_success": false,
+    "expected_code": 100,
+    "reason": "Not connected to SolidWorks. Call connect_solidworks first (swConnectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "chamfer_edges",
+    "doc_state": "disconnected",
+    "expected_success": false,
+    "expected_code": 100,
+    "reason": "Not connected to SolidWorks. Call connect_solidworks first (swConnectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "list_features",
+    "doc_state": "disconnected",
+    "expected_success": false,
+    "expected_code": 100,
+    "reason": "Not connected to SolidWorks. Call connect_solidworks first (swConnectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "get_dimensions",
+    "doc_state": "disconnected",
+    "expected_success": false,
+    "expected_code": 100,
+    "reason": "Not connected to SolidWorks. Call connect_solidworks first (swConnectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "set_dimension",
+    "doc_state": "disconnected",
+    "expected_success": false,
+    "expected_code": 100,
+    "reason": "Not connected to SolidWorks. Call connect_solidworks first (swConnectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "close_sketch",
+    "doc_state": "disconnected",
+    "expected_success": false,
+    "expected_code": 100,
+    "reason": "Not connected to SolidWorks. Call connect_solidworks first (swConnectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "get_sketch_status",
+    "doc_state": "disconnected",
+    "expected_success": false,
+    "expected_code": 100,
+    "reason": "Not connected to SolidWorks. Call connect_solidworks first (swConnectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "set_units",
+    "doc_state": "disconnected",
+    "expected_success": false,
+    "expected_code": 100,
+    "reason": "Not connected to SolidWorks. Call connect_solidworks first (swConnectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "execute_python",
+    "doc_state": "disconnected",
+    "expected_success": false,
+    "expected_code": 9,
+    "reason": "execute_python is disabled by default for security (swInvalidCall)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "inspect_model",
+    "doc_state": "disconnected",
+    "expected_success": false,
+    "expected_code": 100,
+    "reason": "Not connected to SolidWorks. Call connect_solidworks first (swConnectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "verify_model",
+    "doc_state": "disconnected",
+    "expected_success": false,
+    "expected_code": 100,
+    "reason": "Not connected to SolidWorks. Call connect_solidworks first (swConnectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "select_entity",
+    "doc_state": "disconnected",
+    "expected_success": false,
+    "expected_code": 100,
+    "reason": "Not connected to SolidWorks. Call connect_solidworks first (swConnectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "capture_viewport",
+    "doc_state": "disconnected",
+    "expected_success": false,
+    "expected_code": 100,
+    "reason": "Not connected to SolidWorks. Call connect_solidworks first (swConnectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "add_component",
+    "doc_state": "disconnected",
+    "expected_success": false,
+    "expected_code": 100,
+    "reason": "Not connected to SolidWorks. Call connect_solidworks first (swConnectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "add_mate",
+    "doc_state": "disconnected",
+    "expected_success": false,
+    "expected_code": 100,
+    "reason": "Not connected to SolidWorks. Call connect_solidworks first (swConnectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "check_interference",
+    "doc_state": "disconnected",
+    "expected_success": false,
+    "expected_code": 100,
+    "reason": "Not connected to SolidWorks. Call connect_solidworks first (swConnectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "list_components",
+    "doc_state": "disconnected",
+    "expected_success": false,
+    "expected_code": 100,
+    "reason": "Not connected to SolidWorks. Call connect_solidworks first (swConnectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "create_new_drawing",
+    "doc_state": "disconnected",
+    "expected_success": false,
+    "expected_code": 100,
+    "reason": "Not connected to SolidWorks. Call connect_solidworks first (swConnectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "create_drawing_from_model",
+    "doc_state": "disconnected",
+    "expected_success": false,
+    "expected_code": 100,
+    "reason": "Not connected to SolidWorks. Call connect_solidworks first (swConnectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "export_drawing",
+    "doc_state": "disconnected",
+    "expected_success": false,
+    "expected_code": 100,
+    "reason": "Not connected to SolidWorks. Call connect_solidworks first (swConnectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "create_simulation_study",
+    "doc_state": "disconnected",
+    "expected_success": false,
+    "expected_code": 100,
+    "reason": "Not connected to SolidWorks. Call connect_solidworks first (swConnectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "set_study_material",
+    "doc_state": "disconnected",
+    "expected_success": false,
+    "expected_code": 100,
+    "reason": "Not connected to SolidWorks. Call connect_solidworks first (swConnectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "add_study_fixture",
+    "doc_state": "disconnected",
+    "expected_success": false,
+    "expected_code": 100,
+    "reason": "Not connected to SolidWorks. Call connect_solidworks first (swConnectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "add_study_load",
+    "doc_state": "disconnected",
+    "expected_success": false,
+    "expected_code": 100,
+    "reason": "Not connected to SolidWorks. Call connect_solidworks first (swConnectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "mesh_and_run_simulation",
+    "doc_state": "disconnected",
+    "expected_success": false,
+    "expected_code": 100,
+    "reason": "Not connected to SolidWorks. Call connect_solidworks first (swConnectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "get_simulation_results",
+    "doc_state": "disconnected",
+    "expected_success": false,
+    "expected_code": 100,
+    "reason": "Not connected to SolidWorks. Call connect_solidworks first (swConnectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "search_knowledge",
+    "doc_state": "disconnected",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Local knowledge base operations do not require SolidWorks connection",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "record_knowledge",
+    "doc_state": "disconnected",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Local knowledge base operations do not require SolidWorks connection",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "create_checkpoint",
+    "doc_state": "disconnected",
+    "expected_success": false,
+    "expected_code": 100,
+    "reason": "Not connected to SolidWorks. Call connect_solidworks first (swConnectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "rollback_checkpoint",
+    "doc_state": "disconnected",
+    "expected_success": false,
+    "expected_code": 100,
+    "reason": "Not connected to SolidWorks. Call connect_solidworks first (swConnectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "inspect_dialogs",
+    "doc_state": "disconnected",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Win32 dialog scan operates independently of COM connection",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "dismiss_dialog",
+    "doc_state": "disconnected",
+    "expected_success": false,
+    "expected_code": 107,
+    "reason": "No active blocking modal dialog detected in SolidWorks to dismiss (swInvalidInput)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "load_addin",
+    "doc_state": "disconnected",
+    "expected_success": false,
+    "expected_code": 100,
+    "reason": "Not connected to SolidWorks. Call connect_solidworks first (swConnectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "inspect_rebuild_errors",
+    "doc_state": "disconnected",
+    "expected_success": false,
+    "expected_code": 100,
+    "reason": "Not connected to SolidWorks. Call connect_solidworks first (swConnectionError)",
+    "expectation_basis": "rule"
+  },
+  {
+    "tool": "reset_sta_worker",
+    "doc_state": "disconnected",
+    "expected_success": true,
+    "expected_code": 0,
+    "reason": "Administrative recovery resets internal worker thread without connection",
+    "expectation_basis": "rule"
+  }
+]
