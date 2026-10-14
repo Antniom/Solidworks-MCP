@@ -157,12 +157,19 @@ def run_welcome_demo(auto_launch: bool = True, verbose: bool = True) -> bool:
     if verbose:
         print(" [*] Step 6/6: Aligning camera to Isometric view and zooming to fit...")
 
-    # Center camera and show Isometric view
+    # Center camera and show Isometric view in foreground
     doc, _ = sw.get_active_doc()
     if doc is not None:
         try:
+            from solidworks_mcp.automation.base import ensure_visible_and_foreground
+            ensure_visible_and_foreground(sw._sw_app)
             doc.ShowNamedView2("*Isometric", 7)
             doc.ViewZoomtofit2()
+            ext = getattr(doc, "Extension", None)
+            if ext and hasattr(ext, "Maximize"):
+                ext.Maximize()
+            elif hasattr(doc, "ActiveView") and doc.ActiveView:
+                doc.ActiveView.FrameState = 1
             doc.GraphicsRedraw2()
         except Exception as ve:
             logger.debug(f"View adjustment error: {ve}")

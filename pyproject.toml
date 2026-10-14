@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "solidworks-mcp"
 version = "4.0.0"
-description = "Production-grade Model Context Protocol (MCP) server for Dassault Systèmes SolidWorks with 66 verified CAD, assembly, drawing, FEA, and diagnostic tools."
+description = "Production-grade Model Context Protocol (MCP) server for Dassault Systèmes SolidWorks with 67 verified CAD, assembly, drawing, FEA, and diagnostic tools."
 readme = "README.md"
 license = { text = "MIT" }
 authors = [

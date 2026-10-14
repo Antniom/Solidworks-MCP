@@ -31,7 +31,7 @@
 >
 > #### 🛡️ Step 2: Explaining Custom Scripts (`execute_python`) in Plain English
 > When explaining the optional custom script feature to the user, use this friendly explanation:
-> > *"SolidWorks MCP comes with 66 built-in, completely safe design tools for 99% of modeling tasks (sketching, extrusions, holes, assemblies, drawings, and stress tests).*
+> > *"SolidWorks MCP comes with 67 built-in, completely safe design tools for 99% of modeling tasks (sketching, extrusions, holes, assemblies, drawings, and stress tests).*
 > >
 > > *Occasionally, for very specialized or unusual SolidWorks tasks, I can write a custom macro script. For your security, this is locked by default so no code runs without your knowledge.*
 > >
@@ -41,11 +41,28 @@
 >
 > ---
 >
-> #### ✅ Step 3: Tell the User What to Do Next
-> Once installed, give the user these exact, simple instructions:
-> 1. *"If you are using **Claude Desktop**: fully quit Claude from the Windows system tray (bottom-right near your clock) and reopen it."*
-> 2. *"Look for the little **hammer icon (🔨)** in our chat box — that means all 66 SolidWorks tools are ready!"*
-> 3. *"Open SolidWorks, and try saying something like:*
+> #### 🚀 Step 3: Immediate Live Demonstration (Zero-Reasoning Sequential Recipe)
+> **Right after installing, execute this exact sequence of MCP tool calls to show the user the system working live in SolidWorks (do NOT spend tokens reasoning or planning — call these sequentially):**
+>
+> 1. `connect_solidworks` `{}`
+> 2. `create_new_part` `{}`
+> 3. `create_sketch` `{"plane": "Front"}`
+> 4. `draw_rectangle` `{"x1": -130, "y1": -45, "x2": 130, "y2": 45, "unit": "mm"}`
+> 5. `extrude_sketch` `{"depth": 8, "unit": "mm"}`
+> 6. `create_sketch_on_face` `{"x": 0, "y": 0, "z": 8, "unit": "mm"}`
+> 7. `draw_text` `{"text": "Welcome to\nSolidworks AI", "x": -75, "y": -16, "height": 16, "font_name": "Segoe UI", "bold": true, "unit": "mm"}`
+> 8. `extrude_sketch` `{"depth": 4, "unit": "mm"}`
+> 9. `capture_viewport` `{"view_name": "*Isometric"}`
+>
+> *(This builds an architectural 3D plaque with raised "Welcome to Solidworks AI" letters, brings SolidWorks into foreground focus, and returns a high-resolution render in chat!)*
+>
+> ---
+>
+> #### ✅ Step 4: Tell the User What to Do Next
+> Once the demo model is built, tell the user:
+> 1. *"Look at your screen — SolidWorks is open with your extruded 3D 'Welcome to Solidworks AI' model!"*
+> 2. *"If you are using **Claude Desktop**: fully quit Claude from the Windows system tray (bottom-right near your clock) and reopen it so the tool hammer icon (🔨) lights up."*
+> 3. *"Tell me what you'd like to design next! Try something like:*
 >    - 💬 *'Create a 50mm cube with a 20mm hole through the center.'*
 >    - 💬 *'Build a standard M16 hex bolt with a 50mm shaft.'*
 >    - 💬 *'Check the volume and weight of my active model.'*
@@ -59,7 +76,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![SolidWorks 2023-2025](https://img.shields.io/badge/SolidWorks-2023--2025%20Verified-red.svg)](https://www.solidworks.com/)
-[![MCP Tools: 66](https://img.shields.io/badge/MCP%20Tools-66%20Design%20Tools-green.svg)](https://modelcontextprotocol.io/)
+[![MCP Tools: 67](https://img.shields.io/badge/MCP%20Tools-67%20Design%20Tools-green.svg)](https://modelcontextprotocol.io/)
 
 **SolidWorks MCP** connects artificial intelligence assistants (like **Claude Desktop**, **Claude Code**, **Antigravity**, and **Cursor**) directly to **Dassault Systèmes SolidWorks**. 
 
@@ -69,7 +86,7 @@ Instead of clicking through menus or writing complex macros by hand, you can sim
 
 ## ✨ What Can It Do?
 
-- ✏️ **3D Modeling & Sketching:** Draw lines, circles, polygons, extrusions, cuts, revolves, shells, fillets, chamfers, and standard Hole Wizard holes.
+- ✏️ **3D Modeling & Sketching:** Draw lines, circles, polygons, 3D text/typography, extrusions, cuts, revolves, shells, fillets, chamfers, and standard Hole Wizard holes.
 - 🔩 **Assemblies & Mates:** Insert parts, align components with concentric and coincident mates, and check for physical collisions or interference.
 - 📐 **2D Manufacturing Drawings:** Automatically generate A4/A3/Letter sheets with orthographic views, section cuts, dimensions, and Bill of Materials (BOM) tables.
 - 🔬 **Stress Analysis (FEA):** Apply real-world materials (steel, aluminum, titanium), set up fixed supports and loads, mesh, and calculate stress and Factors of Safety.
@@ -110,7 +127,7 @@ Open SolidWorks, start a new chat with your AI, and look for the **hammer icon (
 > **Want to see it work right now without typing a prompt?**
 > With SolidWorks open, open PowerShell and run:
 > ```powershell
-> python -m solidworks_mcp.welcome_demo
+> python welcome_demo.py
 > ```
 > Watch your AI assistant automatically build an extruded 3D **"Welcome to Solidworks AI"** display plaque right in front of your eyes!
 
@@ -144,7 +161,7 @@ Once connected, open SolidWorks and try asking:
 
 ## 🛡️ Safety & Privacy: How Your System Is Protected
 
-- **No Mysterious Code Execution:** The server has **66 dedicated, safe CAD tools**. It does not need to run arbitrary code for everyday modeling.
+- **No Mysterious Code Execution:** The server has **67 dedicated, safe CAD tools**. It does not need to run arbitrary code for everyday modeling.
 - **Interactive Approval for Custom Scripts (`execute_python`):** If a task ever requires a custom Python macro, the AI is programmed to pause and ask for your clear permission first. You always remain in control.
 - **Your Files Stay on Your PC:** All 3D models, geometry calculations, and drawings stay strictly on your local computer. No CAD data is sent to external servers.
 
@@ -153,7 +170,7 @@ Once connected, open SolidWorks and try asking:
 ## 🔧 Technical Details & Tool Inventory (For Power Users & Developers)
 
 <details>
-<summary><b>Click to expand the complete 66-tool catalog and architecture details</b></summary>
+<summary><b>Click to expand the complete 67-tool catalog and architecture details</b></summary>
 
 ### 🏗️ Industrial COM Architecture
 - **100% STA Thread Affinity**: SolidWorks COM API strictly requires Single-Threaded Apartment (STA) execution. Every call is marshaled onto a dedicated worker thread with reentrant lock management (`reset_sta_worker`), preventing RPC errors (`0x8001010E`).
@@ -161,7 +178,7 @@ Once connected, open SolidWorks and try asking:
 - **Out-of-Band Win32 Modal Dialog Watchdog**: Background thread monitors blocking popup dialogs, allowing automated inspection (`inspect_dialogs`) and dismissal (`dismiss_dialog`).
 - **Declarative Geometry Selection (`select_by_geometry`)**: Replaces blind coordinate guessing by filtering faces/edges by topology (`plane`, `cylinder`), normal vectors, area, radius, and centroids.
 
-### Complete 66 Tool Inventory
+### Complete 67 Tool Inventory
 
 #### 1. Connection & Session (3 tools)
 - `connect_solidworks`: Connects or auto-launches SolidWorks with verified ROT registration.
@@ -181,7 +198,7 @@ Once connected, open SolidWorks and try asking:
 #### 3. Metadata & Custom Properties (1 tool)
 - `manage_custom_properties`: Get, set, delete, and list file-level and configuration properties.
 
-#### 4. 2D Sketching & Planar Contours (8 tools)
+#### 4. 2D Sketching & Planar Contours (9 tools)
 - `create_sketch`: Opens a 2D sketch on standard reference planes (`Front`, `Top`, `Right`).
 - `create_sketch_on_face`: Opens a sketch on any planar face selected by geometry or normal.
 - `draw_line`: Draws a line segment `(x1, y1)` to `(x2, y2)`.
@@ -189,6 +206,7 @@ Once connected, open SolidWorks and try asking:
 - `draw_rectangle`: Draws a rectangle by corner coordinates.
 - `draw_arc`: Draws an arc by center, start, and end points.
 - `draw_polygon`: Draws regular polygons (hexagons, octagons) with inscribed/circumscribed radius.
+- `draw_text`: Draws 2D sketch text in active sketch for extruded 3D typography or engraved labels.
 - `close_sketch`: Exits sketch mode with save/discard options.
 
 #### 5. 3D Solid Features (10 tools)

@@ -323,6 +323,24 @@ def _tool_definitions() -> list[Tool]:
                 "required": []
             }
         ),
+        Tool(
+            name="draw_text",
+            description="Draw 2D sketch text in the active sketch to create extruded 3D typography or engraved labels.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string", "description": "Text to insert (supports \\n for multi-line)"},
+                    "x": {"type": "number", "default": 0, "description": "X coordinate for text placement"},
+                    "y": {"type": "number", "default": 0, "description": "Y coordinate for text placement"},
+                    "height": {"type": "number", "default": 12, "description": "Font character height in units (default 12mm)"},
+                    "font_name": {"type": "string", "default": "Segoe UI", "description": "Font typeface name (default 'Segoe UI')"},
+                    "bold": {"type": "boolean", "default": True, "description": "Bold text style"},
+                    "italic": {"type": "boolean", "default": False, "description": "Italic text style"},
+                    "unit": {"type": "string", "description": "Unit for coordinates and height (e.g. 'mm')"}
+                },
+                "required": ["text"]
+            }
+        ),
         
         # Feature Tools
         Tool(
@@ -1370,6 +1388,18 @@ def _dispatch_tool(name: str, arguments: dict) -> Dict[str, Any]:
             arguments.get("radius", 25),
             arguments.get("sides", 6),
             arguments.get("unit")
+        )
+    
+    elif name == "draw_text":
+        result = sw_automation.draw_text(
+            text=arguments.get("text", ""),
+            x=arguments.get("x", 0.0),
+            y=arguments.get("y", 0.0),
+            height=arguments.get("height", 12.0),
+            font_name=arguments.get("font_name", "Segoe UI"),
+            bold=arguments.get("bold", True),
+            italic=arguments.get("italic", False),
+            unit=arguments.get("unit"),
         )
     
     # Feature Tools

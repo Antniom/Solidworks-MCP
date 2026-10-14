@@ -85,11 +85,18 @@ class DocumentOperations:
                 return self._result(False, "Failed to create part document",
                                   SwErrors.swFileLoadError)
             
-            # Set view
+            # Set view and ensure visibility in foreground
             try:
+                from .base import ensure_visible_and_foreground
+                ensure_visible_and_foreground(self._sw_app)
                 doc.ShowNamedView2("*Isometric", 7)
                 doc.ViewZoomtofit2()
-            except:
+                ext = getattr(doc, "Extension", None)
+                if ext and hasattr(ext, "Maximize"):
+                    ext.Maximize()
+                elif hasattr(doc, "ActiveView") and doc.ActiveView:
+                    doc.ActiveView.FrameState = 1
+            except Exception:
                 pass
             
             title = self._get_doc_title(doc)

@@ -21,6 +21,7 @@ try:
     import win32con
     import win32process
     import win32security
+    import win32gui
     import ctypes
     HAS_PYWIN32 = True
 except ImportError:
@@ -301,6 +302,76 @@ def launch_solidworks(
         return confirmed_app, None
 
     return None, f"Startup timed out after {startup_timeout}s: SolidWorks did not register in Running Object Table (ROT)"
+
+
+def ensure_visible_and_foreground(sw_app) -> bool:
+    """
+    Guarantees that SolidWorks is visible, unminimized, and brought to
+    the foreground of the user's desktop.
+    """
+    if sw_app is None:
+        return False
+    try:
+        sw_app.Visible = True
+        sw_app.UserControl = True
+    except Exception:
+        pass
+
+    try:
+        hwnd = 0
+        try:
+            frame = getattr(sw_app, "Frame", None)
+            if frame:
+                hwnd = getattr(frame, "GetHWndx64", lambda: 0)()
+                if not hwnd:
+                    hwnd = getattr(frame, "GetHWnd", lambda: 0)()
+        except Exception:
+            pass
+
+        if not hwnd:
+            try:
+                pid = get_attr_or_call(sw_app, "GetProcessID")
+                if pid:
+                    def enum_cb(h, found):
+                        if win32gui.IsWindowVisible(h) or win32gui.IsIconic(h):
+                            _, w_pid = win32process.GetWindowThreadProcessId(h)
+                            if w_pid == pid:
+                                title = win32gui.GetWindowText(h)
+                                if "solidworks" in title.lower():
+                                    found.insert(0, h)
+                                elif not found:
+                                    found.append(h)
+                        return True
+                    found = []
+                    win32gui.EnumWindows(enum_cb, found)
+                    if found:
+                        hwnd = found[0]
+            except Exception:
+                pass
+
+        if hwnd:
+            try:
+                if win32gui.IsIconic(hwnd):
+                    win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                else:
+                    win32gui.ShowWindow(hwnd, win32con.SW_SHOW)
+                win32gui.ShowWindow(hwnd, win32con.SW_SHOWMAXIMIZED)
+
+                cur_thread = win32api.GetCurrentThreadId()
+                target_thread, _ = win32process.GetWindowThreadProcessId(hwnd)
+                if cur_thread != target_thread:
+                    ctypes.windll.user32.AttachThreadInput(cur_thread, target_thread, True)
+                    ctypes.windll.user32.SetForegroundWindow(hwnd)
+                    ctypes.windll.user32.SetFocus(hwnd)
+                    ctypes.windll.user32.AttachThreadInput(cur_thread, target_thread, False)
+                else:
+                    win32gui.SetForegroundWindow(hwnd)
+                return True
+            except Exception as e:
+                logger.debug(f"Could not bring window to foreground: {e}")
+    except Exception as e:
+        logger.debug(f"ensure_visible_and_foreground error: {e}")
+    return False
 
 
 class SolidWorksAutomation:
