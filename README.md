@@ -41,6 +41,52 @@
 
 ---
 
+## 🖥️ Claude Desktop Setup (Why Pasting the URL Doesn't Work)
+
+> [!NOTE]
+> **Why pasting the repository link in Claude Desktop chat doesn't install it:**
+> The chat window inside Claude Desktop runs in an isolated conversational environment. It does **not** have shell access to your host Windows machine, cannot clone git repositories, and cannot modify files on your computer.
+>
+> To use SolidWorks MCP with Claude Desktop, the server must be registered in your local Windows configuration file (`%APPDATA%\Claude\claude_desktop_config.json`), which Claude Desktop reads on startup to launch the local Python server via stdio.
+
+### Quick Setup for Claude Desktop (2 Minutes)
+
+1. **Clone & Set Up on Windows (PowerShell):**
+   ```powershell
+   git clone https://github.com/Antniom/Solidworks-MCP.git
+   cd Solidworks-MCP
+   python -m venv .venv
+   .venv\Scripts\pip install -e .
+   ```
+
+2. **Run the One-Click Auto-Installer:**
+   ```powershell
+   .venv\Scripts\python -m solidworks_mcp.install
+   ```
+   *This automatically detects Claude Desktop and configures `%APPDATA%\Claude\claude_desktop_config.json`.*
+
+3. **Or Configure Manually:**
+   Open `%APPDATA%\Claude\claude_desktop_config.json` and paste:
+   ```json
+   {
+     "mcpServers": {
+       "solidworks": {
+         "command": "C:\\path\\to\\Solidworks-MCP\\.venv\\Scripts\\python.exe",
+         "args": [
+           "-m",
+           "solidworks_mcp.server"
+         ]
+       }
+     }
+   }
+   ```
+
+4. **Restart Claude Desktop:**
+   Fully quit Claude Desktop (right-click its icon in the Windows taskbar system tray and select **Quit**), then reopen it.
+   A hammer icon 🔨 will appear in the bottom-right corner of the chat input with all **66 SolidWorks MCP tools** loaded and ready to automate SolidWorks live!
+
+---
+
 # SolidWorks MCP Server 🔧
 
 > Production-grade [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server providing full autonomous CAD, assembly, drafting, FEA simulation, and diagnostic capabilities for Dassault Systèmes SolidWorks.
