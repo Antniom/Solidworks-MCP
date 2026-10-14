@@ -38,8 +38,20 @@
 >
 > ---
 >
-> #### 🚀 Step 3: Immediate Live Demonstration (Zero-Reasoning Sequential Recipe)
-> **Right after installing, execute this exact sequence of MCP tool calls to show the user the system working live in SolidWorks (do NOT spend tokens reasoning or planning — call these sequentially):**
+> #### 🔄 Step 3: Tell the User to Restart & Prompt Them to Reply
+> AI clients (Claude Desktop, Antigravity, Cursor, Windsurf) load new MCP tools on application startup. Because this current session cannot call the new tools until restarted, **instruct the user clearly**:
+> > *"SolidWorks MCP is now installed and configured across your applications!*
+> >
+> > *To load the 67 new 3D design tools, please restart your app:*
+> > - *If using **Claude Desktop**: fully quit Claude from the Windows taskbar system tray (bottom-right near your clock) and reopen it.*
+> > - *If using **Cursor / Antigravity / Windsurf**: close and reopen the app.*
+> >
+> > *Once you're back, reply with: **'I restarted'** (or **'ready'**), and I will immediately build an extruded 3D 'Welcome to Solidworks AI' display plaque in SolidWorks to show you our new tools working live on your screen!"*
+>
+> ---
+>
+> #### 🚀 Step 4: When the User Returns ("I restarted" / "ready") — Run the 9-Step Demo Recipe!
+> **When the user returns post-restart, the 67 SolidWorks MCP tools will be active in your tool list! Immediately execute this exact sequence of tool calls to demonstrate the system live in SolidWorks (do NOT spend tokens reasoning or planning — call these sequentially via MCP):**
 >
 > 1. `connect_solidworks` `{}`
 > 2. `create_new_part` `{}`
@@ -51,19 +63,17 @@
 > 8. `extrude_sketch` `{"depth": 4, "unit": "mm"}`
 > 9. `capture_viewport` `{"view_name": "*Isometric"}`
 >
-> *(This builds an architectural 3D plaque with raised "Welcome to Solidworks AI" letters, brings SolidWorks into foreground focus, and returns a high-resolution render in chat!)*
+> *(This brings SolidWorks into foreground focus, builds the architectural plaque with raised 3D lettering live on screen, and returns a high-resolution render in chat!)*
 >
 > ---
 >
-> #### ✅ Step 4: Tell the User What to Do Next
-> Once the demo model is built, tell the user:
-> 1. *"Look at your screen — SolidWorks is open with your extruded 3D 'Welcome to Solidworks AI' model!"*
-> 2. *"If you are using **Claude Desktop**: fully quit Claude from the Windows system tray (bottom-right near your clock) and reopen it so the tool hammer icon (🔨) lights up."*
-> 3. *"Tell me what you'd like to design next! Try something like:*
->    - 💬 *'Create a 50mm cube with a 20mm hole through the center.'*
->    - 💬 *'Build a standard M16 hex bolt with a 50mm shaft.'*
->    - 💬 *'Check the volume and weight of my active model.'*
->    - 💬 *'Generate an A4 drawing of this part with Front, Top, and 3D views.'*"
+> #### ✨ Step 5: Invite the User's Next Design Request
+> Once the demo render is presented in chat, invite the user to start designing:
+> 💬 *"Your SolidWorks AI assistant is fully connected and ready! What would you like to design next? Try:*
+> - *'Create a 50mm cube with a 20mm hole through the center.'*
+> - *'Build a standard M16 hex bolt with a 50mm shaft.'*
+> - *'Check the volume and mass properties of this model.'*
+> - *'Generate an A4 drawing of this part with Front, Top, and 3D views.'"*
 
 ---
 

@@ -8,7 +8,8 @@ description: >-
   and verify geometry with bounding box assertions, mass properties, and viewport captures.
   Triggers on English prompts like "model part", "create part", "extrude sketch", "cut hole",
   "revolve sketch", "create shell", "create pattern", "hole wizard", "manage feature", "select geometry",
-  "fillet edges", "chamfer", "part design", "solid body", "/solidworks-modeling" as well as Portuguese (pt-PT)
+  "fillet edges", "chamfer", "part design", "solid body", "welcome demo", "i restarted", "ready",
+  "welcome plaque", "demo model", "/solidworks-modeling" as well as Portuguese (pt-PT)
   phrases like "modelar peça", "criar peça", "extrusão de esboço", "corte extrudido", "revolução",
   "criar casca", "criar padrão", "assistente de furação", "selecionar geometria", "arredondamento", "chanfro".
 ---
@@ -74,6 +75,7 @@ For dialog recovery and rebuild diagnostics, see `solidworks-diagnostics`.
 - `draw_line {"x1": float, "y1": float, "x2": float, "y2": float, "unit": "mm"}`
 - `draw_arc {"cx": float, "cy": float, "radius": float, "start_angle": float, "end_angle": float, "unit": "mm"}`
 - `draw_polygon {"cx": float, "cy": float, "radius": float, "sides": int, "unit": "mm"}`
+- `draw_text {"text": str, "x": float, "y": float, "height": float, "font_name": str, "bold": bool, "unit": "mm"}`
 
 ### 3. 3D Solid Features
 - `extrude_sketch {"depth": float, "both_directions": bool, "unit": "mm"}`: Extrudes active or selected sketch. Automatically closes sketch and selects profile before extrusion.
@@ -147,6 +149,29 @@ Supported schema parameters:
 ---
 
 ## End-to-End Workflow Recipes
+
+### Recipe 0: First-Run 3D Welcome Demonstration Plaque (9-Step Zero-Reasoning Recipe)
+Triggered when the user says "I restarted", "ready", "welcome demo", "demo plaque", or right after MCP setup:
+```json
+// 1. Connect & bring SolidWorks to desktop foreground
+connect_solidworks {}
+
+// 2. Initialize fresh part
+create_new_part {}
+
+// 3. Base plaque sketch & extrusion
+create_sketch {"plane": "Front"}
+draw_rectangle {"x1": -130, "y1": -45, "x2": 130, "y2": 45, "unit": "mm"}
+extrude_sketch {"depth": 8, "unit": "mm"}
+
+// 4. Inset 3D typography
+create_sketch_on_face {"x": 0, "y": 0, "z": 8, "unit": "mm"}
+draw_text {"text": "Welcome to\nSolidworks AI", "x": -75, "y": -16, "height": 16, "font_name": "Segoe UI", "bold": true, "unit": "mm"}
+extrude_sketch {"depth": 4, "unit": "mm"}
+
+// 5. Render viewport
+capture_viewport {"view_name": "*Isometric"}
+```
 
 ### Recipe 1: Parametric Flanged Bearing Housing with Hole Wizard & Circular Pattern
 ```json
