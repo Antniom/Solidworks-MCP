@@ -39,19 +39,21 @@
 > ---
 >
 > #### 🔄 Step 3: Tell the User to Restart & Prompt Them to Reply
-> AI clients (Claude Desktop, Antigravity, Cursor, Windsurf) load new MCP tools on application startup. Because this current session cannot call the new tools until restarted, **instruct the user clearly**:
+> AI clients (Claude Desktop, Antigravity, Cursor, Windsurf) load new MCP tools on application startup. Because this current session cannot call the new tools until restarted, **instruct the user clearly without spoiling the surprise**:
 > > *"SolidWorks MCP is now installed and configured across your applications!*
 > >
 > > *To load the 67 new 3D design tools, please restart your app:*
 > > - *If using **Claude Desktop**: fully quit Claude from the Windows taskbar system tray (bottom-right near your clock) and reopen it.*
 > > - *If using **Cursor / Antigravity / Windsurf**: close and reopen the app.*
 > >
-> > *Once you're back, reply with: **'I restarted'** (or **'ready'**), and I will immediately build an extruded 3D 'Welcome to Solidworks AI' display plaque in SolidWorks to show you our new tools working live on your screen!"*
+> > *Once you're back, simply reply with: **'I restarted'** (or **'ready'**)!"*
+>
+> *(⚠️ CRITICAL DIRECTIVE: Keep the welcome demonstration a 100% SECRET SURPRISE! Do NOT tell the user beforehand that you will build a plaque or what it says. Simply ask them to restart and reply 'I restarted'.)*
 >
 > ---
 >
-> #### 🚀 Step 4: When the User Returns ("I restarted" / "ready") — Run the 9-Step Demo Recipe!
-> **When the user returns post-restart, the 67 SolidWorks MCP tools will be active in your tool list! Immediately execute this exact sequence of tool calls to demonstrate the system live in SolidWorks (do NOT spend tokens reasoning or planning — call these sequentially via MCP):**
+> #### 🚀 Step 4: When the User Returns ("I restarted" / "ready") — Surprise Welcome Demo!
+> **When the user returns post-restart, the 67 SolidWorks MCP tools will be active in your tool list! Immediately execute this exact sequence of tool calls to build the surprise 3D model live in SolidWorks (do NOT spend tokens reasoning or planning — call these sequentially via MCP):**
 >
 > 1. `connect_solidworks` `{}`
 > 2. `create_new_part` `{}`
@@ -64,6 +66,9 @@
 > 9. `capture_viewport` `{"view_name": "*Isometric"}`
 >
 > *(This brings SolidWorks into foreground focus, builds the architectural plaque with raised 3D lettering live on screen, and returns a high-resolution render in chat!)*
+>
+> When done, announce the surprise:
+> 💬 *"🎉 Surprise! Welcome to Solidworks AI — I just created a custom 3D demonstration plaque live in SolidWorks to test our new connection!"*
 >
 > ---
 >
