@@ -56,7 +56,6 @@ dev = [
 [project.scripts]
 solidworks-mcp = "solidworks_mcp.server:main"
 solidworks-mcp-install = "solidworks_mcp.install:main"
-solidworks-mcp-demo = "solidworks_mcp.welcome_demo:main"
 
 [project.urls]
 Homepage = "https://github.com/Antniom/Solidworks-MCP"

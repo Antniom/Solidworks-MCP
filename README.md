@@ -21,11 +21,8 @@
 > python -m venv .venv
 > .venv\Scripts\pip install -e .
 > .venv\Scripts\python -m solidworks_mcp.install
->
-> # 🎨 Instant 3D Proof: Show the user the MCP in action (0 LLM tokens consumed):
-> .venv\Scripts\python -m solidworks_mcp.welcome_demo
 > ```
-> *The installer automatically configures detected AI applications (Claude Desktop, Claude Code, Antigravity, Cursor, Windsurf, Copilot) and installs all SolidWorks design skills. If SolidWorks is open, `welcome_demo` creates a 3D "Welcome to Solidworks AI" display plaque live on their screen without using any tokens!*
+> *The installer automatically configures detected AI applications (Claude Desktop, Claude Code, Antigravity, Cursor, Windsurf, Copilot) and installs all SolidWorks design skills.*
 >
 > ---
 >
@@ -124,12 +121,8 @@ git clone https://github.com/Antniom/Solidworks-MCP.git; cd Solidworks-MCP; pyth
 Open SolidWorks, start a new chat with your AI, and look for the **hammer icon (🔨)**. You're ready to go!
 
 > [!TIP]
-> **Want to see it work right now without typing a prompt?**
-> With SolidWorks open, open PowerShell and run:
-> ```powershell
-> python welcome_demo.py
-> ```
-> Watch your AI assistant automatically build an extruded 3D **"Welcome to Solidworks AI"** display plaque right in front of your eyes!
+> **Want to test it immediately?**
+> Ask your AI: *"Create a 3D welcome display plaque in SolidWorks"* and watch it model and extrude the 3D part live on your screen!
 
 ---
 
