@@ -51,12 +51,16 @@ class ClientTarget:
         config_format: str = "json_mcpServers",
         skills_dirs: Optional[List[Path]] = None,
         detection_hint: Optional[Path] = None,
+        extra_config_paths: Optional[List[Path]] = None,
+        mcp_dir: Optional[Path] = None,
     ):
         self.name = name
         self.config_path = config_path
         self.config_format = config_format
         self.skills_dirs = skills_dirs or []
         self.detection_hint = detection_hint or config_path.parent
+        self.extra_config_paths = extra_config_paths or []
+        self.mcp_dir = mcp_dir
 
     def is_installed(self) -> bool:
         """Check whether the client or its parent application directory exists on the system."""
@@ -86,13 +90,17 @@ def get_detected_clients() -> List[ClientTarget]:
         ),
         ClientTarget(
             name="Antigravity / Gemini",
-            config_path=user_profile / ".gemini" / "antigravity" / "mcp_config.json",
+            config_path=user_profile / ".gemini" / "config" / "mcp_config.json",
             config_format="json_mcpServers",
             skills_dirs=[
                 user_profile / ".gemini" / "config" / "skills",
                 user_profile / ".gemini" / "antigravity" / "skills",
             ],
             detection_hint=user_profile / ".gemini",
+            extra_config_paths=[
+                user_profile / ".gemini" / "antigravity" / "mcp_config.json",
+            ],
+            mcp_dir=user_profile / ".gemini" / "antigravity" / "mcp" / "solidworks",
         ),
         ClientTarget(
             name="Cursor",
@@ -127,6 +135,86 @@ def get_detected_clients() -> List[ClientTarget]:
     return clients
 
 
+def _update_single_config(
+    target_path: Path,
+    server_key: str,
+    server_entry: Dict[str, Any],
+    dry_run: bool = False,
+) -> bool:
+    """Safely updates or creates an mcpServers configuration JSON file."""
+    config_data: Dict[str, Any] = {}
+    if target_path.exists():
+        try:
+            with open(target_path, "r", encoding="utf-8-sig") as f:
+                config_data = json.load(f)
+        except Exception as e:
+            logger.warning(f"Could not parse existing {target_path}: {e}. Creating fresh config.")
+            config_data = {}
+
+    if "mcpServers" not in config_data:
+        config_data["mcpServers"] = {}
+
+    config_data["mcpServers"][server_key] = server_entry
+
+    if dry_run:
+        logger.info(f"[DRY-RUN] Would update config at: {target_path}")
+        return True
+
+    try:
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(target_path, "w", encoding="utf-8") as f:
+            json.dump(config_data, f, indent=2)
+        return True
+    except Exception as e:
+        logger.error(f"Failed to write configuration to {target_path}: {e}")
+        return False
+
+
+def export_antigravity_schemas(mcp_dir: Path, dry_run: bool = False) -> int:
+    """Exports tool schemas into Antigravity MCP directory for instant discovery."""
+    import asyncio
+    try:
+        from solidworks_mcp.server import list_tools
+        res = asyncio.run(list_tools(None, None))
+        tools = res.tools if hasattr(res, "tools") else []
+    except Exception as e:
+        logger.warning(f"Could not load tool schemas for export: {e}")
+        return 0
+
+    if dry_run:
+        logger.info(f"[DRY-RUN] Would export {len(tools)} schemas to {mcp_dir}")
+        return len(tools)
+
+    try:
+        mcp_dir.mkdir(parents=True, exist_ok=True)
+        for t in tools:
+            params = getattr(t, "input_schema", getattr(t, "inputSchema", {}))
+            tool_data = {
+                "name": t.name,
+                "description": t.description or "",
+                "parameters": params,
+            }
+            tool_file = mcp_dir / f"{t.name}.json"
+            with open(tool_file, "w", encoding="utf-8") as f:
+                json.dump(tool_data, f, indent=2)
+
+        instructions_path = mcp_dir / "instructions.md"
+        instructions_content = (
+            "MCP server for parametric 3D modeling, assemblies, drawings, and FEA simulation in Dassault Systèmes SolidWorks.\n"
+            "All dimensions are in millimeters. Typical workflow: connect -> create_part / open_document -> create_sketch -> "
+            "draw geometry -> extrude_sketch / cut_extrude / revolve_sketch -> save_document.\n"
+            "Use select_by_geometry for declarative face/edge selection. Custom macros via execute_python require user consent or SW_MCP_ALLOW_EXEC=1.\n"
+        )
+        with open(instructions_path, "w", encoding="utf-8") as f:
+            f.write(instructions_content)
+
+        logger.info(f"Exported {len(tools)} tool schemas and instructions to: {mcp_dir}")
+        return len(tools)
+    except Exception as e:
+        logger.warning(f"Failed exporting tool schemas to {mcp_dir}: {e}")
+        return 0
+
+
 def register_mcp_server(
     client: ClientTarget,
     python_exe: str,
@@ -149,33 +237,17 @@ def register_mcp_server(
     if env_vars:
         server_entry["env"] = env_vars
 
-    config_data: Dict[str, Any] = {}
-    if client.config_path.exists():
-        try:
-            with open(client.config_path, "r", encoding="utf-8") as f:
-                config_data = json.load(f)
-        except Exception as e:
-            logger.warning(f"Could not parse existing {client.config_path}: {e}. Creating fresh config.")
-            config_data = {}
-
-    if "mcpServers" not in config_data:
-        config_data["mcpServers"] = {}
-
-    config_data["mcpServers"][server_key] = server_entry
-
-    if dry_run:
-        logger.info(f"[DRY-RUN] Would update {client.name} config at: {client.config_path}")
-        return True
-
-    try:
-        client.config_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(client.config_path, "w", encoding="utf-8") as f:
-            json.dump(config_data, f, indent=2)
+    primary_ok = _update_single_config(client.config_path, server_key, server_entry, dry_run=dry_run)
+    if primary_ok:
         logger.info(f"Registered SolidWorks MCP in {client.name} ({client.config_path})")
-        return True
-    except Exception as e:
-        logger.error(f"Failed to write configuration for {client.name}: {e}")
-        return False
+
+    for extra_path in client.extra_config_paths:
+        _update_single_config(extra_path, server_key, server_entry, dry_run=dry_run)
+
+    if client.mcp_dir:
+        export_antigravity_schemas(client.mcp_dir, dry_run=dry_run)
+
+    return primary_ok
 
 
 def _force_remove_readonly(func, path, exc_info):
@@ -256,7 +328,20 @@ def run_installer(
     print(" [*] SOLIDWORKS MCP MULTI-CLIENT AUTO-INSTALLER")
     print("=" * 76)
 
-    resolved_python = python_exe or sys.executable
+    if not python_exe:
+        pkg_root = Path(__file__).resolve().parent.parent
+        local_venv_py = pkg_root / ".venv" / "Scripts" / "python.exe"
+        cwd_venv_py = Path.cwd() / ".venv" / "Scripts" / "python.exe"
+        if hasattr(sys, "real_prefix") or (hasattr(sys, "base_prefix") and sys.base_prefix != sys.prefix):
+            resolved_python = sys.executable
+        elif local_venv_py.exists():
+            resolved_python = str(local_venv_py)
+        elif cwd_venv_py.exists():
+            resolved_python = str(cwd_venv_py)
+        else:
+            resolved_python = sys.executable
+    else:
+        resolved_python = python_exe
     logger.info(f"Target Python executable: {resolved_python}")
 
     bundled_skills = get_bundled_skills_dir()
