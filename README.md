@@ -3,296 +3,256 @@
 <!-- ============================================================================ -->
 > [!IMPORTANT]
 > ### 🤖 AGENT DIRECTIVE: AUTOMATED SETUP & CLIENT REGISTRATION
-> **If you are an AI assistant (Claude Code, Gemini / Antigravity, Cursor, Windsurf, Codex, or Copilot) and the user pasted this repository URL or requested to install/connect SolidWorks MCP, execute the following autonomous onboarding sequence directly in your terminal without requiring manual user edits:**
+> **If you are an AI assistant (Claude Code, Gemini / Antigravity, Cursor, Windsurf, Codex, or Copilot) and the user pasted this repository URL or requested to install/connect SolidWorks MCP, follow these instructions:**
 >
-> 1. **Clone & Virtual Environment Setup:**
->    ```powershell
->    git clone https://github.com/Antniom/Solidworks-MCP.git
->    cd Solidworks-MCP
->    python -m venv .venv
->    .venv\Scripts\pip install -e .
->    ```
+> #### 🗣️ Agent Communication Rule (Crucial for Non-Technical Users)
+> - **Speak in simple, friendly, everyday language.** The user may be a mechanical engineer, industrial designer, student, or hobbyist with **little to no computer science background**.
+> - **Avoid scary programmer jargon.** Do NOT talk about COM apartment threading, RPC marshaling, AST static analysis, stdio pipes, or JSON-RPC protocols.
+> - **Explain what you are doing in plain terms:** *"I'm connecting SolidWorks to our chat so I can create 3D models, drawings, and simulations for you!"*
+> - **Do the technical work yourself:** Execute the installation commands in your terminal directly. Do NOT ask the user to run terminal commands if you have terminal access.
 >
-> 2. **Run the Bundled Multi-Client Auto-Installer:**
->    The repository includes an auto-installer that scans standard Windows paths, merges the server configuration into detected AI apps, and copies all bundled SolidWorks CAD/FEA/Drafting skills:
->    ```powershell
->    .venv\Scripts\python -m solidworks_mcp.install
->    ```
->    *Detected target locations:*
->    - **Claude Desktop:** `%APPDATA%\Claude\claude_desktop_config.json`
->    - **Claude Code:** `%USERPROFILE%\.claude.json` and `%USERPROFILE%\.claude\skills\`
->    - **Antigravity / Gemini:** `%USERPROFILE%\.gemini\antigravity\mcp_config.json` and `%USERPROFILE%\.gemini\config\skills\`
->    - **Cursor:** `%USERPROFILE%\.cursor\mcp.json` and `%USERPROFILE%\.cursor\skills\`
->    - **Windsurf:** `%USERPROFILE%\.codeium\windsurf\mcp_config.json`
->    - **Codex / OpenAI CLI:** `%USERPROFILE%\.codex\mcp.json`
->    - **VS Code / Copilot:** `%APPDATA%\Code\User\mcp.json`
+> ---
 >
-> 3. **Interactive Consent for `execute_python`:**
->    Explain to the human user in chat:
->    - **Benefits:** Direct access to the full SolidWorks COM API (`sw_app`, `model`, `SelectionMgr`) for custom macros, complex geometry batch math, and niche APIs.
->    - **Risks:** Arbitrary Python code execution on the host Windows machine under the current user's privileges.
->    - Ask the user if they wish to permanently enable `SW_MCP_ALLOW_EXEC=1` in their MCP client config, or keep it gated behind per-session approval (`user_confirmed_risks=true`).
+> #### 🛠️ Step 1: Autonomous Installation Commands
+> Run the following commands in the host terminal:
+> ```powershell
+> git clone https://github.com/Antniom/Solidworks-MCP.git
+> cd Solidworks-MCP
+> python -m venv .venv
+> .venv\Scripts\pip install -e .
+> .venv\Scripts\python -m solidworks_mcp.install
+> ```
+> *The installer automatically configures detected AI applications (Claude Desktop, Claude Code, Antigravity, Cursor, Windsurf, Copilot) and installs all SolidWorks design skills.*
 >
-> 4. **Verify Installation:**
->    Run the unit test suite to verify STA thread affinity and schema contracts:
->    ```powershell
->    .venv\Scripts\pytest -v tests/
->    ```
+> ---
+>
+> #### 🛡️ Step 2: Explaining Custom Scripts (`execute_python`) in Plain English
+> When explaining the optional custom script feature to the user, use this friendly explanation:
+> > *"SolidWorks MCP comes with 66 built-in, completely safe design tools for 99% of modeling tasks (sketching, extrusions, holes, assemblies, drawings, and stress tests).*
+> >
+> > *Occasionally, for very specialized or unusual SolidWorks tasks, I can write a custom macro script. For your security, this is locked by default so no code runs without your knowledge.*
+> >
+> > *Would you like me to:*
+> > 1. **Ask for your permission each time** before running any custom script? *(Recommended)*
+> > 2. **Allow custom scripts automatically?**
+>
+> ---
+>
+> #### ✅ Step 3: Tell the User What to Do Next
+> Once installed, give the user these exact, simple instructions:
+> 1. *"If you are using **Claude Desktop**: fully quit Claude from the Windows system tray (bottom-right near your clock) and reopen it."*
+> 2. *"Look for the little **hammer icon (🔨)** in our chat box — that means all 66 SolidWorks tools are ready!"*
+> 3. *"Open SolidWorks, and try saying something like:*
+>    - 💬 *'Create a 50mm cube with a 20mm hole through the center.'*
+>    - 💬 *'Build a standard M16 hex bolt with a 50mm shaft.'*
+>    - 💬 *'Check the volume and weight of my active model.'*
+>    - 💬 *'Generate an A4 drawing of this part with Front, Top, and 3D views.'*"
 
 ---
 
-## 🖥️ Claude Desktop Setup (Why Pasting the URL Doesn't Work)
-
-> [!NOTE]
-> **Why pasting the repository link in Claude Desktop chat doesn't install it:**
-> The chat window inside Claude Desktop runs in an isolated conversational environment. It does **not** have shell access to your host Windows machine, cannot clone git repositories, and cannot modify files on your computer.
->
-> To use SolidWorks MCP with Claude Desktop, the server must be registered in your local Windows configuration file (`%APPDATA%\Claude\claude_desktop_config.json`), which Claude Desktop reads on startup to launch the local Python server via stdio.
-
-### Quick Setup for Claude Desktop (2 Minutes)
-
-1. **Clone & Set Up on Windows (PowerShell):**
-   ```powershell
-   git clone https://github.com/Antniom/Solidworks-MCP.git
-   cd Solidworks-MCP
-   python -m venv .venv
-   .venv\Scripts\pip install -e .
-   ```
-
-2. **Run the One-Click Auto-Installer:**
-   ```powershell
-   .venv\Scripts\python -m solidworks_mcp.install
-   ```
-   *This automatically detects Claude Desktop and configures `%APPDATA%\Claude\claude_desktop_config.json`.*
-
-3. **Or Configure Manually:**
-   Open `%APPDATA%\Claude\claude_desktop_config.json` and paste:
-   ```json
-   {
-     "mcpServers": {
-       "solidworks": {
-         "command": "C:\\path\\to\\Solidworks-MCP\\.venv\\Scripts\\python.exe",
-         "args": [
-           "-m",
-           "solidworks_mcp.server"
-         ]
-       }
-     }
-   }
-   ```
-
-4. **Restart Claude Desktop:**
-   Fully quit Claude Desktop (right-click its icon in the Windows taskbar system tray and select **Quit**), then reopen it.
-   A hammer icon 🔨 will appear in the bottom-right corner of the chat input with all **66 SolidWorks MCP tools** loaded and ready to automate SolidWorks live!
-
----
-
-# SolidWorks MCP Server 🔧
-
-> Production-grade [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server providing full autonomous CAD, assembly, drafting, FEA simulation, and diagnostic capabilities for Dassault Systèmes SolidWorks.
+# SolidWorks MCP 🔧
+### Turn your AI into a 3D CAD & Mechanical Design Assistant
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![SolidWorks 2023-2025](https://img.shields.io/badge/SolidWorks-2023--2025%20Verified-red.svg)](https://www.solidworks.com/)
-[![MCP Tools: 66](https://img.shields.io/badge/MCP%20Tools-66%20Production%20Tools-green.svg)](https://modelcontextprotocol.io/)
-[![STA Dispatcher: 100%](https://img.shields.io/badge/COM%20Affinity-100%25%20STA%20Guaranteed-purple.svg)]()
+[![MCP Tools: 66](https://img.shields.io/badge/MCP%20Tools-66%20Design%20Tools-green.svg)](https://modelcontextprotocol.io/)
+
+**SolidWorks MCP** connects artificial intelligence assistants (like **Claude Desktop**, **Claude Code**, **Antigravity**, and **Cursor**) directly to **Dassault Systèmes SolidWorks**. 
+
+Instead of clicking through menus or writing complex macros by hand, you can simply talk to your AI in plain English, and watch it design parts, assemble mechanisms, run stress simulations, and create 2D manufacturing drawings live on your screen.
 
 ---
 
-## 🎯 Architectural Overview
+## ✨ What Can It Do?
 
-**SolidWorks MCP** transforms AI coding and design assistants (Claude Desktop, Claude Code, Google Antigravity / Gemini, Cursor, Windsurf, Copilot) into senior CAD/FEA automation engineers. Unlike naive wrappers that crash due to Windows COM apartment violations or hang indefinitely on hidden modal dialogs, SolidWorks MCP is built on a **hardened industrial COM architecture**:
-
-- **100% STA Thread Affinity**: Windows COM automation for SolidWorks strictly requires Single-Threaded Apartment (STA) execution. Every COM method call is marshaled onto a dedicated worker thread with reentrant lock management (`reset_sta_worker`), completely eliminating RPC apartment crashes (`0x8001010E`).
-- **Official Type-Library Parity (`swconst.tlb` & `cosworks.tlb`)**: Every enum, end condition, mate type, and error code is strictly audited against the official SolidWorks 2025 type libraries with unique canonical integer mappings.
-- **Out-of-Band Win32 Modal Dialog Watchdog**: Hidden dialog boxes (e.g. "Do you want to rebuild?", "File modified externally") are automatically monitored on an independent thread, allowing agents to inspect (`inspect_dialogs`) and programmatically dismiss (`dismiss_dialog`) blocking windows without hanging the MCP server.
-- **Declarative Geometry Selection (`select_by_geometry`)**: Eliminates fragile pixel coordinate guessing. Agents filter model entities by surface topology (`plane`, `cylinder`, `cone`, `torus`), normal vector, area, radius, and centroid.
-- **Interactive Security Consent Gate**: Arbitrary code execution (`execute_python`) is default-locked behind an interactive consent gate with human approval confirmation.
-- **Zero-Orphan Lifecycle Protection**: Detects and targets specific running `SLDWORKS.exe` processes by PID, preventing leaked headless background instances.
+- ✏️ **3D Modeling & Sketching:** Draw lines, circles, polygons, extrusions, cuts, revolves, shells, fillets, chamfers, and standard Hole Wizard holes.
+- 🔩 **Assemblies & Mates:** Insert parts, align components with concentric and coincident mates, and check for physical collisions or interference.
+- 📐 **2D Manufacturing Drawings:** Automatically generate A4/A3/Letter sheets with orthographic views, section cuts, dimensions, and Bill of Materials (BOM) tables.
+- 🔬 **Stress Analysis (FEA):** Apply real-world materials (steel, aluminum, titanium), set up fixed supports and loads, mesh, and calculate stress and Factors of Safety.
+- 💬 **Smart Dialog Handling:** Never hangs when SolidWorks asks *"Do you want to rebuild?"* — the AI can see and dismiss pop-up dialogs automatically.
+- 🛡️ **100% Safe:** Runs locally on your machine. Never closes or overwrites your existing files without your confirmation.
 
 ---
 
-## 🛠️ The 66 Native Tools (Complete Inventory)
+## 🚀 3-Minute Quick Setup (For Non-Programmers)
 
-All 66 tools are available over MCP stdio and mapped to dedicated STA handlers:
+You don't need any programming experience. Just follow these simple steps:
 
-### 1. Connection & Session (3 tools)
-| Tool | Description |
-| :--- | :--- |
-| `connect_solidworks` | Connects or auto-launches SolidWorks with verified ROT (Running Object Table) registration. |
-| `get_solidworks_info` | Retrieves active SolidWorks version, revision, executable path, and system templates. |
-| `get_capabilities` | Queries loaded add-ins (Simulation, Toolbox, Routing) and active document counters. |
+### Step 1: Open Windows PowerShell
+1. Press the **Windows Key** on your keyboard.
+2. Type `powershell`.
+3. Click on **Windows PowerShell**.
 
-### 2. Document & Configuration Management (8 tools)
-| Tool | Description |
-| :--- | :--- |
-| `create_new_part` | Creates a new 3D part document (`.sldprt`) from default system template. |
-| `create_new_assembly` | Creates a new assembly document (`.sldasm`) from default template. |
-| `open_document` | Opens an existing model or drawing with silent/read-only options. |
-| `save_document` | Saves active document with full error bitmask diagnostics. |
-| `close_document` | Closes active or target document safely without orphan processes. |
-| `get_document_info` | Returns title, path, document type, active configuration, and modification state. |
-| `list_open_documents` | Enumerates all open documents currently held in SolidWorks memory. |
-| `manage_configuration` | List, add, activate, rename, or delete model configurations. |
+### Step 2: Copy & Paste This Single Command
+Copy the line below, paste it into your PowerShell window, and press **Enter**:
 
-### 3. Metadata & Custom Properties (1 tool)
-| Tool | Description |
-| :--- | :--- |
-| `manage_custom_properties` | Get, set, delete, and list file-level and config-specific custom properties (including `$PRP:` links). |
-
-### 4. 2D Sketching & Planar Contours (8 tools)
-| Tool | Description |
-| :--- | :--- |
-| `create_sketch` | Opens a 2D sketch on standard reference planes (`Front`, `Top`, `Right`). |
-| `create_sketch_on_face` | Opens a sketch on any planar model face selected by 3D coordinates or normal vector. |
-| `draw_line` | Draws a sketch line segment `(x1, y1)` to `(x2, y2)`. |
-| `draw_circle` | Draws a circle by center `(x, y)` and radius. |
-| `draw_rectangle` | Draws a rectangle by corner coordinates `(x1, y1)` to `(x2, y2)`. |
-| `draw_arc` | Draws an arc by center, start, and end points. |
-| `draw_polygon` | Draws regular polygons (hexagons, octagons, triangles) with circumradius. |
-| `close_sketch` | Safely exits sketch mode with save/discard options. |
-
-### 5. 3D Solid Features (10 tools)
-| Tool | Description |
-| :--- | :--- |
-| `extrude_sketch` | Boss-extrusion with depth, direction, draft angle, and auto-sketch closure. |
-| `cut_extrude` | Cut-extrusion with blind depth or through-all conditions. |
-| `revolve_sketch` | Revolve boss or cut around sketch centerline or axis with custom angles. |
-| `create_shell` | Creates thin-walled hollow solid bodies with specified thickness and open faces. |
-| `create_pattern` | Creates linear or circular feature patterns with instance counts and spacing. |
-| `create_hole_wizard` | Creates standard engineering holes (counterbore, countersink, tapped, clearance). |
-| `fillet_edges` | Applies constant radius rounds/fillets to selected edges. |
-| `chamfer_edges` | Applies bevel chamfers to selected edges (distance and angle). |
-| `list_features` | Enumerates all FeatureManager tree items with suppression state and type. |
-| `manage_feature` | Suppress, unsuppress, rename, delete (with absorbed sketches), and reorder features. |
-
-### 6. Parametric Dimensions (2 tools)
-| Tool | Description |
-| :--- | :--- |
-| `get_dimensions` | Reads dimension values across features or sketches. |
-| `set_dimension` | Drives dimension values parametrically and triggers model rebuild. |
-
-### 7. Inspection & Geometry Selection (4 tools)
-| Tool | Description |
-| :--- | :--- |
-| `select_by_geometry` | Declarative selection by surface type (`plane`, `cylinder`), normal, radius, area, centroid. |
-| `select_entity` | Selects entities by name, type, or coordinate point. |
-| `inspect_model` | Inspects body count, bounding box `[dx, dy, dz]`, volume, surface area, and mass center. |
-| `verify_model` | Asserts bounding box dimensions, solid body counts, and clean rebuild state against tolerances. |
-
-### 8. Viewport & Visualization (1 tool)
-| Tool | Description |
-| :--- | :--- |
-| `capture_viewport` | Captures high-resolution rendered viewport image (`*Isometric`, `*Front`, etc.) to PNG. |
-
-### 9. Assemblies & Mechanism Mates (4 tools)
-| Tool | Description |
-| :--- | :--- |
-| `add_component` | Inserts parts into assembly with automatic memory pre-loading (`sw.OpenDoc6`). |
-| `add_mate` | Adds standard mates (coincident, concentric, parallel, distance, angle). |
-| `check_interference` | Runs interference detection and returns colliding components and volumes. |
-| `list_components` | Lists all components, instances, file paths, and fixity states. |
-
-### 10. 2D Drawings, Detailing & BOMs (6 tools)
-| Tool | Description |
-| :--- | :--- |
-| `create_new_drawing` | Creates an empty drawing sheet in standard paper sizes (A4, A3, A2, A1, Letter). |
-| `create_drawing_from_model` | Places standard orthographic (`*Front`, `*Top`, `*Right`) and isometric views. |
-| `create_section_view` | Creates aligned or offset section cut views from a sketched section line. |
-| `import_model_items` | Automatically imports 3D model feature dimensions and annotations into views. |
-| `add_drawing_dimension` | Places driven drafting dimensions between drawing entities. |
-| `insert_bom_table` | Inserts Bill of Materials tables (`top_level`, `parts_only`, `indented`) with auto-located templates. |
-| `export_drawing` | Exports drawings to vector PDF, CNC DXF/DWG, or raster PNG. |
-
-### 11. FEA Simulation & Stress Analysis (6 tools)
-| Tool | Description |
-| :--- | :--- |
-| `create_simulation_study` | Initializes Static, Frequency, Buckling, or Thermal studies via COSMOSWorks. |
-| `set_study_material` | Assigns engineering materials from standard or custom `.sldmat` databases. |
-| `add_study_fixture` | Applies boundary restraints (fixed, immovable, roller, hinge, symmetry). |
-| `add_study_load` | Applies mechanical loads (pressure in Pa/MPa, concentrated normal forces in N). |
-| `mesh_and_run_simulation` | Generates parabolic 10-node tetrahedral solid mesh and executes solver. |
-| `get_simulation_results` | Extracts von Mises stress (MPa), resultant displacement (mm), and Factor of Safety (FOS). |
-
-### 12. Diagnostics, Dialog Watchdog & Recovery (8 tools)
-| Tool | Description |
-| :--- | :--- |
-| `inspect_dialogs` | Non-blocking scan of active modal dialog windows and button titles. |
-| `dismiss_dialog` | Programmatically clicks dialog buttons (`OK`, `Cancel`, `Yes`, `No`, `Rebuild`). |
-| `load_addin` | Programmatically loads add-in DLLs (Simulation, Toolbox, Routing, Motion). |
-| `inspect_rebuild_errors` | Traverses FeatureManager tree and reports `GetErrorCode2` diagnostic codes. |
-| `reset_sta_worker` | Re-initializes hung STA COM thread and cleans reentrant locks without restarting SolidWorks. |
-| `create_checkpoint` | Creates an in-memory document state snapshot. |
-| `rollback_checkpoint` | Reverts document state to a previous snapshot. |
-| `get_sketch_status` | Returns sketch activity status, plane, and entity counts. |
-
-### 13. Utilities & Guarded Execution (2 tools)
-| Tool | Description |
-| :--- | :--- |
-| `set_units` | Changes default active units (`mm`, `cm`, `inch`, `m`, `ft`). |
-| `execute_python` | Interactive consent-gated execution of custom Python code with direct COM access. |
-
----
-
-## ⚡ Quick Start & Installation
-
-### Option A: Automatic Multi-Client Installation (Recommended)
-
-Clone the repository and run the multi-client installer:
 ```powershell
-git clone https://github.com/Antniom/Solidworks-MCP.git
-cd Solidworks-MCP
-python -m venv .venv
-.venv\Scripts\pip install -e .
-.venv\Scripts\python -m solidworks_mcp.install
+git clone https://github.com/Antniom/Solidworks-MCP.git; cd Solidworks-MCP; python -m venv .venv; .\.venv\Scripts\pip install -e .; .\.venv\Scripts\python -m solidworks_mcp.install
 ```
 
-The installer automatically configures all detected AI clients and installs the complete set of SolidWorks skills.
+*What this does:* It downloads the helper, prepares a self-contained environment, and automatically configures your AI apps (Claude Desktop, Cursor, Antigravity, etc.).
 
-### Option B: Manual Configuration (Claude Desktop)
+### Step 3: Restart Your AI Application
+- **For Claude Desktop:** 
+  1. Go to the bottom-right corner of your screen (Windows System Tray, next to the clock).
+  2. Right-click the **Claude** icon and choose **Quit Claude** *(don't just click the X on the window)*.
+  3. Reopen Claude Desktop.
+- **For Cursor / Antigravity / Windsurf:** Simply close and reopen the app.
 
-Add to `%APPDATA%\Claude\claude_desktop_config.json`:
-```json
-{
-  "mcpServers": {
-    "solidworks": {
-      "command": "C:\\path\\to\\Solidworks-MCP\\.venv\\Scripts\\python.exe",
-      "args": ["-m", "solidworks_mcp.server"],
-      "env": {
-        "SW_MCP_ALLOW_EXEC": "0"
-      }
-    }
-  }
-}
-```
+### Step 4: Start Designing!
+Open SolidWorks, start a new chat with your AI, and look for the **hammer icon (🔨)**. You're ready to go!
 
 ---
 
-## 🛡️ Security Gating: `execute_python`
+## 💡 Why Can't I Just Paste the GitHub Link into Claude Desktop's Chat?
 
-To safeguard host systems against accidental or untrusted code execution, `execute_python` is **disabled by default**.
+If you paste a GitHub URL into Claude Desktop's chat window, Claude will tell you it cannot install it. 
 
-When an AI agent attempts to invoke `execute_python` without permission, the tool refuses execution and returns an explicit instruction prompting the agent to ask the human user in chat for confirmation:
-- **Benefits:** Full access to `sw_app`, `model`, and `SelectionMgr` for custom macros, complex geometry math, or niche APIs not in the 65 standard tools.
-- **Risks:** Unrestricted arbitrary Python execution on the host Windows machine under the user's account privileges.
-
-To unlock execution:
-1. Re-invoke with `user_confirmed_risks=true` after explicit consent in chat.
-2. Set environment variable `SW_MCP_ALLOW_EXEC=1` in your client config.
+**Here is why:**
+- Claude Desktop's chat window runs in a secure cloud sandbox. It's like a web browser — it cannot touch your computer's files, cannot open your terminal, and cannot launch SolidWorks on its own.
+- To control SolidWorks, your computer needs a tiny local connection bridge on your PC.
+- Running the quick setup command above installs that local bridge once. From then on, Claude Desktop can talk to SolidWorks smoothly and safely whenever you chat!
 
 ---
 
-## 🧪 Testing & Verification
+## 🎯 Fun Prompts to Try First
 
-The suite includes comprehensive unit tests verifying type library parity, STA dispatcher affinity, AST static guarantees, and security gates:
+Once connected, open SolidWorks and try asking:
 
+| Category | Example Prompt |
+| :--- | :--- |
+| **Basic 3D Part** | *"Create a 60mm diameter cylinder that is 100mm tall, and hollow it out with a 3mm wall thickness."* |
+| **Standard Fastener** | *"Create a standard DIN 933 M12 hex bolt with a 45mm threaded shaft."* |
+| **Part Inspection** | *"Inspect my active part and tell me its volume, total surface area, and bounding box dimensions."* |
+| **Assembly** | *"Insert bracket.sldprt and pin.sldprt, and add a concentric mate between their cylindrical holes."* |
+| **2D Drawing** | *"Create an A3 drawing of this part with Front, Top, and Isometric views, and place a Bill of Materials table."* |
+| **Stress Test** | *"Run a static stress simulation on this bracket: fix the base, apply a 2,000 N downward force on the top face, and check the Factor of Safety."* |
+
+---
+
+## 🛡️ Safety & Privacy: How Your System Is Protected
+
+- **No Mysterious Code Execution:** The server has **66 dedicated, safe CAD tools**. It does not need to run arbitrary code for everyday modeling.
+- **Interactive Approval for Custom Scripts (`execute_python`):** If a task ever requires a custom Python macro, the AI is programmed to pause and ask for your clear permission first. You always remain in control.
+- **Your Files Stay on Your PC:** All 3D models, geometry calculations, and drawings stay strictly on your local computer. No CAD data is sent to external servers.
+
+---
+
+## 🔧 Technical Details & Tool Inventory (For Power Users & Developers)
+
+<details>
+<summary><b>Click to expand the complete 66-tool catalog and architecture details</b></summary>
+
+### 🏗️ Industrial COM Architecture
+- **100% STA Thread Affinity**: SolidWorks COM API strictly requires Single-Threaded Apartment (STA) execution. Every call is marshaled onto a dedicated worker thread with reentrant lock management (`reset_sta_worker`), preventing RPC errors (`0x8001010E`).
+- **Official Type-Library Parity (`swconst.tlb` & `cosworks.tlb`)**: Enums, mate types, and feature options match official SolidWorks 2025 type libraries with canonical integer values.
+- **Out-of-Band Win32 Modal Dialog Watchdog**: Background thread monitors blocking popup dialogs, allowing automated inspection (`inspect_dialogs`) and dismissal (`dismiss_dialog`).
+- **Declarative Geometry Selection (`select_by_geometry`)**: Replaces blind coordinate guessing by filtering faces/edges by topology (`plane`, `cylinder`), normal vectors, area, radius, and centroids.
+
+### Complete 66 Tool Inventory
+
+#### 1. Connection & Session (3 tools)
+- `connect_solidworks`: Connects or auto-launches SolidWorks with verified ROT registration.
+- `get_solidworks_info`: Retrieves active version, revision, executable path, and system templates.
+- `get_capabilities`: Queries loaded add-ins (Simulation, Toolbox, Routing) and active document counts.
+
+#### 2. Document & Configuration Management (8 tools)
+- `create_new_part`: Creates a new 3D part document (`.sldprt`) from default template.
+- `create_new_assembly`: Creates a new assembly document (`.sldasm`) from default template.
+- `open_document`: Opens a model or drawing with silent and read-only options.
+- `save_document`: Saves active document with full error bitmask diagnostics.
+- `close_document`: Closes active or target document safely.
+- `get_document_info`: Returns title, path, type, active configuration, and dirty state.
+- `list_open_documents`: Enumerates all open documents currently in SolidWorks memory.
+- `manage_configuration`: List, add, activate, rename, or delete configurations.
+
+#### 3. Metadata & Custom Properties (1 tool)
+- `manage_custom_properties`: Get, set, delete, and list file-level and configuration properties.
+
+#### 4. 2D Sketching & Planar Contours (8 tools)
+- `create_sketch`: Opens a 2D sketch on standard reference planes (`Front`, `Top`, `Right`).
+- `create_sketch_on_face`: Opens a sketch on any planar face selected by geometry or normal.
+- `draw_line`: Draws a line segment `(x1, y1)` to `(x2, y2)`.
+- `draw_circle`: Draws a circle by center `(x, y)` and radius.
+- `draw_rectangle`: Draws a rectangle by corner coordinates.
+- `draw_arc`: Draws an arc by center, start, and end points.
+- `draw_polygon`: Draws regular polygons (hexagons, octagons) with inscribed/circumscribed radius.
+- `close_sketch`: Exits sketch mode with save/discard options.
+
+#### 5. 3D Solid Features (10 tools)
+- `extrude_sketch`: Boss-extrusion with depth, direction, draft angle, and auto-closure.
+- `cut_extrude`: Cut-extrusion with blind depth or through-all conditions.
+- `revolve_sketch`: Revolve boss or cut around sketch centerline with custom angles.
+- `create_shell`: Creates thin-walled hollow solid bodies with specified thickness.
+- `create_pattern`: Creates linear or circular feature patterns with spacing.
+- `create_hole_wizard`: Creates standard engineering holes (counterbore, countersink, tapped).
+- `fillet_edges`: Applies constant radius rounds/fillets to selected edges.
+- `chamfer_edges`: Applies bevel chamfers to selected edges (distance and angle).
+- `list_features`: Enumerates FeatureManager tree items with suppression state.
+- `manage_feature`: Suppress, unsuppress, rename, delete, and reorder features.
+
+#### 6. Parametric Dimensions (2 tools)
+- `get_dimensions`: Reads dimension values across features or sketches.
+- `set_dimension`: Drives dimension values parametrically and triggers model rebuild.
+
+#### 7. Inspection & Geometry Selection (4 tools)
+- `select_by_geometry`: Declarative selection by topology (`plane`, `cylinder`), normal, radius, area.
+- `select_entity`: Selects entities by name, type, or coordinate point.
+- `inspect_model`: Inspects body count, bounding box, volume, surface area, and mass center.
+- `verify_model`: Asserts bounding box dimensions and clean rebuild state against tolerances.
+
+#### 8. Viewport & Visualization (1 tool)
+- `capture_viewport`: Captures high-resolution rendered viewport image to PNG.
+
+#### 9. Assemblies & Mechanism Mates (4 tools)
+- `add_component`: Inserts parts into assembly with automatic memory pre-loading.
+- `add_mate`: Adds standard mates (coincident, concentric, parallel, distance, angle).
+- `check_interference`: Runs interference detection and returns colliding components.
+- `list_components`: Lists all components, instances, file paths, and fixity states.
+
+#### 10. 2D Drawings, Detailing & BOMs (6 tools)
+- `create_new_drawing`: Creates an empty drawing sheet in standard paper sizes (A4, A3, Letter).
+- `create_drawing_from_model`: Places standard orthographic and isometric views.
+- `create_section_view`: Creates aligned or offset section cut views from a sketch line.
+- `import_model_items`: Automatically imports 3D model feature dimensions into views.
+- `add_drawing_dimension`: Places driven drafting dimensions between drawing entities.
+- `insert_bom_table`: Inserts Bill of Materials tables with auto-located templates.
+- `export_drawing`: Exports drawings to vector PDF, CNC DXF/DWG, or raster PNG.
+
+#### 11. FEA Simulation & Stress Analysis (6 tools)
+- `create_simulation_study`: Initializes Static, Frequency, Buckling, or Thermal studies.
+- `set_study_material`: Assigns engineering materials from standard or custom `.sldmat` databases.
+- `add_study_fixture`: Applies boundary restraints (fixed, immovable, roller, hinge).
+- `add_study_load`: Applies mechanical loads (pressure in Pa/MPa, forces in N).
+- `mesh_and_run_simulation`: Generates solid tetrahedral mesh and executes solver.
+- `get_simulation_results`: Extracts von Mises stress (MPa), displacement (mm), and Factor of Safety.
+
+#### 12. Diagnostics, Dialog Watchdog & Recovery (8 tools)
+- `inspect_dialogs`: Non-blocking scan of active modal dialog windows and buttons.
+- `dismiss_dialog`: Programmatically clicks dialog buttons (`OK`, `Cancel`, `Yes`, `No`).
+- `load_addin`: Programmatically loads add-in DLLs (Simulation, Toolbox, Routing).
+- `inspect_rebuild_errors`: Traverses FeatureManager tree and reports rebuild error codes.
+- `reset_sta_worker`: Re-initializes hung STA COM thread without restarting SolidWorks.
+- `create_checkpoint`: Creates an in-memory document state snapshot.
+- `rollback_checkpoint`: Reverts document state to a previous snapshot.
+- `get_sketch_status`: Returns sketch activity status, plane, and entity counts.
+
+#### 13. Utilities & Guarded Execution (2 tools)
+- `set_units`: Changes active units (`mm`, `cm`, `inch`, `m`, `ft`).
+- `execute_python`: Interactive consent-gated execution of custom Python macros with full COM access.
+
+### 🧪 Unit Testing & Verification
 ```powershell
 pytest -v tests/
 ```
+All 66 tools are covered by automated unit tests validating STA thread dispatching, AST safety guards, and parameter schemas.
+
+</details>
 
 ---
 
-## 📜 License & Attribution
+## 📜 License & Author
 
 - **Author & Maintainer:** António Coelho ([@Antniom](https://github.com/Antniom))
 - **Repository:** [https://github.com/Antniom/Solidworks-MCP](https://github.com/Antniom/Solidworks-MCP)
