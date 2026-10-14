@@ -572,3 +572,77 @@ class SketchOperations:
         except Exception as e:
             logger.error(f"Draw centerline error: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Error: {e}", SwErrors.swSketchError)
+
+    def draw_text(self, text: str, x: float = 0.0, y: float = 0.0,
+                  height: float = 12.0, font_name: str = "Segoe UI",
+                  bold: bool = True, italic: bool = False,
+                  unit: str = None) -> Dict:
+        """
+        Draw sketch text in the active sketch
+        
+        Args:
+            text: String text to insert (supports \n for multi-line)
+            x, y: Placement coordinates (origin of text)
+            height: Font character height in units (default mm)
+            font_name: Font typeface name (default 'Segoe UI')
+            bold: Bold formatting
+            italic: Italic formatting
+            unit: Unit for coordinates and height (default active unit)
+        
+        Returns:
+            Result dictionary
+        """
+        try:
+            doc, err = self.get_active_doc()
+            if err:
+                return err
+
+            sk_err = self._require_active_sketch_in_3d(doc)
+            if sk_err:
+                return sk_err
+
+            if not text:
+                return self._result(
+                    False,
+                    "Text parameter cannot be empty.",
+                    SwErrors.swInvalidParameter,
+                )
+
+            # Convert coordinates and height to meters
+            x_m = self._units.to_meters(x, unit)
+            y_m = self._units.to_meters(y, unit)
+            height_m = self._units.to_meters(height, unit)
+
+            # Insert sketch text via ModelDoc2::InsertSketchText
+            sketch_text = doc.InsertSketchText(x_m, y_m, 0.0, text, 0, 0, 0, 100, 100)
+            if sketch_text is None:
+                return self._result(
+                    False,
+                    "Failed to insert sketch text - ensure sketch is active",
+                    SwErrors.swSketchError,
+                )
+
+            # Customize font format if supported
+            try:
+                tf = sketch_text.GetTextFormat()
+                if tf:
+                    if font_name:
+                        tf.TypeFaceName = font_name
+                    if height_m > 0:
+                        tf.CharHeight = height_m
+                    tf.Bold = bold
+                    tf.Italic = italic
+                    sketch_text.SetTextFormat(False, tf)
+            except Exception as fe:
+                logger.debug(f"Could not apply font formatting: {fe}")
+
+            unit_str = unit or self._units.default_unit.value
+            return self._result(
+                True,
+                f"Inserted sketch text: '{text[:30]}' at ({x}, {y})",
+                SwErrors.swSuccess,
+                {"text": text, "x": x, "y": y, "height": height, "font": font_name, "unit": unit_str},
+            )
+        except Exception as e:
+            logger.error(f"Draw text error: {e}\n{traceback.format_exc()}")
+            return self._result(False, f"Error: {e}", SwErrors.swSketchError)

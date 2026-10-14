@@ -244,6 +244,7 @@ def run_installer(
     client_name: Optional[str] = None,
     dry_run: bool = False,
     non_interactive: bool = False,
+    run_demo: Optional[bool] = None,
 ) -> int:
     """Execute full multi-client installation workflow."""
     if hasattr(sys.stdout, "reconfigure"):
@@ -313,6 +314,41 @@ def run_installer(
     print(f" [OK] Installation complete: {success_count}/{len(detected)} clients configured.")
     print(f" [*] Bundled SolidWorks skills installed across {total_skills_installed} destinations.")
     print("=" * 76)
+
+    # 3D Welcome Demonstration Hook
+    should_run_demo = False
+    if run_demo is True:
+        should_run_demo = True
+    elif run_demo is False:
+        should_run_demo = False
+    elif not dry_run:
+        try:
+            from .automation.base import find_sldworks_pids
+            sw_pids = find_sldworks_pids()
+        except Exception:
+            sw_pids = []
+
+        if sw_pids:
+            if not non_interactive and sys.stdin.isatty():
+                choice = input("\nSolidWorks is currently open! Would you like to create the 3D 'Welcome to Solidworks AI' demonstration model now? (Y/n): ").strip().lower()
+                should_run_demo = choice not in ("n", "no")
+            else:
+                should_run_demo = True
+        elif not non_interactive and sys.stdin.isatty():
+            choice = input("\nWould you like to launch SolidWorks and run the 3D 'Welcome to Solidworks AI' demonstration model? (y/N): ").strip().lower()
+            should_run_demo = choice in ("y", "yes")
+
+    if should_run_demo and not dry_run:
+        try:
+            from .welcome_demo import run_welcome_demo
+            run_welcome_demo(auto_launch=True, verbose=True)
+        except Exception as e:
+            logger.warning(f"Could not complete Welcome Demo: {e}")
+    else:
+        print("\n💡 Tip: To see your AI assistant build a 3D 'Welcome to Solidworks AI' model anytime,")
+        print("   simply open SolidWorks and run:")
+        print("     python -m solidworks_mcp.welcome_demo\n")
+
     print("To use: Restart your AI client(s) (Claude Desktop, Antigravity, Cursor, etc.).\n")
     return 0
 
@@ -325,6 +361,8 @@ def main():
     parser.add_argument("--client", type=str, default=None, help="Target a specific client by name")
     parser.add_argument("--dry-run", action="store_true", help="Preview installation without modifying files")
     parser.add_argument("--non-interactive", action="store_true", help="Run without interactive prompts")
+    parser.add_argument("--demo", action="store_true", default=None, help="Run 3D Welcome Demo in SolidWorks after installation")
+    parser.add_argument("--no-demo", action="store_false", dest="demo", help="Skip running 3D Welcome Demo")
 
     args = parser.parse_args()
     ret = run_installer(
@@ -333,6 +371,7 @@ def main():
         client_name=args.client,
         dry_run=args.dry_run,
         non_interactive=args.non_interactive,
+        run_demo=args.demo,
     )
     sys.exit(ret)
 
