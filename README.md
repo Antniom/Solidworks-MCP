@@ -83,11 +83,11 @@
 > 8. `draw_circle` `{"x": 80, "y": -22, "radius": 3.5, "unit": "mm"}`
 > 9. `extrude_sketch` `{"depth": 8, "reverse_dir": true, "unit": "mm"}`
 > 10. `create_sketch` `{"plane": "Front"}`
-> 11. `draw_text` `{"text": "SOLIDWORKS AI", "x": -68, "y": -5, "height": 13, "font_name": "Arial", "bold": true, "unit": "mm"}`
+> 11. `draw_text` `{"text": "SOLIDWORKS AI", "x": -33, "y": -7, "height": 18, "font_name": "Arial", "bold": true, "unit": "mm"}`
 > 12. `extrude_sketch` `{"depth": 3, "unit": "mm"}`
 > 13. `capture_viewport` `{"view_name": "*Isometric"}`
 >
-> *(Note: Extruding the base backward with `reverse_dir: true` leaves the Front plane flush on the front face of the plaque. Creating the text sketch on the Front plane guarantees that the 3D lettering is 100% horizontal, properly centered, and raised 3mm directly on top of the plaque face with 4 precision standoff mounting holes!)*
+> *(Note: Extruding the base backward with `reverse_dir: true` leaves the Front plane flush on the front face of the plaque. Creating the text sketch on the Front plane guarantees that the 3D lettering is 100% horizontal, properly centered at (x: -33, y: -7, height: 18), and raised 3mm directly on top of the plaque face with 4 precision standoff mounting holes!)*
 >
 > When done, announce the surprise:
 > 💬 *"🎉 Surprise! Welcome to SolidWorks AI — I just created a custom executive 3D display plaque live in SolidWorks with corner standoff mounts to verify our new connection!"*

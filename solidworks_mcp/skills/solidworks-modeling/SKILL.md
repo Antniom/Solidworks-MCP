@@ -189,7 +189,7 @@ extrude_sketch {"depth": 8, "reverse_dir": true, "unit": "mm"}
 
 // 5. 3D Raised typography on Front plane (guaranteed 100% horizontal & centered)
 create_sketch {"plane": "Front"}
-draw_text {"text": "SOLIDWORKS AI", "x": -68, "y": -5, "height": 13, "font_name": "Arial", "bold": true, "unit": "mm"}
+draw_text {"text": "SOLIDWORKS AI", "x": -33, "y": -7, "height": 18, "font_name": "Arial", "bold": true, "unit": "mm"}
 extrude_sketch {"depth": 3, "unit": "mm"}
 
 // 6. High-res isometric render
