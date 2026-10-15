@@ -336,6 +336,8 @@ def _tool_definitions() -> list[Tool]:
                     "font_name": {"type": "string", "default": "Segoe UI", "description": "Font typeface name (default 'Segoe UI')"},
                     "bold": {"type": "boolean", "default": True, "description": "Bold text style"},
                     "italic": {"type": "boolean", "default": False, "description": "Italic text style"},
+                    "angle": {"type": "number", "default": 0, "description": "Text rotation angle in degrees (e.g. 0, 90, 180, 270)"},
+                    "center": {"type": "boolean", "default": False, "description": "Center-align text horizontally"},
                     "unit": {"type": "string", "description": "Unit for coordinates and height (e.g. 'mm')"}
                 },
                 "required": ["text"]
@@ -351,6 +353,7 @@ def _tool_definitions() -> list[Tool]:
                 "properties": {
                     "depth": {"type": "number", "default": 10, "description": "Extrusion depth"},
                     "both_directions": {"type": "boolean", "default": False, "description": "Extrude in both directions"},
+                    "reverse_dir": {"type": "boolean", "default": False, "description": "Reverse extrusion direction (extrude backward)"},
                     "unit": {"type": "string", "description": "Unit"}
                 },
                 "required": []
@@ -1399,6 +1402,8 @@ def _dispatch_tool(name: str, arguments: dict) -> Dict[str, Any]:
             font_name=arguments.get("font_name", "Segoe UI"),
             bold=arguments.get("bold", True),
             italic=arguments.get("italic", False),
+            angle=arguments.get("angle", 0.0),
+            center=arguments.get("center", False),
             unit=arguments.get("unit"),
         )
     
@@ -1407,6 +1412,7 @@ def _dispatch_tool(name: str, arguments: dict) -> Dict[str, Any]:
         result = sw_automation.extrude_sketch(
             arguments.get("depth", 10),
             arguments.get("both_directions", False),
+            arguments.get("reverse_dir", False),
             arguments.get("unit")
         )
     

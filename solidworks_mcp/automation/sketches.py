@@ -576,6 +576,7 @@ class SketchOperations:
     def draw_text(self, text: str, x: float = 0.0, y: float = 0.0,
                   height: float = 12.0, font_name: str = "Segoe UI",
                   bold: bool = True, italic: bool = False,
+                  angle: float = 0.0, center: bool = False,
                   unit: str = None) -> Dict:
         """
         Draw sketch text in the active sketch
@@ -587,6 +588,8 @@ class SketchOperations:
             font_name: Font typeface name (default 'Segoe UI')
             bold: Bold formatting
             italic: Italic formatting
+            angle: Text rotation angle in degrees (e.g. 0, 90, 180, 270)
+            center: Center-align text horizontally
             unit: Unit for coordinates and height (default active unit)
         
         Returns:
@@ -613,8 +616,11 @@ class SketchOperations:
             y_m = self._units.to_meters(y, unit)
             height_m = self._units.to_meters(height, unit)
 
+            formatted_text = f"<r{int(angle)}>{text}" if angle != 0.0 else text
+            alignment = 1 if center else 0
+
             # Insert sketch text via ModelDoc2::InsertSketchText
-            sketch_text = doc.InsertSketchText(x_m, y_m, 0.0, text, 0, 0, 0, 100, 100)
+            sketch_text = doc.InsertSketchText(x_m, y_m, 0.0, formatted_text, alignment, 0, 0, 100, 100)
             if sketch_text is None:
                 return self._result(
                     False,
@@ -641,7 +647,7 @@ class SketchOperations:
                 True,
                 f"Inserted sketch text: '{text[:30]}' at ({x}, {y})",
                 SwErrors.swSuccess,
-                {"text": text, "x": x, "y": y, "height": height, "font": font_name, "unit": unit_str},
+                {"text": text, "x": x, "y": y, "height": height, "font": font_name, "angle": angle, "center": center, "unit": unit_str},
             )
         except Exception as e:
             logger.error(f"Draw text error: {e}\n{traceback.format_exc()}")

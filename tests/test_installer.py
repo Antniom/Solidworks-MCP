@@ -72,3 +72,20 @@ def test_register_mcp_server_updates_extra_paths(tmp_path: Path):
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
             assert "solidworks" in data["mcpServers"]
+
+
+def test_text_and_extrude_parameters():
+    """Verify new reverse_dir, angle, and center properties exist in server tool schemas."""
+    from solidworks_mcp.server import _tool_definitions
+    tools = {t.name: t for t in _tool_definitions()}
+    
+    assert "extrude_sketch" in tools
+    extrude_props = tools["extrude_sketch"].input_schema["properties"]
+    assert "reverse_dir" in extrude_props
+    assert extrude_props["reverse_dir"]["type"] == "boolean"
+    
+    assert "draw_text" in tools
+    text_props = tools["draw_text"].input_schema["properties"]
+    assert "angle" in text_props
+    assert "center" in text_props
+

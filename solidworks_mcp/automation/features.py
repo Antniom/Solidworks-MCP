@@ -169,7 +169,7 @@ class FeatureOperations:
     # ========================================================================
     
     def extrude_sketch(self, depth: float = 10, both_directions: bool = False,
-                       unit: str = None) -> Dict:
+                       reverse_dir: bool = False, unit: str = None) -> Dict:
         """
         Extrude the active sketch (Boss-Extrude)
         FIXED v4.0: Properly closes sketch, selects it, uses 23-param FeatureExtrusion2
@@ -177,6 +177,7 @@ class FeatureOperations:
         Args:
             depth: Extrusion depth
             both_directions: Extrude in both directions (mid-plane)
+            reverse_dir: Reverse extrusion direction (extrude backward)
             unit: Unit for depth
         
         Returns:
@@ -224,7 +225,7 @@ class FeatureOperations:
                 feat = doc.FeatureManager.FeatureExtrusion2(
                     True,           # Sd - single direction
                     False,          # Flip
-                    False,          # Dir - direction
+                    bool(reverse_dir),  # Dir - direction (True = reverse)
                     end_cond,       # T1 - end condition (0=Blind, 6=MidPlane)
                     0,              # T2 - end condition 2
                     depth_m,        # D1 - depth
@@ -255,7 +256,7 @@ class FeatureOperations:
             if feat is None:
                 try:
                     feat = doc.FeatureManager.FeatureExtrusion3(
-                        True, False, False, end_cond, 0,
+                        True, False, bool(reverse_dir), end_cond, 0,
                         depth_m, depth_m,
                         False, False, False, False,
                         0.0, 0.0,
