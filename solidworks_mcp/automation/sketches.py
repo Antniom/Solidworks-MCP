@@ -630,7 +630,20 @@ class SketchOperations:
 
             # Customize font format if supported
             try:
-                tf = sketch_text.GetTextFormat()
+                tf = None
+                ole = getattr(sketch_text, "_oleobj_", None)
+                if ole is not None:
+                    # ISketchText::GetTextFormat is DISPID 8 in SolidWorks COM API
+                    try:
+                        tf_disp = ole.Invoke(8, 0, pythoncom.DISPATCH_METHOD, True)
+                        tf = win32com.client.Dispatch(tf_disp)
+                    except Exception:
+                        get_tf = getattr(sketch_text, "GetTextFormat", None)
+                        tf = get_tf() if callable(get_tf) else get_tf
+                else:
+                    get_tf = getattr(sketch_text, "GetTextFormat", None)
+                    tf = get_tf() if callable(get_tf) else get_tf
+
                 if tf:
                     if font_name:
                         tf.TypeFaceName = font_name
@@ -638,7 +651,19 @@ class SketchOperations:
                         tf.CharHeight = height_m
                     tf.Bold = bold
                     tf.Italic = italic
-                    sketch_text.SetTextFormat(False, tf)
+                    if ole is not None:
+                        # ISketchText::SetTextFormat is DISPID 10: SetTextFormat(UseDoc: False, TextFormat: IDispatch)
+                        try:
+                            tf_ole = getattr(tf, "_oleobj_", tf)
+                            ole.Invoke(10, 0, pythoncom.DISPATCH_METHOD, True, False, tf_ole)
+                        except Exception:
+                            set_tf = getattr(sketch_text, "SetTextFormat", None)
+                            if callable(set_tf):
+                                set_tf(False, tf)
+                    else:
+                        set_tf = getattr(sketch_text, "SetTextFormat", None)
+                        if callable(set_tf):
+                            set_tf(False, tf)
             except Exception as fe:
                 logger.debug(f"Could not apply font formatting: {fe}")
 
