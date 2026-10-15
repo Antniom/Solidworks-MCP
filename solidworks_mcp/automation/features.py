@@ -17,7 +17,7 @@ Fixes v4.0.0:
 
 import logging
 import traceback
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 import win32com.client
 import pythoncom
@@ -1173,12 +1173,13 @@ class FeatureOperations:
         delete_absorbed: bool = True,
         delete_children: bool = False,
         config_scope: int = 1,
+        color_rgb: Optional[List[int]] = None,
     ) -> Dict:
         """
-        Manage feature tree operations: suppress, unsuppress, rename, delete, reorder.
+        Manage feature tree operations: suppress, unsuppress, rename, delete, reorder, set_color.
 
         Args:
-            action: 'suppress', 'unsuppress', 'rename', 'delete', 'reorder'
+            action: 'suppress', 'unsuppress', 'rename', 'delete', 'reorder', 'set_color'
             feature_name: Name of feature to operate on
             new_name: New feature name for 'rename' action
             target_feature: Target feature name for 'reorder' action
@@ -1186,6 +1187,7 @@ class FeatureOperations:
             delete_absorbed: Delete absorbed sketches/features on delete (default True)
             delete_children: Delete child features on delete (default False)
             config_scope: Suppression scope: 1=ThisConfiguration, 2=AllConfigurations (default 1)
+            color_rgb: RGB color [R, G, B] with integer values 0-255 for 'set_color' action
         """
         try:
             doc, err = self.get_active_doc()
@@ -1201,10 +1203,10 @@ class FeatureOperations:
                 )
 
             action_clean = (action or "").strip().lower()
-            if action_clean not in ("suppress", "unsuppress", "rename", "delete", "reorder"):
+            if action_clean not in ("suppress", "unsuppress", "rename", "delete", "reorder", "set_color"):
                 return self._result(
                     False,
-                    f"Invalid action '{action}'. Valid actions: 'suppress', 'unsuppress', 'rename', 'delete', 'reorder'.",
+                    f"Invalid action '{action}'. Valid actions: 'suppress', 'unsuppress', 'rename', 'delete', 'reorder', 'set_color'.",
                     SwErrors.swInvalidInput,
                 )
 
@@ -1364,6 +1366,40 @@ class FeatureOperations:
                     SwErrors.swSuccess,
                     {"feature": target_feat_name, "target_feature": tgt_name, "location": move_location},
                 )
+
+            elif action_clean == "set_color":
+                if not color_rgb or len(color_rgb) < 3:
+                    return self._result(
+                        False,
+                        "Action 'set_color' requires color_rgb=[R, G, B] (integers 0-255)",
+                        SwErrors.swInvalidInput,
+                    )
+                try:
+                    r_val = max(0.0, min(1.0, float(color_rgb[0]) / 255.0))
+                    g_val = max(0.0, min(1.0, float(color_rgb[1]) / 255.0))
+                    b_val = max(0.0, min(1.0, float(color_rgb[2]) / 255.0))
+
+                    import pythoncom, win32com.client
+                    arr = win32com.client.VARIANT(
+                        pythoncom.VT_ARRAY | pythoncom.VT_R8,
+                        [r_val, g_val, b_val, 0.5, 0.6, 0.4, 0.3, 0.0, 0.0]
+                    )
+                    null_callout = null_dispatch()
+                    feat.SetMaterialPropertyValues2(arr, config_scope, null_callout)
+                    get_attr_or_call(doc, "GraphicsRedraw2")
+
+                    return self._result(
+                        True,
+                        f"Successfully applied color RGB {color_rgb} to feature '{target_feat_name}'",
+                        SwErrors.swSuccess,
+                        {"feature": target_feat_name, "color_rgb": color_rgb},
+                    )
+                except Exception as ce:
+                    return self._result(
+                        False,
+                        f"Failed to set color on feature '{target_feat_name}': {ce}",
+                        SwErrors.swFeatureError,
+                    )
 
         except Exception as e:
             logger.error(f"manage_feature error: {e}\n{traceback.format_exc()}")

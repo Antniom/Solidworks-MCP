@@ -90,7 +90,7 @@ For dialog recovery and rebuild diagnostics, see `solidworks-diagnostics`.
 - `fillet_edges {"radius": float, "unit": "mm"}`: Blends currently selected edges with constant radius fillet.
 - `chamfer_edges {"distance": float, "angle": float, "unit": "mm"}`: Breaks currently selected edges with bevel chamfer (default 45 degrees).
 - `manage_feature`:
-  - `"action"`: `"suppress"`, `"unsuppress"`, `"rename"`, `"delete"`, `"reorder"`
+  - `"action"`: `"suppress"`, `"unsuppress"`, `"rename"`, `"delete"`, `"reorder"`, `"set_color"`
   - `"feature_name"`: Name of target feature in FeatureManager tree
   - `"new_name"`: (For rename) New feature name
   - `"target_feature"`: (For reorder) Target feature name to move relative to
@@ -98,6 +98,7 @@ For dialog recovery and rebuild diagnostics, see `solidworks-diagnostics`.
   - `"delete_absorbed"`: (For delete) If `true`, deletes absorbed child sketches (default `true`)
   - `"delete_children"`: (For delete) Delete dependent child features (default `false`)
   - `"config_scope"`: Suppression scope: `1` = ThisConfiguration, `2` = AllConfigurations
+  - `"color_rgb"`: (For set_color) RGB integer array `[R, G, B]` with values 0-255
 
 ### 4. Declarative Geometric Selection (`select_by_geometry`)
 Never guess blind coordinates or trial-and-error click points. Use `select_by_geometry` to query and select entities programmatically:
@@ -167,7 +168,7 @@ search_knowledge {"query": "setup"}
 set_units {"unit": "mm"}
 ```
 
-#### Phase B: Executive 3D Plaque Demonstration (100% Horizontal, Raised 3D Letters)
+#### Phase B: Standalone 3D Red Typography Demonstration (Centered, Bold, Extruded Red)
 Once authorized, execute this exact sequence live in SolidWorks:
 ```json
 // 1. Connect & bring SolidWorks to desktop foreground
@@ -176,23 +177,19 @@ connect_solidworks {}
 // 2. Initialize fresh part
 create_new_part {}
 
-// 3. Base plaque with 4 precision standoff mounting holes
+// 3. Create sketch on standard Front plane
 create_sketch {"plane": "Front"}
-draw_rectangle {"x1": -90, "y1": -32, "x2": 90, "y2": 32, "unit": "mm"}
-draw_circle {"x": -80, "y": 22, "radius": 3.5, "unit": "mm"}
-draw_circle {"x": 80, "y": 22, "radius": 3.5, "unit": "mm"}
-draw_circle {"x": -80, "y": -22, "radius": 3.5, "unit": "mm"}
-draw_circle {"x": 80, "y": -22, "radius": 3.5, "unit": "mm"}
 
-// 4. Extrude base backward so Front plane sits flush on the front face
-extrude_sketch {"depth": 8, "reverse_dir": true, "unit": "mm"}
+// 4. Draw bold 25mm typography centered around (0, 0)
+draw_text {"text": "SOLIDWORKS AI", "x": -140, "y": -12.5, "height": 25, "font_name": "Arial", "bold": true, "unit": "mm"}
 
-// 5. 3D Raised typography on Front plane (guaranteed 100% horizontal & centered)
-create_sketch {"plane": "Front"}
-draw_text {"text": "SOLIDWORKS AI", "x": -33, "y": -7, "height": 18, "font_name": "Arial", "bold": true, "unit": "mm"}
-extrude_sketch {"depth": 3, "unit": "mm"}
+// 5. Extrude 10mm in solid 3D depth
+extrude_sketch {"depth": 10, "unit": "mm"}
 
-// 6. High-res isometric render
+// 6. Apply vibrant crimson red appearance
+manage_feature {"action": "set_color", "feature_name": "Boss-Extrude1", "color_rgb": [235, 20, 20]}
+
+// 7. High-res isometric render
 capture_viewport {"view_name": "*Isometric"}
 ```
 

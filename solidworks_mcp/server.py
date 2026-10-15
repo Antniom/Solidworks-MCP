@@ -436,13 +436,13 @@ def _tool_definitions() -> list[Tool]:
         ),
         Tool(
             name="manage_feature",
-            description="Manage feature tree operations: suppress, unsuppress, rename, delete, reorder.",
+            description="Manage feature tree operations: suppress, unsuppress, rename, delete, reorder, set_color.",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["suppress", "unsuppress", "rename", "delete", "reorder"],
+                        "enum": ["suppress", "unsuppress", "rename", "delete", "reorder", "set_color"],
                         "description": "Feature operation action"
                     },
                     "feature_name": {"type": "string", "description": "Target feature name"},
@@ -469,6 +469,11 @@ def _tool_definitions() -> list[Tool]:
                         "enum": [1, 2],
                         "default": 1,
                         "description": "Suppression scope: 1=ThisConfiguration, 2=AllConfigurations"
+                    },
+                    "color_rgb": {
+                        "type": "array",
+                        "items": {"type": "integer"},
+                        "description": "RGB color [R, G, B] (0-255) for 'set_color' action"
                     }
                 },
                 "required": ["action", "feature_name"]
@@ -1464,6 +1469,7 @@ def _dispatch_tool(name: str, arguments: dict) -> Dict[str, Any]:
             delete_absorbed=arguments.get("delete_absorbed", True),
             delete_children=arguments.get("delete_children", False),
             config_scope=arguments.get("config_scope", 1),
+            color_rgb=arguments.get("color_rgb"),
         )
 
     elif name == "revolve_sketch":
