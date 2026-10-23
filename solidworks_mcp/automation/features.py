@@ -970,6 +970,18 @@ class FeatureOperations:
             dim = None
             try:
                 dim = doc.Parameter(name)
+                if not dim and "@" in name:
+                    parts = name.split("@")
+                    candidates = [f"{parts[0]}@{parts[1]}"]
+                    if len(parts) >= 3:
+                        candidates.append(f"{parts[0]}@{parts[1]}@{parts[2].split('.')[0]}")
+                    for cand in candidates:
+                        try:
+                            dim = doc.Parameter(cand)
+                            if dim:
+                                break
+                        except Exception:
+                            pass
             except Exception:
                 pass
 

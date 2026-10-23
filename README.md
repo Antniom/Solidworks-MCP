@@ -8,7 +8,7 @@
 > #### 🗣️ Agent Communication Rule (Crucial for Non-Technical Users)
 > - **Speak in simple, friendly, everyday language.** The user may be a mechanical engineer, industrial designer, student, or hobbyist with **little to no computer science background**.
 > - **Avoid scary programmer jargon.** Do NOT talk about COM apartment threading, RPC marshaling, AST static analysis, stdio pipes, or JSON-RPC protocols.
-> - **Explain what you are doing in plain terms:** *"I'm connecting SolidWorks to our chat so I can create 3D models, drawings, and simulations for you!"*
+> - **Explain what you are doing in plain terms:** *"I'm connecting SolidWorks to our chat so I can create 3D models, show interactive sliders, create drawings, and run simulations for you!"*
 > - **Do the technical work yourself:** Execute the installation commands in your terminal directly. Do NOT ask the user to run terminal commands if you have terminal access.
 >
 > ---
@@ -22,13 +22,13 @@
 > .venv\Scripts\pip install -e .
 > .venv\Scripts\python -m solidworks_mcp.install
 > ```
-> *The installer automatically configures detected AI applications (Claude Desktop, Claude Code, Antigravity, Cursor, Windsurf, Copilot) and installs all SolidWorks design skills.*
+> *The installer automatically configures detected AI applications (Claude Desktop, Claude Code, Antigravity, Cursor, Windsurf, Codex, Copilot) and installs all 11 SolidWorks design skills.*
 >
 > ---
 >
 > #### 🛡️ Step 2: Explaining Custom Scripts (`execute_python`) in Plain English
 > When explaining the optional custom script feature to the user, use this friendly explanation:
-> > *"SolidWorks MCP comes with 67 built-in, completely safe design tools for 99% of modeling tasks (sketching, extrusions, holes, assemblies, drawings, and stress tests).*
+> > *"SolidWorks MCP comes with 68 built-in, completely safe design tools for 99% of modeling tasks (sketching, extrusions, holes, assemblies, drawings, interactive sliders, and stress tests).*
 > >
 > > *Occasionally, for very specialized or unusual SolidWorks tasks, I can write a custom macro script. For your security, this is locked by default so no code runs without your knowledge.*
 > >
@@ -39,12 +39,12 @@
 > ---
 >
 > #### 🔄 Step 3: Tell the User to Restart & Prompt Them to Reply
-> AI clients (Claude Desktop, Antigravity, Cursor, Windsurf) load new MCP tools on application startup. Because this current session cannot call the new tools until restarted, **instruct the user clearly without spoiling the surprise**:
+> AI clients (Claude Desktop, Antigravity, Cursor, Windsurf, Codex) load new MCP tools on application startup. Because this current session cannot call the new tools until restarted, **instruct the user clearly without spoiling the surprise**:
 > > *"SolidWorks MCP is now installed and configured across your applications!*
 > >
-> > *To load the 67 new 3D design tools, please restart your app:*
+> > *To load the 68 new 3D design tools, please restart your app:*
 > > - *If using **Claude Desktop**: fully quit Claude from the Windows taskbar system tray (bottom-right near your clock) and reopen it.*
-> > - *If using **Cursor / Antigravity / Windsurf**: close and reopen the app.*
+> > - *If using **Cursor / Antigravity / Windsurf / Codex**: close and reopen the app.*
 > >
 > > *Once you're back, simply reply with: **'I restarted'** (or **'ready'**)!"*
 >
@@ -92,6 +92,7 @@
 > Once the demo render is presented in chat, invite the user to start designing:
 > 💬 *"Your SolidWorks AI assistant is fully connected and ready! What would you like to design next? Try:*
 > - *'Create a 50mm cube with a 20mm hole through the center.'*
+> - *'Open the interactive studio so I can adjust dimensions with sliders.'*
 > - *'Build a standard M16 hex bolt with a 50mm shaft.'*
 > - *'Check the volume and mass properties of this model.'*
 > - *'Generate an A4 drawing of this part with Front, Top, and 3D views.'"*
@@ -99,31 +100,101 @@
 ---
 
 # SolidWorks MCP 🔧
-### Turn your AI into a 3D CAD & Mechanical Design Assistant
+### Turn your AI into a 3D CAD & Mechanical Design Assistant with Interactive In-Chat Controls
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![SolidWorks 2023-2025](https://img.shields.io/badge/SolidWorks-2023--2025%20Verified-red.svg)](https://www.solidworks.com/)
-[![MCP Tools: 67](https://img.shields.io/badge/MCP%20Tools-67%20Design%20Tools-green.svg)](https://modelcontextprotocol.io/)
+[![MCP Tools: 68](https://img.shields.io/badge/MCP%20Tools-68%20Design%20Tools-green.svg)](https://modelcontextprotocol.io/)
+[![Skills: 11 Bundled](https://img.shields.io/badge/Skills-11%20Specialized%20Skills-purple.svg)](solidworks_mcp/skills/)
+[![Multi-Client](https://img.shields.io/badge/AI%20Clients-Claude%20%7C%20Antigravity%20%7C%20Codex%20%7C%20Cursor-orange.svg)](#-multi-client-compatibility)
 
-**SolidWorks MCP** connects artificial intelligence assistants (like **Claude Desktop**, **Claude Code**, **Antigravity**, and **Cursor**) directly to **Dassault Systèmes SolidWorks**. 
+**SolidWorks MCP** connects artificial intelligence assistants (like **Claude Desktop**, **Claude Code**, **Google Antigravity**, **OpenAI Codex**, and **Cursor**) directly to **Dassault Systèmes SolidWorks**. 
 
-Instead of clicking through menus or writing complex macros by hand, you can simply talk to your AI in plain English, and watch it design parts, assemble mechanisms, run stress simulations, and create 2D manufacturing drawings live on your screen.
+Instead of clicking through menus or writing complex macros by hand, you can simply talk to your AI in plain English, and watch it design parts, adjust dimensions with live interactive sliders in chat, assemble mechanisms, run stress simulations, and create 2D manufacturing drawings live on your screen.
 
 ---
 
 ## ✨ What Can It Do?
 
-- ✏️ **3D Modeling & Sketching:** Draw lines, circles, polygons, 3D text/typography, extrusions, cuts, revolves, shells, fillets, chamfers, and standard Hole Wizard holes.
+- 🎛️ **Interactive In-Chat CAD Studio:** Adjust dimensions with live visual sliders right inside your chat window! View real-time 3D model rebuilds, dynamic bounding box measurements, and coordinate axes.
+- ✏️ **3D Modeling & Sketching:** Draw lines, circles, arcs, polygons, 3D text/typography, extrusions, cuts, revolves, shells, fillets, chamfers, and standard Hole Wizard holes.
+- 📐 **Zero Point Approximations:** Strictly enforces native mathematical CAD primitives (`draw_circle`, `draw_arc`, `fillet_edges`) — no faceted, polygonized curves or broken edge blends.
+- 🏗️ **Canonical Feature Decomposition:** Deconstructs complex parts into atomic sequential features (Base Solid $\rightarrow$ Cavities $\rightarrow$ Bosses $\rightarrow$ Ribs $\rightarrow$ Datums $\rightarrow$ Finishing Fillets) preventing sketch rebuild failures.
+- 🏭 **Design for Manufacturing (DFM):** Built-in heuristics validate CNC tool clearances (internal corner radii $\ge R_{\text{tool}} + 0.5\text{ mm}$), sheet metal bend rules ($R \ge 1.0\times T$, keepout zones, reliefs), 3D printing self-supporting limits ($45^\circ$ rule, hole shrinkage compensation), and injection molding draft angles.
 - 🔩 **Assemblies & Mates:** Insert parts, align components with concentric and coincident mates, and check for physical collisions or interference.
-- 📐 **2D Manufacturing Drawings:** Automatically generate A4/A3/Letter sheets with orthographic views, section cuts, dimensions, and Bill of Materials (BOM) tables.
+- 📜 **2D Manufacturing Drawings:** Automatically generate A4/A3/Letter sheets with orthographic views following projection standards, section cuts, imported 3D dimensions, and Bill of Materials (BOM) tables.
 - 🔬 **Stress Analysis (FEA):** Apply real-world materials (steel, aluminum, titanium), set up fixed supports and loads, mesh, and calculate stress and Factors of Safety.
 - 💬 **Smart Dialog Handling:** Never hangs when SolidWorks asks *"Do you want to rebuild?"* — the AI can see and dismiss pop-up dialogs automatically.
 - 🛡️ **100% Safe:** Runs locally on your machine. Never closes or overwrites your existing files without your confirmation.
 
 ---
 
-## 🚀 3-Minute Quick Setup (For Non-Programmers)
+## 🎛️ Interactive In-Chat CAD Studio
+
+Modeled after [`earthtojake/text-to-cad`](https://github.com/earthtojake/text-to-cad), SolidWorks MCP includes a real-time **Interactive CAD Studio** embedded directly inside chat.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as User / Chat
+    participant Agent as AI Agent
+    participant Bridge as Fast-Bridge HTTP (127.0.0.1:54321)
+    participant SW as SolidWorks COM (STA Thread)
+
+    User->>Agent: "Let me adjust dimensions with sliders"
+    Agent->>SW: show_interactive_studio
+    SW->>Bridge: Launch background bridge daemon & read dimensions
+    SW-->>Agent: Generate studio artifact + embed directive
+    Agent-->>User: Render interactive CAD Studio widget in chat
+    User->>Bridge: Drag slider (e.g. Length: 50mm -> 65mm)
+    Bridge->>SW: Dispatch SetSystemValue3 & EditRebuild3 on STA worker
+    SW-->>Bridge: Capture updated viewport PNG & bounding box
+    Bridge-->>User: Live viewport update + Bounding Box HUD refresh
+```
+
+### Key Studio Features:
+- **Bi-Directional Parameter Sliders**: Sliders grouped by FeatureManager tree owners (e.g., `Sketch1`, `Boss-Extrude1`), synchronized with exact numerical input steppers and micro-stepping buttons (`-` / `+`).
+- **Self-Healing Viewport Stage**: CAD perspective grid, RGB Coordinate Axes Triad (X-red, Y-green, Z-blue), and 4-way orientation switcher (`Iso`, `Front`, `Top`, `Right`).
+- **Automatic Geometry Rollback**: If a slider drag causes self-intersecting geometry or a rebuild error in SolidWorks, the Fast-Bridge intercepts the failure and rolls back the dimension to its previous valid state instantly.
+- **"Prompt Agent" Quick Edit**: Formats modified parameters into an engineering directive ready to copy or dispatch back to the agent for follow-up drawing or FEA updates.
+
+---
+
+## 🧠 11 Specialized CAD & Engineering Skills
+
+SolidWorks MCP packages 11 modular engineering skills that teach your AI assistant standard mechanical engineering workflows:
+
+| Skill | Description | Triggers |
+| :--- | :--- | :--- |
+| **`solidworks-interactive`** | Interactive CAD studio with live sliders & real-time viewport rebuilds | "tweak dimensions", "sliders", "interactive cad", "estúdio interativo" |
+| **`solidworks-modeling`** | 3D parametric part design with analytic primitives & canonical feature decomposition | "model part", "extrude", "revolve", "cut hole", "modelar peça" |
+| **`solidworks-dfm`** | Design for Manufacturing (CNC, Sheet Metal, Injection Molding, 3D Printing) | "dfm check", "machinability", "sheet metal rules", "regras de fabrico" |
+| **`solidworks-assemblies`** | Bottom-up assemblies, standard mates, kinematics & interference detection | "create assembly", "add mate", "concentric mate", "montagem" |
+| **`solidworks-drawings`** | 2D technical drawings, orthographic layouts, section views & BOM tables | "create drawing", "technical drawing", "section view", "desenho técnico" |
+| **`solidworks-simulation`** | FEA structural analysis: materials, restraints, loads, meshing & von Mises stress | "fea simulation", "stress analysis", "factor of safety", "simulação fea" |
+| **`solidworks-din-parts`** | Pure-Python standard fasteners (DIN 934, DIN 933, DIN 125, DIN 2573) | "din 934", "hex bolt", "din 125 washer", "porca m16" |
+| **`solidworks-toolbox`** | SolidWorks Toolbox add-in automation & standard hardware libraries | "solidworks toolbox", "toolbox bolt", "biblioteca toolbox" |
+| **`solidworks-diagnostics`** | Modal dialog inspection, FeatureManager error recovery & STA worker resets | "solidworks error", "modal popup", "dismiss dialog", "reset worker" |
+| **`legacy-solidworks-engineering`** | High-level CAD verification doctrine and procedural invariants | Fallback background reference |
+| **`legacy-solidworks-mcp`** | Low-level COM API signatures & win32com error handling | Fallback low-level debugging |
+
+---
+
+## 🌐 Multi-Client Compatibility
+
+SolidWorks MCP supports all major AI coding environments with dedicated configuration manifests and automated discovery:
+
+- **Google Antigravity / Gemini**: Packaged as a unified plugin (`plugins/solidworks/`) with vector SVG logo, agent rules, and inline HTML rendering via `<agent-embed>`.
+- **Anthropic Claude Desktop & Claude Code**: Native MCP server configuration via `claude.mcp.json`, `%APPDATA%\Claude\claude_desktop_config.json`, and `~/.claude.json`. Exposes MCP App resources (`ui://solidworks/app.html`) with CSP local network permissions.
+- **OpenAI Codex**: Manifest `codex.mcp.json` and `.codex-plugin/plugin.json`, automatically configured in `~/.codex/mcp.json`.
+- **Cursor IDE**: Manifest `cursor.mcp.json` and `.cursor-plugin/plugin.json`, automatically configured in `~/.cursor/mcp.json`.
+- **Windsurf (Codeium)**: Configured in `~/.codeium/windsurf/mcp_config.json`.
+- **VS Code / GitHub Copilot**: Configured in `%APPDATA%\Code\User\mcp.json`.
+
+---
+
+## 🚀 3-Minute Quick Setup
 
 You don't need any programming experience. Just follow these simple steps:
 
@@ -139,70 +210,55 @@ Copy the line below, paste it into your PowerShell window, and press **Enter**:
 git clone https://github.com/Antniom/Solidworks-MCP.git; cd Solidworks-MCP; python -m venv .venv; .\.venv\Scripts\pip install -e .; .\.venv\Scripts\python -m solidworks_mcp.install
 ```
 
-*What this does:* It downloads the helper, prepares a self-contained environment, and automatically configures your AI apps (Claude Desktop, Cursor, Antigravity, etc.).
+*What this does:* It downloads the repository, prepares a self-contained Python virtual environment, auto-detects all installed AI clients (Claude Desktop, Claude Code, Antigravity, Cursor, Codex, etc.), configures their MCP settings, and copies all 11 skills to their skill directories.
 
 ### Step 3: Restart Your AI Application
-- **For Claude Desktop:** 
-  1. Go to the bottom-right corner of your screen (Windows System Tray, next to the clock).
-  2. Right-click the **Claude** icon and choose **Quit Claude** *(don't just click the X on the window)*.
-  3. Reopen Claude Desktop.
-- **For Cursor / Antigravity / Windsurf:** Simply close and reopen the app.
+- **For Claude Desktop:** Fully quit Claude from the Windows taskbar system tray (bottom-right near your clock) and reopen it.
+- **For Cursor / Antigravity / Windsurf / Codex:** Close and reopen the app.
 
 ### Step 4: Start Designing!
-Open SolidWorks, start a new chat with your AI, and look for the **hammer icon (🔨)**. You're ready to go!
-
-> [!TIP]
-> **Want to test it immediately?**
-> Ask your AI: *"Create a 3D welcome display plaque in SolidWorks"* and watch it model and extrude the 3D part live on your screen!
+Open SolidWorks, start a new chat with your AI, and enjoy hands-free CAD engineering!
 
 ---
 
-## 💡 Why Can't I Just Paste the GitHub Link into Claude Desktop's Chat?
-
-If you paste a GitHub URL into Claude Desktop's chat window, Claude will tell you it cannot install it. 
-
-**Here is why:**
-- Claude Desktop's chat window runs in a secure cloud sandbox. It's like a web browser — it cannot touch your computer's files, cannot open your terminal, and cannot launch SolidWorks on its own.
-- To control SolidWorks, your computer needs a tiny local connection bridge on your PC.
-- Running the quick setup command above installs that local bridge once. From then on, Claude Desktop can talk to SolidWorks smoothly and safely whenever you chat!
-
----
-
-## 🎯 Fun Prompts to Try First
+## 🎯 Example Prompts
 
 Once connected, open SolidWorks and try asking:
 
 | Category | Example Prompt |
 | :--- | :--- |
-| **Basic 3D Part** | *"Create a 60mm diameter cylinder that is 100mm tall, and hollow it out with a 3mm wall thickness."* |
-| **Standard Fastener** | *"Create a standard DIN 933 M12 hex bolt with a 45mm threaded shaft."* |
+| **Interactive CAD Studio** | *"Open the interactive studio so I can adjust dimensions with sliders in chat."* |
+| **3D Modeling & Sliders** | *"Model a flanged mounting bracket and show interactive slider controls in chat."* |
+| **DFM Audit** | *"Run a DFM check on this part: verify that all internal pocket radii can be milled with a 6mm tool and check wall thicknesses."* |
+| **Standard Fasteners** | *"Create a standard DIN 933 M12 hex bolt with a 45mm threaded shaft."* |
 | **Part Inspection** | *"Inspect my active part and tell me its volume, total surface area, and bounding box dimensions."* |
-| **Assembly** | *"Insert bracket.sldprt and pin.sldprt, and add a concentric mate between their cylindrical holes."* |
-| **2D Drawing** | *"Create an A3 drawing of this part with Front, Top, and Isometric views, and place a Bill of Materials table."* |
-| **Stress Test** | *"Run a static stress simulation on this bracket: fix the base, apply a 2,000 N downward force on the top face, and check the Factor of Safety."* |
+| **Assembly & Mates** | *"Insert bracket.sldprt and pin.sldprt, and add a concentric mate between their cylindrical holes."* |
+| **2D Manufacturing Drawing** | *"Create an A3 drawing of this part with Front, Top, and Isometric views, import model dimensions, and add a Bill of Materials table."* |
+| **FEA Stress Simulation** | *"Run a static stress simulation on this bracket: fix the base, apply a 2,000 N downward force on the top face, and check the Factor of Safety."* |
 
 ---
 
 ## 🛡️ Safety & Privacy: How Your System Is Protected
 
-- **No Mysterious Code Execution:** The server has **67 dedicated, safe CAD tools**. It does not need to run arbitrary code for everyday modeling.
+- **68 Dedicated, Deterministic CAD Tools:** The server executes dedicated, pre-validated CAD operations. It does not run arbitrary shell or system commands during routine modeling.
 - **Interactive Approval for Custom Scripts (`execute_python`):** If a task ever requires a custom Python macro, the AI is programmed to pause and ask for your clear permission first. You always remain in control.
-- **Your Files Stay on Your PC:** All 3D models, geometry calculations, and drawings stay strictly on your local computer. No CAD data is sent to external servers.
+- **Your Files Stay on Your PC:** All 3D models, geometry calculations, and drawings stay strictly on your local computer. No CAD data is sent to external cloud servers.
 
 ---
 
-## 🔧 Technical Details & Tool Inventory (For Power Users & Developers)
+## 🔧 Technical Details & Tool Inventory (For Developers)
 
 <details>
-<summary><b>Click to expand the complete 67-tool catalog and architecture details</b></summary>
+<summary><b>Click to expand the complete 68-tool catalog and architecture details</b></summary>
 
 ### 🏗️ Industrial COM Architecture
 - **100% STA Thread Affinity**: SolidWorks COM API strictly requires Single-Threaded Apartment (STA) execution. Every call is marshaled onto a dedicated worker thread with reentrant lock management (`reset_sta_worker`), preventing RPC errors (`0x8001010E`).
 - **Official Type-Library Parity (`swconst.tlb` & `cosworks.tlb`)**: Enums, mate types, and feature options match official SolidWorks 2025 type libraries with canonical integer values.
 - **Out-of-Band Win32 Modal Dialog Watchdog**: Background thread monitors blocking popup dialogs, allowing automated inspection (`inspect_dialogs`) and dismissal (`dismiss_dialog`).
 - **Declarative Geometry Selection (`select_by_geometry`)**: Replaces blind coordinate guessing by filtering faces/edges by topology (`plane`, `cylinder`), normal vectors, area, radius, and centroids.
+- **Fast-Bridge HTTP Daemon**: Lightweight multithreaded HTTP server on `127.0.0.1:54321` connecting chat webviews to live SolidWorks COM sessions with sub-100ms slider rebuilds.
 
-### Complete 67 Tool Inventory
+### Complete 68 Tool Inventory
 
 #### 1. Connection & Session (3 tools)
 - `connect_solidworks`: Connects or auto-launches SolidWorks with verified ROT registration.
@@ -243,7 +299,7 @@ Once connected, open SolidWorks and try asking:
 - `fillet_edges`: Applies constant radius rounds/fillets to selected edges.
 - `chamfer_edges`: Applies bevel chamfers to selected edges (distance and angle).
 - `list_features`: Enumerates FeatureManager tree items with suppression state.
-- `manage_feature`: Suppress, unsuppress, rename, delete, and reorder features.
+- `manage_feature`: Suppress, unsuppress, rename, delete, reorder, or set feature appearance color.
 
 #### 6. Parametric Dimensions (2 tools)
 - `get_dimensions`: Reads dimension values across features or sketches.
@@ -255,8 +311,9 @@ Once connected, open SolidWorks and try asking:
 - `inspect_model`: Inspects body count, bounding box, volume, surface area, and mass center.
 - `verify_model`: Asserts bounding box dimensions and clean rebuild state against tolerances.
 
-#### 8. Viewport & Visualization (1 tool)
+#### 8. Viewport, Interactive Studio & Visualization (2 tools)
 - `capture_viewport`: Captures high-resolution rendered viewport image to PNG.
+- `show_interactive_studio`: Launches in-chat CAD Studio with live dimension sliders, dynamic viewport rebuilds, and auto-rollback protection.
 
 #### 9. Assemblies & Mechanism Mates (4 tools)
 - `add_component`: Inserts parts into assembly with automatic memory pre-loading.
@@ -299,7 +356,7 @@ Once connected, open SolidWorks and try asking:
 ```powershell
 pytest -v tests/
 ```
-All 66 tools are covered by automated unit tests validating STA thread dispatching, AST safety guards, and parameter schemas.
+All 68 tools and UI subsystems are covered by automated unit tests validating STA thread dispatching, AST safety guards, Fast-Bridge HTTP endpoints, dimension sanitization, and parameter schemas.
 
 </details>
 

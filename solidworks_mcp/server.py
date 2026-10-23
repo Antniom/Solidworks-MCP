@@ -37,12 +37,19 @@ from mcp.types import (
     PaginatedRequestParams,
     TextContent,
     Tool,
+    Resource,
+    ListResourcesResult,
+    ReadResourceResult,
+    ReadResourceRequestParams,
+    TextResourceContents,
 )
 from jsonschema import Draft202012Validator
 
 import time
 import uuid
 import datetime
+import base64
+import atexit
 
 # Local imports
 from .automation import SolidWorksAutomation
@@ -786,6 +793,31 @@ def _tool_definitions() -> list[Tool]:
                     "view_name": {"type": "string", "default": "*Isometric", "description": "Named view orientation"}
                 },
                 "required": []
+            }
+        ),
+        Tool(
+            name="show_interactive_studio",
+            description="Open an interactive CAD studio in chat with parametric dimension sliders, live viewport preview, and instantaneous SolidWorks rebuilds.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "view_name": {
+                        "type": "string",
+                        "default": "*Isometric",
+                        "enum": ["*Isometric", "*Front", "*Top", "*Right", "*Bottom", "*Left", "*Back"],
+                        "description": "Initial view orientation for viewport preview"
+                    },
+                    "feature_filter": {
+                        "type": "string",
+                        "description": "Optional feature name filter (e.g. 'Sketch1' or 'Boss-Extrude1')"
+                    }
+                },
+                "required": []
+            },
+            meta={
+                "ui": {
+                    "resourceUri": "ui://solidworks/app.html"
+                }
             }
         ),
 
@@ -1591,6 +1623,9 @@ def _dispatch_tool(name: str, arguments: dict) -> Dict[str, Any]:
             view_name=arguments.get("view_name", "*Isometric"),
         )
 
+    elif name == "show_interactive_studio":
+        result = _show_interactive_studio_handler(arguments)
+
     # Assembly Tools (Phase 3)
     elif name == "add_component":
         result = sw_automation.add_component(
@@ -1988,6 +2023,18 @@ async def call_tool(
         envelope.diagnostics.unit = sw_automation.units.default_unit
 
         logger.info(f"Result: success={envelope.success}, op={op_id}, duration={duration_ms:.2f}ms")
+        if name == "show_interactive_studio" and envelope.success:
+            return CallToolResult(
+                content=[TextContent(type="text", text=result.get("message", ""))],
+                structuredContent=result.get("data"),
+                is_error=False,
+                meta={
+                    "ui": {
+                        "resourceUri": "ui://solidworks/app.html"
+                    },
+                    "envelope": envelope.to_dict()
+                }
+            )
         return envelope.to_call_tool_result()
 
     except SolidWorksModalBlockedException as e:
@@ -2076,10 +2123,64 @@ async def call_tool(
         return err_env.to_call_tool_result()
 
 
+async def list_resources(
+    params: Optional[PaginatedRequestParams] = None,
+    context: Optional[ServerRequestContext] = None,
+) -> ListResourcesResult:
+    """List resources exposed by SolidWorks MCP (MCP Apps interactive studio UI)."""
+    return ListResourcesResult(
+        resources=[
+            Resource(
+                uri="ui://solidworks/app.html",
+                name="SolidWorks Interactive Studio",
+                description="Interactive CAD studio with live parametric sliders, viewport preview, and SolidWorks rebuilds.",
+                mimeType="text/html;profile=mcp-app",
+            )
+        ]
+    )
+
+
+async def read_resource(
+    params: ReadResourceRequestParams,
+    context: Optional[ServerRequestContext] = None,
+) -> ReadResourceResult:
+    """Read resource content (serves the studio HTML for MCP Apps clients)."""
+    uri_str = str(getattr(params, "uri", ""))
+    if uri_str == "ui://solidworks/app.html":
+        from .ui.bridge import _current_app_html, get_bridge_port
+        port = get_bridge_port() or 54321
+        return ReadResourceResult(
+            contents=[
+                TextResourceContents(
+                    uri="ui://solidworks/app.html",
+                    mimeType="text/html;profile=mcp-app",
+                    meta={
+                        "ui": {
+                            "csp": {
+                                "connectDomains": [
+                                    f"http://127.0.0.1:{port}",
+                                    "http://127.0.0.1:*",
+                                    "http://localhost:*",
+                                    "data:",
+                                    "blob:",
+                                ],
+                                "resourceDomains": ["data:", "blob:"],
+                            }
+                        }
+                    },
+                    text=_current_app_html,
+                )
+            ]
+        )
+    raise ValueError(f"Resource not found: {uri_str}")
+
+
 server = Server(
     "solidworks-mcp-server",
     on_list_tools=list_tools,
     on_call_tool=call_tool,
+    on_list_resources=list_resources,
+    on_read_resource=read_resource,
 )
 
 
@@ -2553,6 +2654,169 @@ def _get_sketch_status_handler() -> Dict:
 # ============================================================================
 # Main Entry Point
 # ============================================================================
+
+
+# ============================================================================
+# Interactive Studio Handler (Fast-Bridge & UI Generator)
+# ============================================================================
+
+def _show_interactive_studio_handler(arguments: dict) -> Dict[str, Any]:
+    """
+    Launch Fast-Bridge daemon, inspect model dimensions, capture viewport snapshot,
+    generate interactive studio HTML artifact, and return embedding directives.
+    """
+    try:
+        from .ui.bridge import start_bridge, get_bridge_port
+        from .ui.generator import generate_studio_html
+        
+        # 1. Ensure Fast-Bridge is running
+        port = get_bridge_port()
+        if not port:
+            try:
+                port = start_bridge()
+            except Exception as e:
+                logger.warning(f"Could not start fast bridge: {e}")
+                port = 54321
+
+        # 2. Get active document
+        doc, err = sw_automation.get_active_doc()
+        if err:
+            return err
+        
+        model_title = "SolidWorks Model"
+        if doc:
+            try:
+                title_getter = getattr(doc, "GetTitle", lambda: getattr(doc, "Title", "SolidWorks Model"))
+                model_title = title_getter() if callable(title_getter) else str(title_getter)
+            except Exception:
+                pass
+
+        # 3. Query dimensions
+        feat_filter = arguments.get("feature_filter")
+        dims_res = sw_automation.get_dimensions(feature_name=feat_filter)
+        dims_data = dims_res.get("data") if isinstance(dims_res, dict) and dims_res.get("success") else None
+        if isinstance(dims_data, list):
+            dims = dims_data
+        elif isinstance(dims_data, dict):
+            dims = dims_data.get("dimensions", [])
+        elif isinstance(dims_res, dict) and isinstance(dims_res.get("dimensions"), list):
+            dims = dims_res.get("dimensions", [])
+        else:
+            dims = []
+
+        # 4. Viewport snapshot
+        view_name = arguments.get("view_name", "*Isometric")
+        cap_res = sw_automation.capture_viewport(view_name=view_name)
+        img_b64 = ""
+        if isinstance(cap_res, dict) and cap_res.get("success"):
+            fp = cap_res.get("data", {}).get("filepath")
+            if fp and os.path.exists(fp):
+                try:
+                    with open(fp, "rb") as f:
+                        img_b64 = f"data:image/png;base64,{base64.b64encode(f.read()).decode('ascii')}"
+                except Exception:
+                    pass
+
+        # 5. Model bounds
+        insp_res = sw_automation.inspect_model()
+        bbox_info = insp_res.get("data", {}) if isinstance(insp_res, dict) and insp_res.get("success") else None
+
+        # 6. Artifact destination
+        if arguments.get("output_path"):
+            artifact_path = Path(arguments["output_path"])
+        elif arguments.get("output_dir"):
+            artifact_path = Path(arguments["output_dir"]) / "solidworks_studio.html"
+        elif os.environ.get("SOLIDWORKS_STUDIO_TEST_DIR"):
+            artifact_path = Path(os.environ["SOLIDWORKS_STUDIO_TEST_DIR"]) / "solidworks_studio.html"
+        else:
+            user_profile = Path(os.environ.get("USERPROFILE", os.path.expanduser("~")))
+            brain_base = user_profile / ".gemini" / "antigravity" / "brain"
+            if brain_base.exists():
+                brain_dirs = [p for p in brain_base.iterdir() if p.is_dir() and not p.name.startswith(".")]
+                if brain_dirs:
+                    brain_dirs.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+                    artifact_dir = brain_dirs[0]
+                else:
+                    artifact_dir = Path.cwd() / "artifacts"
+            else:
+                artifact_dir = Path.cwd() / "artifacts"
+            artifact_dir.mkdir(parents=True, exist_ok=True)
+            artifact_path = artifact_dir / "solidworks_studio.html"
+
+        artifact_path.parent.mkdir(parents=True, exist_ok=True)
+
+        raw_unit = getattr(sw_automation._units, "default_unit", "mm")
+        if hasattr(raw_unit, "value") and isinstance(raw_unit.value, str):
+            unit_label = raw_unit.value
+        elif isinstance(raw_unit, str):
+            unit_label = raw_unit
+        else:
+            unit_label = "mm"
+        if "mock" in unit_label.lower():
+            unit_label = "mm"
+        if "mock" in str(model_title).lower():
+            model_title = "SolidWorks Model" 
+
+        generate_studio_html(
+            model_title=model_title,
+            dimensions=dims,
+            units=unit_label,
+            initial_image_base64=img_b64,
+            bbox=bbox_info.get("dimensions_mm") if bbox_info else None,
+            bridge_port=port,
+            output_path=str(artifact_path),
+        )
+
+        # 7. Formatted message with embed tag & summary table
+        clean_path = str(artifact_path).replace("\\", "/")
+        artifact_file_url = f"file:///{clean_path}"
+        
+        table_lines = ["| Dimension | Value | Owner Feature |", "| :--- | :--- | :--- |"]
+        for d in dims[:10]:
+            table_lines.append(f"| `{d.get('full_name')}` | `{d.get('value')} {d.get('units')}` | {d.get('owner_feature', '')} |")
+        if len(dims) > 10:
+            table_lines.append(f"| *...and {len(dims) - 10} more* | | |")
+        
+        dim_summary = "\n".join(table_lines) if dims else "*No driving dimensions detected.*"
+
+        message = (
+            f"### 🎛️ SolidWorks Interactive Studio\n\n"
+            f"<agent-embed src=\"{artifact_file_url}\"></agent-embed>\n\n"
+            f"**Model:** `{model_title}` • **Fast-Bridge:** `http://127.0.0.1:{port}` • **Dimensions:** {len(dims)}\n\n"
+            f"{dim_summary}\n\n"
+            f"> *Drag sliders in the interactive studio to update SolidWorks in real-time. Use 'Prompt Agent' when done.*"
+        )
+
+        return {
+            "success": True,
+            "message": message,
+            "error_code": 0,
+            "error_name": "swSuccess",
+            "data": {
+                "modelTitle": model_title,
+                "bridgePort": port,
+                "dimensionsCount": len(dims),
+                "artifactPath": str(artifact_path),
+                "artifactUrl": artifact_file_url,
+                "bridgeUrl": f"http://127.0.0.1:{port}/api/app.html",
+                "dimensions": dims,
+                "_meta": {
+                    "ui": {
+                        "resourceUri": "ui://solidworks/app.html"
+                    }
+                }
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error in show_interactive_studio: {e}\n{traceback.format_exc()}")
+        return {
+            "success": False,
+            "message": f"Failed to launch interactive studio: {e}",
+            "error_code": int(SwErrors.swGeneralError),
+            "error_name": "swGeneralError",
+            "data": {"traceback": traceback.format_exc()}
+        }
+
 
 async def main():
     """Main entry point for MCP server"""

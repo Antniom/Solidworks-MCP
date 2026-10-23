@@ -133,6 +133,81 @@ Supported schema parameters:
 
 ---
 
+---
+
+## The Analytic Primitives Rule (Zero Point-by-Point Approximations)
+
+> [!CAUTION]
+> **STRICT PROHIBITION: ZERO POINT-BY-POINT CURVE APPROXIMATION**
+> Never approximate circular arcs, fillets, slots, cylindrical surfaces, or rounds by emitting discrete piecewise line segments (`draw_line` in a loop) or dense point coordinate tables.
+
+### Why Piecewise Linear Approximations Break CAD Models:
+1. **Loss of G1 / G2 Tangent Continuity**: SolidWorks recognizes analytical circles and arcs with true mathematical curvature. Piecewise lines form faceted polygonal chains that cannot maintain tangent continuity.
+2. **B-Rep Topology Fragmentation**: Instead of a single cylindrical or toroidal boundary representation (B-Rep) face, the solid body becomes fractured into dozens of micro-facets, severely bloating file size and degrading graphics performance.
+3. **Broken Downstream Features**: Geometric filters like `select_by_geometry` (filtering for `surface_type: "cylinder"` or circular edges) will fail completely because the faces are flat polygons. Edge fillets (`fillet_edges`) and Hole Wizard placements will fail or self-intersect.
+4. **CAM Toolpath Corruption**: CNC post-processors translate native arcs into circular G-code (`G02`/`G03`), yielding glassy surface finishes. Polygonal faceted approximations force thousands of micro-linear segments (`G01`), causing machine chatter, vibration, and ruined surface tolerances.
+
+### Enforced Geometry Standards:
+- **Full Circular Profiles**: Always use `draw_circle {"x": cx, "y": cy, "radius": r, "unit": "mm"}`.
+- **Curved Transitions & Slots**: Use `draw_arc {"cx": cx, "cy": cy, "radius": r, "start_angle": theta1, "end_angle": theta2, "unit": "mm"}`.
+- **Corner Blends**: Model sharp corners first, then blend them parametrically using `fillet_edges {"radius": r}` on the solid body edges.
+
+---
+
+## Canonical Feature Decomposition Protocol
+
+> [!IMPORTANT]
+> **NEVER ATTEMPT A MONOLITHIC SKETCH FOR COMPLEX PARTS**
+> Avoid drawing an entire complex component (contour + pockets + bosses + holes + ribs + chamfers) in a single sketch. Monolithic sketches cause self-intersecting loops, ambiguous contours, unsolvable constraint chains, and fragile rebuild failures.
+
+Decompose every complex mechanical component into the canonical 7-tier modeling sequence:
+
+```mermaid
+flowchart TD
+    Tier1["1. Base Prismatic Body\nBoss-Extrude (MidPlane or blind)"] --> Tier2["2. Primary Cutouts & Core Cavities\nCut-Extrude (Through-all or blind)"]
+    Tier2 --> Tier3["3. Secondary Bosses, Mounts & Pads\nFace-anchored Boss-Extrudes"]
+    Tier3 --> Tier4["4. Structural Reinforcement Ribs\nSketch on face + Extrude (merge_result=True)"]
+    Tier4 --> Tier5["5. Auxiliary Datum Planes\nOffset or angled reference planes"]
+    Tier5 --> Tier6["6. Angled Flanges & Revolved Bosses\nFeatures built from auxiliary datums"]
+    Tier6 --> Tier7["7. Engineering Finishing Features\nHole Wizard, Chamfers, and Fillets last"]
+```
+
+### The 7 Canonical Feature Tiers:
+1. **Base Prismatic Body**:
+   - Establish the primary bounding solid using a clean, closed 2D sketch on a standard reference plane (`Front`, `Top`, or `Right`).
+   - Use `extrude_sketch` with appropriate symmetry (e.g. `both_directions: true` for parts symmetric across the origin).
+2. **Primary Cutouts & Core Cavities**:
+   - Cut through-holes, major pockets, and lightening apertures using `cut_extrude`.
+   - Maintain clear wall thicknesses between internal pockets and outer boundaries.
+3. **Secondary Bosses, Mounts & Pads**:
+   - Add localized raised material for bearing housings, bolt standoffs, or alignment tabs.
+   - Anchor sketches directly onto existing planar faces.
+4. **Structural Reinforcement Ribs**:
+   - Add web ribs, gussets, and stiffeners.
+   - Sketch directly on the supporting face or central symmetry plane, extrude to meet adjacent walls, ensuring seamless solid body union (`merge_result=True`).
+5. **Auxiliary Reference Planes**:
+   - When features exist at compound angles or offset elevations, construct dedicated datum reference planes before sketching.
+6. **Angled Flanges, Arms & Revolved Bosses**:
+   - Build geometric extensions anchored to the auxiliary planes or existing faces.
+7. **Engineering Finishing Features (Applied LAST)**:
+   - Always apply finishing operations at the very end of the tree:
+     - Standard bolt holes via `create_hole_wizard`.
+     - Edge deburring with `chamfer_edges`.
+     - Stress-relieving transition blends with `fillet_edges`.
+   - Applying fillets early fragments edges needed for downstream face anchoring.
+
+---
+
+## Face-Anchored Sketching & Merge Integrity
+
+1. **Face Anchoring**:
+   - When building secondary features, do not guess global coordinates or create floating disconnected sketches.
+   - Use `create_sketch_on_face {"x": px, "y": py, "z": pz, "unit": "mm"}` by targeting a known surface coordinate from the prior feature, or query the face using `select_by_geometry`.
+2. **Single Solid Body Integrity**:
+   - SolidWorks features should merge with the primary body by default (`merge_result=True`).
+   - Multiple disconnected solid bodies in a part are prone to mating confusion, mass calculation errors, and simulation meshing failures unless multi-body design is explicitly intentional.
+   - Verify body count after feature additions using `inspect_model {}` (expected: `body_count: 1`).
+
 ## DFM & Fabrication-First Engineering Rules
 
 1. **Sheet Metal vs. Billet Machining**:

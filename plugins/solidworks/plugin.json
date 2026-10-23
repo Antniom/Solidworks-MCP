@@ -1,0 +1,12 @@
+{
+  "name": "solidworks",
+  "displayName": "SolidWorks AI Studio",
+  "description": "Interactive 3D CAD modeling, live dimension sliders in chat, assemblies, drawings, and FEA simulation in Dassault Systèmes SolidWorks.",
+  "version": "4.1.0",
+  "logo": "assets/logo.svg",
+  "suggestedPrompts": [
+    "Open interactive CAD studio with dimension sliders for the active model",
+    "Model a mounting bracket and show interactive slider controls in chat",
+    "Create a parametric DIN 933 bolt and adjust shaft length with sliders"
+  ]
+}

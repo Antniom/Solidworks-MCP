@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "solidworks": {
+      "command": "C:\\test\\python.exe",
+      "args": [
+        "-m",
+        "solidworks_mcp.server"
+      ],
+      "env": {
+        "PYTHONPATH": "C:\\Users\\anton\\Desktop\\SolidWorks MCP",
+        "SW_MCP_ALLOW_EXEC": "1"
+      }
+    }
+  }
+}

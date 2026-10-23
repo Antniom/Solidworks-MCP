@@ -1,0 +1,18 @@
+{
+  "name": "solidworks",
+  "version": "1.0.0",
+  "description": "Parametric 3D CAD modeling, interactive in-chat studio, FEA simulation, and drawing generation in Dassault Systèmes SolidWorks.",
+  "author": {
+    "name": "António Coelho"
+  },
+  "license": "MIT",
+  "keywords": [
+    "solidworks",
+    "cad",
+    "engineering",
+    "fea"
+  ],
+  "logo": "./plugins/solidworks/assets/logo.svg",
+  "skills": "./skills/",
+  "mcpServers": "./cursor.mcp.json"
+}

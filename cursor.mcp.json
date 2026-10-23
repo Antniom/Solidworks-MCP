@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "solidworks": {
+      "command": "python",
+      "args": [
+        "-m",
+        "solidworks_mcp.server"
+      ],
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      }
+    }
+  }
+}

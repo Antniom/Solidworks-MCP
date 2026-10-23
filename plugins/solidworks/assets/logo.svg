@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" fill="none">
+  <!-- 10% outer margin padding (content sits in 14..114) -->
+  
+  <!-- Isometric 3D Cube Faces -->
+  <!-- Top Face -->
+  <polygon points="64,22 104,44 64,66 24,44" fill="#0284c7" fill-opacity="0.9" stroke="#38bdf8" stroke-width="2.5" stroke-linejoin="round" />
+  
+  <!-- Right Face -->
+  <polygon points="64,66 104,44 104,88 64,110" fill="#0369a1" fill-opacity="0.95" stroke="#38bdf8" stroke-width="2.5" stroke-linejoin="round" />
+  
+  <!-- Left Face -->
+  <polygon points="64,66 24,44 24,88 64,110" fill="#0c4a6e" fill-opacity="0.95" stroke="#38bdf8" stroke-width="2.5" stroke-linejoin="round" />
+  
+  <!-- Dimension Extension Lines & Arrows (Parametric Indicator) -->
+  <!-- Dimension Arrow Top Width -->
+  <line x1="28" y1="36" x2="60" y2="18" stroke="#f43f5e" stroke-width="2" stroke-linecap="round" stroke-dasharray="2,2" />
+  <line x1="68" y1="18" x2="100" y2="36" stroke="#f43f5e" stroke-width="2" stroke-linecap="round" stroke-dasharray="2,2" />
+  <circle cx="64" cy="20" r="3" fill="#f43f5e" />
+  
+  <!-- Dimension Caliper Vertical Height Indicator -->
+  <line x1="112" y1="44" x2="112" y2="88" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" />
+  <line x1="108" y1="44" x2="116" y2="44" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" />
+  <line x1="108" y1="88" x2="116" y2="88" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" />
+  
+  <!-- Slider Track and Handle Overlay (Representing Chat Slider Controls) -->
+  <rect x="36" y="94" width="56" height="8" rx="4" fill="#0f172a" fill-opacity="0.8" stroke="#38bdf8" stroke-width="1.5" />
+  <rect x="38" y="96" width="28" height="4" rx="2" fill="#38bdf8" />
+  <circle cx="66" cy="98" r="7" fill="#f43f5e" stroke="#ffffff" stroke-width="2" />
+  
+  <!-- Center Origin Marker -->
+  <circle cx="64" cy="66" r="3" fill="#ffffff" />
+</svg>

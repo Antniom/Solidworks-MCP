@@ -1,0 +1,335 @@
+---
+name: solidworks-modeling
+description: >-
+  Parametric 3D part modeling in Dassault Systèmes SolidWorks via the MCP server (`solidworks`).
+  Design prismatic, turned, shelled, and multi-body parts; create sketches, boss extrusions, cut extrusions,
+  revolves, shells, linear/circular patterns, and Hole Wizard features; manage configurations and custom
+  properties; select faces/edges declaratively with `select_by_geometry`; manage feature tree state;
+  and verify geometry with bounding box assertions, mass properties, and viewport captures.
+  Triggers on English prompts like "model part", "create part", "extrude sketch", "cut hole",
+  "revolve sketch", "create shell", "create pattern", "hole wizard", "manage feature", "select geometry",
+  "fillet edges", "chamfer", "part design", "solid body", "welcome demo", "i restarted", "ready",
+  "welcome plaque", "demo model", "/solidworks-modeling" as well as Portuguese (pt-PT)
+  phrases like "modelar peça", "criar peça", "extrusão de esboço", "corte extrudido", "revolução",
+  "criar casca", "criar padrão", "assistente de furação", "selecionar geometria", "arredondamento", "chanfro".
+---
+
+# SolidWorks 3D Part Modeling & Feature Management via MCP
+
+## When this skill applies
+Use this skill whenever creating, modifying, inspecting, or verifying individual 3D solid parts (`.sldprt`) in SolidWorks:
+- Creating base and secondary solid features: boss/cut extrusions, revolves, shells, linear and circular patterns.
+- Creating standard engineering holes using the Hole Wizard (counterbore, countersink, tapped, clearance).
+- Applying mechanical blends: fillets and chamfers.
+- Precise, deterministic CAD selection using `select_by_geometry` (plane, cylinder, normal vector, area, radius, centroid) without coordinate guessing.
+- FeatureManager tree operations via `manage_feature`: suppress, unsuppress, rename, delete (with absorbed sketches), and reorder.
+- Part configuration management via `manage_configuration`: list, add, activate, rename, and delete configurations.
+- Metadata and custom properties management via `manage_custom_properties`: get, set, delete, and list (including `$PRP:` linked metadata).
+- Reading and driving sketch and feature dimensions via `get_dimensions` and `set_dimension`.
+- Verifying dimensional correctness via `inspect_model` and `verify_model`.
+
+For assemblies and mates, see `solidworks-assemblies`.
+For standard DIN/ISO fasteners, see `solidworks-din-parts` or `solidworks-toolbox`.
+For 2D manufacturing drawings and BOMs, see `solidworks-drawings`.
+For FEA stress and deformation analysis, see `solidworks-simulation`.
+For dialog recovery and rebuild diagnostics, see `solidworks-diagnostics`.
+
+---
+
+## Tool Selection Hierarchy: Native Tools First
+
+> [!IMPORTANT]
+> **STRICT TOOL EXECUTION HIERARCHY**:
+> 1. **Priority 1 — Native MCP Tools (Always use first)**:
+>    Always use dedicated SolidWorks MCP tools. All 66 native tools execute on a dedicated Single-Threaded Apartment (STA) COM dispatcher thread, enforce strict pre- and post-condition checks, and handle automatic unit conversion (`mm`/`degrees` to meters/radians).
+> 2. **Priority 2 — `execute_python` (Security-Gated Fallback ONLY)**:
+>    Do **NOT** use `execute_python` for operations covered by native tools.
+>    `execute_python` is locked by default. If invoked without consent, it returns an explicit directive for the AI agent to ask the human user for affirmative permission in chat, explaining benefits and host-execution security risks.
+
+---
+
+## Complete Modeling Tool Inventory & Parameter Schemas
+
+### 1. Document & Configuration Management
+- `create_new_part {}`: Creates a new part from default part template.
+- `save_document {"filepath": str}`: Saves active document.
+- `manage_configuration`:
+  - `"action"`: `"list"`, `"add"`, `"activate"`, `"rename"`, `"delete"`
+  - `"name"`: Target configuration name to add, activate, rename, or delete
+  - `"new_name"`: (For rename) New configuration name
+  - `"description"`, `"comment"`: (For add) Optional metadata
+- `manage_custom_properties`:
+  - `"action"`: `"list"`, `"get"`, `"set"`, `"delete"`
+  - `"name"`: Target property name (e.g., `"Material"`, `"PartNumber"`, `"Description"`, `"Weight"`)
+  - `"value"`: (For set) String value or `$PRP:` linked expression (e.g., `"\"SW-Material@@Part1.SLDPRT\""`)
+  - `"property_type"`: `"text"`, `"number"`, `"date"`, `"yesno"` (default: `"text"`)
+  - `"configuration"`: Empty string `""` for file-level custom properties, or configuration name for config-specific properties
+
+### 2. Sketch Creation & Sketch Entities
+- `create_sketch {"plane": "Front" | "Top" | "Right"}`: Creates a 2D sketch on a standard reference plane.
+- `create_sketch_on_face {"x": float, "y": float, "z": float, "unit": "mm"}`: Selects planar face and opens a sketch.
+- `close_sketch {}`: Explicitly exits sketch mode.
+- `get_sketch_status {}`: Returns whether sketch mode is active and entity counts.
+- `draw_rectangle {"x1": float, "y1": float, "x2": float, "y2": float, "unit": "mm"}`
+- `draw_circle {"x": float, "y": float, "radius": float, "unit": "mm"}`
+- `draw_line {"x1": float, "y1": float, "x2": float, "y2": float, "unit": "mm"}`
+- `draw_arc {"cx": float, "cy": float, "radius": float, "start_angle": float, "end_angle": float, "unit": "mm"}`
+- `draw_polygon {"cx": float, "cy": float, "radius": float, "sides": int, "unit": "mm"}`
+- `draw_text {"text": str, "x": float, "y": float, "height": float, "font_name": str, "bold": bool, "unit": "mm"}`
+
+### 3. 3D Solid Features
+- `extrude_sketch {"depth": float, "both_directions": bool, "unit": "mm"}`: Extrudes active or selected sketch. Automatically closes sketch and selects profile before extrusion.
+- `cut_extrude {"depth": float, "through_all": bool, "both_directions": bool, "unit": "mm"}`: Cuts material using active or selected sketch profile.
+- `revolve_sketch {"angle": float, "reverse_dir": bool, "is_thin": bool, "thin_thickness": float, "is_cut": bool, "axis_name": str, "unit": "deg"}`: Revolves sketch around a selected centerline or axis. Angle in degrees (default `360.0`).
+- `create_shell {"thickness": float, "outward": bool, "unit": "mm"}`: Creates hollow thin-walled solid body with constant wall thickness.
+- `create_pattern`:
+  - Linear pattern: `{"pattern_type": "linear", "feature_name": "Cut-Extrude1", "num1": 4, "spacing1": 25.0, "flip_dir1": bool, "unit": "mm"}`
+  - Circular pattern: `{"pattern_type": "circular", "feature_name": "Hole1", "num1": 6, "spacing1": 60.0, "angle": 360.0, "equal_spacing": true, "unit": "mm"}`
+- `create_hole_wizard`:
+  - `{"hole_type": "counterbore" | "countersink" | "hole" | "tap", "standard": "ISO" | "DIN" | "AnsiMetric", "fastener_type": str, "size": "M8", "end_condition": "through_all" | "blind", "depth": float, "diameter": float, "unit": "mm"}`
+- `fillet_edges {"radius": float, "unit": "mm"}`: Blends currently selected edges with constant radius fillet.
+- `chamfer_edges {"distance": float, "angle": float, "unit": "mm"}`: Breaks currently selected edges with bevel chamfer (default 45 degrees).
+- `manage_feature`:
+  - `"action"`: `"suppress"`, `"unsuppress"`, `"rename"`, `"delete"`, `"reorder"`, `"set_color"`
+  - `"feature_name"`: Name of target feature in FeatureManager tree
+  - `"new_name"`: (For rename) New feature name
+  - `"target_feature"`: (For reorder) Target feature name to move relative to
+  - `"move_location"`: (For reorder) `"before"`, `"after"`, `"to_top"`, `"to_end"` (default: `"after"`)
+  - `"delete_absorbed"`: (For delete) If `true`, deletes absorbed child sketches (default `true`)
+  - `"delete_children"`: (For delete) Delete dependent child features (default `false`)
+  - `"config_scope"`: Suppression scope: `1` = ThisConfiguration, `2` = AllConfigurations
+  - `"color_rgb"`: (For set_color) RGB integer array `[R, G, B]` with values 0-255
+
+### 4. Declarative Geometric Selection (`select_by_geometry`)
+Never guess blind coordinates or trial-and-error click points. Use `select_by_geometry` to query and select entities programmatically:
+```json
+{
+  "target_type": "face",
+  "surface_type": "cylinder",
+  "radius": 15.0,
+  "radius_tolerance": 0.1,
+  "append": false
+}
+```
+Supported schema parameters:
+- `target_type`: `"face"`, `"edge"`, `"vertex"` (default: `"face"`)
+- `surface_type`: (For faces) `"plane"`, `"cylinder"`, `"cone"`, `"sphere"`, `"torus"`, `"bspline"`
+- `curve_type`: (For edges) `"line"`, `"circle"`, `"arc"`, `"bspline"`
+- `normal`: `[nx, ny, nz]` target unit vector with `normal_tolerance` (for planar faces)
+- `radius`: Cylindrical/spherical face or circular edge radius with `radius_tolerance`
+- `length`: Edge length filter with `length_tolerance`
+- `point_on_surface`: `[x, y, z]` 3D coordinate lying on target face
+- `midpoint`: `[x, y, z]` target edge midpoint
+- `point`: `[x, y, z]` target vertex coordinate
+- `bbox_min` / `bbox_max`: Bounding box min/max ranges `[x, y, z]`
+- `mark`: Integer selection mark (default: `0`)
+- `append`: `true` to add to current selection, `false` to clear previous selection first (default: `false`)
+- `unit`: `"mm"`, `"inch"`, `"m"`, `"cm"` (default: `"mm"`)
+
+### 5. Inspection & Verification
+- `inspect_model {}`: Returns body count, bounding box `[dx, dy, dz]`, volume ($mm^3$), surface area ($mm^2$), center of mass, and rebuild error status.
+- `verify_model {"expected_dx": float, "expected_dy": float, "expected_dz": float, "expected_bodies": 1, "tolerance_mm": 0.2}`: Asserts that final geometry matches CAD design specifications.
+- `capture_viewport {"filepath": str, "view_name": "*Isometric"}`: Captures crisp rendered viewport PNG.
+
+---
+
+---
+
+## The Analytic Primitives Rule (Zero Point-by-Point Approximations)
+
+> [!CAUTION]
+> **STRICT PROHIBITION: ZERO POINT-BY-POINT CURVE APPROXIMATION**
+> Never approximate circular arcs, fillets, slots, cylindrical surfaces, or rounds by emitting discrete piecewise line segments (`draw_line` in a loop) or dense point coordinate tables.
+
+### Why Piecewise Linear Approximations Break CAD Models:
+1. **Loss of G1 / G2 Tangent Continuity**: SolidWorks recognizes analytical circles and arcs with true mathematical curvature. Piecewise lines form faceted polygonal chains that cannot maintain tangent continuity.
+2. **B-Rep Topology Fragmentation**: Instead of a single cylindrical or toroidal boundary representation (B-Rep) face, the solid body becomes fractured into dozens of micro-facets, severely bloating file size and degrading graphics performance.
+3. **Broken Downstream Features**: Geometric filters like `select_by_geometry` (filtering for `surface_type: "cylinder"` or circular edges) will fail completely because the faces are flat polygons. Edge fillets (`fillet_edges`) and Hole Wizard placements will fail or self-intersect.
+4. **CAM Toolpath Corruption**: CNC post-processors translate native arcs into circular G-code (`G02`/`G03`), yielding glassy surface finishes. Polygonal faceted approximations force thousands of micro-linear segments (`G01`), causing machine chatter, vibration, and ruined surface tolerances.
+
+### Enforced Geometry Standards:
+- **Full Circular Profiles**: Always use `draw_circle {"x": cx, "y": cy, "radius": r, "unit": "mm"}`.
+- **Curved Transitions & Slots**: Use `draw_arc {"cx": cx, "cy": cy, "radius": r, "start_angle": theta1, "end_angle": theta2, "unit": "mm"}`.
+- **Corner Blends**: Model sharp corners first, then blend them parametrically using `fillet_edges {"radius": r}` on the solid body edges.
+
+---
+
+## Canonical Feature Decomposition Protocol
+
+> [!IMPORTANT]
+> **NEVER ATTEMPT A MONOLITHIC SKETCH FOR COMPLEX PARTS**
+> Avoid drawing an entire complex component (contour + pockets + bosses + holes + ribs + chamfers) in a single sketch. Monolithic sketches cause self-intersecting loops, ambiguous contours, unsolvable constraint chains, and fragile rebuild failures.
+
+Decompose every complex mechanical component into the canonical 7-tier modeling sequence:
+
+```mermaid
+flowchart TD
+    Tier1["1. Base Prismatic Body\nBoss-Extrude (MidPlane or blind)"] --> Tier2["2. Primary Cutouts & Core Cavities\nCut-Extrude (Through-all or blind)"]
+    Tier2 --> Tier3["3. Secondary Bosses, Mounts & Pads\nFace-anchored Boss-Extrudes"]
+    Tier3 --> Tier4["4. Structural Reinforcement Ribs\nSketch on face + Extrude (merge_result=True)"]
+    Tier4 --> Tier5["5. Auxiliary Datum Planes\nOffset or angled reference planes"]
+    Tier5 --> Tier6["6. Angled Flanges & Revolved Bosses\nFeatures built from auxiliary datums"]
+    Tier6 --> Tier7["7. Engineering Finishing Features\nHole Wizard, Chamfers, and Fillets last"]
+```
+
+### The 7 Canonical Feature Tiers:
+1. **Base Prismatic Body**:
+   - Establish the primary bounding solid using a clean, closed 2D sketch on a standard reference plane (`Front`, `Top`, or `Right`).
+   - Use `extrude_sketch` with appropriate symmetry (e.g. `both_directions: true` for parts symmetric across the origin).
+2. **Primary Cutouts & Core Cavities**:
+   - Cut through-holes, major pockets, and lightening apertures using `cut_extrude`.
+   - Maintain clear wall thicknesses between internal pockets and outer boundaries.
+3. **Secondary Bosses, Mounts & Pads**:
+   - Add localized raised material for bearing housings, bolt standoffs, or alignment tabs.
+   - Anchor sketches directly onto existing planar faces.
+4. **Structural Reinforcement Ribs**:
+   - Add web ribs, gussets, and stiffeners.
+   - Sketch directly on the supporting face or central symmetry plane, extrude to meet adjacent walls, ensuring seamless solid body union (`merge_result=True`).
+5. **Auxiliary Reference Planes**:
+   - When features exist at compound angles or offset elevations, construct dedicated datum reference planes before sketching.
+6. **Angled Flanges, Arms & Revolved Bosses**:
+   - Build geometric extensions anchored to the auxiliary planes or existing faces.
+7. **Engineering Finishing Features (Applied LAST)**:
+   - Always apply finishing operations at the very end of the tree:
+     - Standard bolt holes via `create_hole_wizard`.
+     - Edge deburring with `chamfer_edges`.
+     - Stress-relieving transition blends with `fillet_edges`.
+   - Applying fillets early fragments edges needed for downstream face anchoring.
+
+---
+
+## Face-Anchored Sketching & Merge Integrity
+
+1. **Face Anchoring**:
+   - When building secondary features, do not guess global coordinates or create floating disconnected sketches.
+   - Use `create_sketch_on_face {"x": px, "y": py, "z": pz, "unit": "mm"}` by targeting a known surface coordinate from the prior feature, or query the face using `select_by_geometry`.
+2. **Single Solid Body Integrity**:
+   - SolidWorks features should merge with the primary body by default (`merge_result=True`).
+   - Multiple disconnected solid bodies in a part are prone to mating confusion, mass calculation errors, and simulation meshing failures unless multi-body design is explicitly intentional.
+   - Verify body count after feature additions using `inspect_model {}` (expected: `body_count: 1`).
+
+## DFM & Fabrication-First Engineering Rules
+
+1. **Sheet Metal vs. Billet Machining**:
+   - Never model sheet metal enclosures by extruding a 100mm solid block and pocketing out 90% of the material.
+   - Use constant nominal wall thickness with `create_shell` ($t = 1.5\text{ mm}$ or $2.0\text{ mm}$) or model flanged plate segments with appropriate bend radii ($r \ge t$).
+2. **Axisymmetric Turned Parts (Shafts, Bushings)**:
+   - Model turned parts using `revolve_sketch` around a centerline, or sequential centered cylindrical extrusions.
+   - Always include lead-in chamfers ($1 \times 45^\circ$) for bearing insertion and deburring.
+3. **Milled Features**:
+   - Internal vertical corners must have fillet radii matching standard rotary endmills ($R \ge 3\text{ mm}$ for $\varnothing 6\text{ mm}$ cutters). Sharp 90° inside corners cannot be milled.
+4. **Standard Holes & Fasteners**:
+   - Use `create_hole_wizard` for standard clearance and tapped holes rather than plain extruded cuts.
+   - Use `create_pattern` (`"linear"` or `"circular"`) for bolt hole patterns rather than drawing repetitive individual circles.
+
+---
+
+## End-to-End Workflow Recipes
+
+### Recipe 0: First-Run 3D Welcome Demonstration Plaque (Two-Phase Zero-Reasoning Recipe)
+Triggered when the user says "I restarted", "ready", "welcome demo", "demo plaque", or right after MCP setup:
+
+#### Phase A: One-Time Permission Verification Sweep (Authorize Tools)
+Prompt the user: *"Welcome back! Running a quick one-time permission verification across SolidWorks tools. Please click 'Always allow' on the prompt(s) so future design requests run without interruption!"*
+Execute probe calls to prompt "Always allow":
+```json
+get_solidworks_info {}
+get_capabilities {}
+list_open_documents {}
+inspect_dialogs {}
+inspect_rebuild_errors {}
+get_sketch_status {}
+search_knowledge {"query": "setup"}
+set_units {"unit": "mm"}
+```
+
+#### Phase B: Standalone 3D Red Typography Demonstration (Centered, Bold, Extruded Red)
+Once authorized, execute this exact sequence live in SolidWorks:
+```json
+// 1. Connect & bring SolidWorks to desktop foreground
+connect_solidworks {}
+
+// 2. Initialize fresh part
+create_new_part {}
+
+// 3. Create sketch on standard Front plane
+create_sketch {"plane": "Front"}
+
+// 4. Draw bold 25mm typography centered around (0, 0)
+draw_text {"text": "SOLIDWORKS AI", "x": -140, "y": -12.5, "height": 25, "font_name": "Arial", "bold": true, "unit": "mm"}
+
+// 5. Extrude 10mm in solid 3D depth
+extrude_sketch {"depth": 10, "unit": "mm"}
+
+// 6. Apply vibrant crimson red appearance
+manage_feature {"action": "set_color", "feature_name": "Boss-Extrude1", "color_rgb": [235, 20, 20]}
+
+// 7. High-res isometric render
+capture_viewport {"view_name": "*Isometric"}
+```
+
+### Recipe 1: Parametric Flanged Bearing Housing with Hole Wizard & Circular Pattern
+```json
+// 1. Initialize Part & Set Units
+connect_solidworks {}
+create_new_part {}
+set_units {"unit": "mm"}
+
+// 2. Base Mounting Flange
+create_sketch {"plane": "Front"}
+draw_circle {"x": 0, "y": 0, "radius": 60, "unit": "mm"}
+extrude_sketch {"depth": 15, "unit": "mm"}
+
+// 3. Central Bearing Boss
+create_sketch_on_face {"x": 0, "y": 0, "z": 15, "unit": "mm"}
+draw_circle {"x": 0, "y": 0, "radius": 35, "unit": "mm"}
+extrude_sketch {"depth": 40, "unit": "mm"}
+
+// 4. Central Precision Bore
+create_sketch_on_face {"x": 0, "y": 0, "z": 55, "unit": "mm"}
+draw_circle {"x": 0, "y": 0, "radius": 25, "unit": "mm"}
+cut_extrude {"depth": 55, "through_all": true, "unit": "mm"}
+
+// 5. Hole Wizard: Single M6 Counterbore Bolt Hole on PCD 90mm
+create_hole_wizard {
+  "hole_type": "counterbore",
+  "standard": "ISO",
+  "fastener_type": "Socket Head Cap Screw",
+  "size": "M6",
+  "end_condition": "through_all",
+  "x": 0,
+  "y": 45,
+  "unit": "mm"
+}
+
+// 6. Circular Pattern: 4x Bolt Holes on Flange
+create_pattern {
+  "pattern_type": "circular",
+  "feature_name": "Hole1",
+  "num1": 4,
+  "spacing1": 90.0,
+  "angle": 360.0,
+  "equal_spacing": true
+}
+
+// 7. Select Outer Cylindrical Edge and Apply Chamfer
+select_by_geometry {
+  "target_type": "edge",
+  "curve_type": "circle",
+  "radius": 35.0,
+  "radius_tolerance": 0.5
+}
+chamfer_edges {"distance": 1.5, "angle": 45.0, "unit": "mm"}
+
+// 8. Custom Properties & Metadata
+manage_custom_properties {
+  "action": "set",
+  "name": "PartNumber",
+  "value": "BH-6035-M6",
+  "property_type": "text"
+}
+
+// 9. Automated Verification & Screenshot
+verify_model {"expected_dx": 120, "expected_dy": 120, "expected_dz": 55, "tolerance_mm": 0.5}
+capture_viewport {"filepath": "bearing_housing.png", "view_name": "*Isometric"}
+```

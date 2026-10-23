@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "solidworks": {
+      "command": "python",
+      "args": [
+        "-m",
+        "solidworks_mcp.server"
+      ],
+      "startup_timeout_sec": 120,
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      }
+    }
+  }
+}

@@ -101,6 +101,41 @@ Inserts an industry-standard BOM table into the active drawing sheet:
 
 ---
 
+---
+
+## Orthographic Layout Hierarchy & Projection Conventions
+
+Engineering drawings must follow standard multi-view projection hierarchy:
+- **Third-Angle Projection** (Default for ASME/US/UK):
+  - **Front View**: Placed in the lower-left quadrant ($X pprox 100\text{ mm}, Y pprox 100\text{ mm}$ on A3). Represents the primary functional orientation of the part.
+  - **Top View**: Vertically aligned directly above the Front view ($X_{\text{top}} = X_{\text{front}}, Y_{\text{top}} > Y_{\text{front}}$).
+  - **Right View**: Horizontally aligned directly to the right of the Front view ($Y_{\text{right}} = Y_{\text{front}}, X_{\text{right}} > X_{\text{front}}$).
+  - **Isometric View**: Placed in the upper-right quadrant ($X \approx 340\text{ mm}, Y \approx 220\text{ mm}$ on A3), formatted with shaded display mode for instant spatial comprehension.
+
+```mermaid
+flowchart TD
+    subgraph Sheet["Engineering Drawing Sheet (A3 / A4)"]
+        Top["Top View\n(Aligned vertically above Front)"]
+        Front["Front View\n(Lower-Left Anchor)"]
+        Right["Right View\n(Aligned horizontally to right)"]
+        Iso["Isometric View\n(Upper-Right Shaded)"]
+        Title["Title Block & BOM\n(Lower-Right Corner)"]
+    end
+```
+
+---
+
+## Model Dimension Import & Annotation Cleanup Protocol
+
+1. **Driving vs. Driven Dimensions**:
+   - Always call `import_model_items {"all_views": true}` first. This pulls true parametric driving dimensions directly from 3D sketch and feature constraints into the drawing views.
+   - Use `add_drawing_dimension` only for supplementary inspection dimensions or reference dimensions.
+2. **Annotation Rules**:
+   - Prevent overlapping dimension text and crossing extension lines.
+   - Keep dimension callouts outside of the view geometry boundaries whenever possible.
+   - Place Section Views (`create_section_view`) along primary planes of symmetry or through internal cavity centers to reveal hidden internal geometry clearly.
+   - Assemblies must include a Bill of Materials table (`insert_bom_table`) anchored in the upper-right or lower-right quadrant without obscuring view projections.
+
 ## The 5 Rules for SolidWorks Drawings
 
 1. **3D Model Must Be Saved to Disk First**:

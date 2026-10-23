@@ -1,0 +1,37 @@
+{
+  "name": "solidworks",
+  "version": "1.0.0",
+  "description": "Parametric 3D CAD modeling, interactive in-chat studio, FEA simulation, and drawing generation in Dassault Systèmes SolidWorks.",
+  "author": {
+    "name": "António Coelho"
+  },
+  "license": "MIT",
+  "keywords": [
+    "solidworks",
+    "cad",
+    "mechanical-engineering",
+    "fea",
+    "simulation"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./codex.mcp.json",
+  "interface": {
+    "displayName": "SolidWorks CAD",
+    "shortDescription": "Parametric 3D CAD in SolidWorks",
+    "longDescription": "Control Dassault Systèmes SolidWorks live in chat. Create parametric parts, adjust dimensions with interactive sliders, generate 2D engineering drawings, and run FEA stress simulations.",
+    "developerName": "António Coelho",
+    "composerIcon": "./plugins/solidworks/assets/logo.svg",
+    "logo": "./plugins/solidworks/assets/logo.svg",
+    "category": "Creativity",
+    "capabilities": [
+      "Write",
+      "Interactive"
+    ],
+    "defaultPrompt": [
+      "Create a mounting bracket with 4 M6 counterbore holes in SolidWorks.",
+      "Open interactive studio with sliders to tweak dimensions.",
+      "Run a static FEA simulation with 500N downward load."
+    ],
+    "brandColor": "#E11D48"
+  }
+}

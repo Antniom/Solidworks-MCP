@@ -87,6 +87,7 @@ def get_detected_clients() -> List[ClientTarget]:
             config_format="json_mcpServers",
             skills_dirs=[user_profile / ".claude" / "skills"],
             detection_hint=user_profile / ".claude",
+            extra_config_paths=[user_profile / ".claude" / "mcp.json"],
         ),
         ClientTarget(
             name="Antigravity / Gemini",
@@ -108,6 +109,9 @@ def get_detected_clients() -> List[ClientTarget]:
             config_format="json_mcpServers",
             skills_dirs=[user_profile / ".cursor" / "skills"],
             detection_hint=user_profile / ".cursor",
+            extra_config_paths=[
+                app_data / "Cursor" / "User" / "globalStorage" / "rooveterinaryinc.cursor-mcp" / "mcp.json"
+            ],
         ),
         ClientTarget(
             name="Windsurf",
@@ -122,6 +126,7 @@ def get_detected_clients() -> List[ClientTarget]:
             config_format="json_mcpServers",
             skills_dirs=[user_profile / ".codex" / "skills"],
             detection_hint=user_profile / ".codex",
+            extra_config_paths=[user_profile / ".codex" / "config.json"],
         ),
         ClientTarget(
             name="VS Code / GitHub Copilot",
@@ -288,6 +293,106 @@ def install_skills(client: ClientTarget, bundled_skills: Path, dry_run: bool = F
     return installed_count
 
 
+
+def install_antigravity_plugin(
+    python_exe: str,
+    target_dir: Optional[Path] = None,
+    allow_exec: bool = False,
+    dry_run: bool = False,
+) -> bool:
+    """
+    Package and install the unified SolidWorks Antigravity plugin into
+    ~/.gemini/config/plugins/solidworks.
+    Bundles plugin.json, logo.svg, rules/AGENTS.md, mcp_config.json, and all skills.
+    """
+    pkg_root = Path(__file__).resolve().parent.parent
+    user_profile = Path(os.environ.get("USERPROFILE", os.path.expanduser("~")))
+    dest_plugin = target_dir or (user_profile / ".gemini" / "config" / "plugins" / "solidworks")
+    repo_plugin = pkg_root / "plugins" / "solidworks"
+
+    if dry_run:
+        logger.info(f"[DRY-RUN] Would install Antigravity plugin to: {dest_plugin}")
+        return True
+
+    try:
+        bundled_skills = get_bundled_skills_dir()
+        
+        # Ensure workspace repo plugin is synced first
+        repo_plugin.mkdir(parents=True, exist_ok=True)
+        repo_skills = repo_plugin / "skills"
+        repo_skills.mkdir(parents=True, exist_ok=True)
+        if bundled_skills.exists():
+            for s in bundled_skills.iterdir():
+                if s.is_dir() and (s / "SKILL.md").exists():
+                    d = repo_skills / s.name
+                    if d.exists():
+                        shutil.rmtree(d, onerror=_force_remove_readonly)
+                    shutil.copytree(s, d)
+
+        # Build mcp_config.json content
+        env_vars: Dict[str, str] = {
+            "PYTHONPATH": str(pkg_root),
+        }
+        if allow_exec:
+            env_vars["SW_MCP_ALLOW_EXEC"] = "1"
+
+        mcp_config = {
+            "mcpServers": {
+                "solidworks": {
+                    "command": python_exe,
+                    "args": ["-m", "solidworks_mcp.server"],
+                    "env": env_vars,
+                }
+            }
+        }
+
+        # Write to repo_plugin/mcp_config.json
+        with open(repo_plugin / "mcp_config.json", "w", encoding="utf-8") as f:
+            json.dump(mcp_config, f, indent=2)
+
+        # Now stage to destination plugin directory
+        dest_plugin.mkdir(parents=True, exist_ok=True)
+        
+        # Copy plugin.json
+        if (repo_plugin / "plugin.json").exists():
+            shutil.copy2(repo_plugin / "plugin.json", dest_plugin / "plugin.json")
+
+        # Copy mcp_config.json
+        with open(dest_plugin / "mcp_config.json", "w", encoding="utf-8") as f:
+            json.dump(mcp_config, f, indent=2)
+
+        # Copy assets
+        if (repo_plugin / "assets").exists():
+            dest_assets = dest_plugin / "assets"
+            dest_assets.mkdir(parents=True, exist_ok=True)
+            for a in (repo_plugin / "assets").iterdir():
+                shutil.copy2(a, dest_assets / a.name)
+
+        # Copy rules
+        if (repo_plugin / "rules").exists():
+            dest_rules = dest_plugin / "rules"
+            dest_rules.mkdir(parents=True, exist_ok=True)
+            for r in (repo_plugin / "rules").iterdir():
+                shutil.copy2(r, dest_rules / r.name)
+
+        # Copy skills
+        dest_skills = dest_plugin / "skills"
+        dest_skills.mkdir(parents=True, exist_ok=True)
+        if repo_skills.exists():
+            for s in repo_skills.iterdir():
+                if s.is_dir() and (s / "SKILL.md").exists():
+                    d = dest_skills / s.name
+                    if d.exists():
+                        shutil.rmtree(d, onerror=_force_remove_readonly)
+                    shutil.copytree(s, d)
+
+        logger.info(f"Successfully packaged and installed SolidWorks plugin at: {dest_plugin}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed installing Antigravity plugin: {e}")
+        return False
+
+
 def prompt_execute_python_consent() -> bool:
     """Interactive CLI prompt explaining benefits and security risks of execute_python."""
     print("\n" + "=" * 76)
@@ -394,6 +499,15 @@ def run_installer(
         n_skills = install_skills(client, bundled_skills, dry_run=dry_run)
         total_skills_installed += n_skills
 
+    # Install unified Antigravity Plugin
+    plugin_ok = install_antigravity_plugin(
+        python_exe=resolved_python,
+        allow_exec=final_allow_exec,
+        dry_run=dry_run,
+    )
+    if plugin_ok:
+        logger.info("Antigravity / Gemini unified SolidWorks plugin installed successfully.")
+
     print("\n" + "=" * 76)
     print(f" [OK] Installation complete: {success_count}/{len(detected)} clients configured.")
     print(f" [*] Bundled SolidWorks skills installed across {total_skills_installed} destinations.")
@@ -408,6 +522,7 @@ def main():
     parser.add_argument("--allow-exec", action="store_true", default=None, help="Permanently enable SW_MCP_ALLOW_EXEC=1 in configs")
     parser.add_argument("--no-allow-exec", action="store_false", dest="allow_exec", help="Enforce SW_MCP_ALLOW_EXEC=0 in configs")
     parser.add_argument("--client", type=str, default=None, help="Target a specific client by name")
+    parser.add_argument("--install-plugin", action="store_true", default=True, help="Package and install Antigravity plugin")
     parser.add_argument("--dry-run", action="store_true", help="Preview installation without modifying files")
     parser.add_argument("--non-interactive", action="store_true", help="Run without interactive prompts")
 
