@@ -8,6 +8,7 @@ semantic feature/dimension labeling, XSS sanitization, and automatic artifact re
 
 import os
 import json
+import math
 import logging
 from pathlib import Path
 from typing import List, Dict, Any, Optional
@@ -71,10 +72,42 @@ def infer_dimension_semantic_hint(dim: Dict[str, Any]) -> str:
     return "Dimension"
 
 
+def compute_standard_bounds(val: float, is_angle: bool = False) -> Dict[str, float]:
+    """
+    Compute deterministic engineering bracket scales for parametric CAD sliders.
+    Both linear and angular dimensions are mapped to clean decade brackets so that
+    sliders never show arbitrary floating-point boundaries and remain perfectly
+    consistent across all connected studio views (in-chat widget and browser tab).
+    """
+    if is_angle:
+        return {
+            "min": 1.0,
+            "max": 360.0 if val > 180.0 else 180.0,
+            "step": 1.0,
+        }
+    v = max(0.1, abs(val))
+    if v <= 15.0:
+        return {"min": 0.5, "max": 30.0, "step": 0.5}
+    elif v <= 30.0:
+        return {"min": 1.0, "max": 60.0, "step": 0.5}
+    elif v <= 60.0:
+        return {"min": 2.0, "max": 120.0, "step": 1.0}
+    elif v <= 120.0:
+        return {"min": 5.0, "max": 250.0, "step": 1.0}
+    elif v <= 250.0:
+        return {"min": 10.0, "max": 500.0, "step": 2.0}
+    elif v <= 500.0:
+        return {"min": 20.0, "max": 1000.0, "step": 5.0}
+    else:
+        max_v = float(math.ceil(v * 2.0 / 50.0) * 50.0)
+        return {"min": 50.0, "max": max_v, "step": 5.0}
+
+
 def compute_dimension_bounds(dim: Dict[str, Any]) -> Dict[str, Any]:
     """
     Compute unit-aware minimum, maximum, and step bounds for dimension sliders.
-    Separates angular dimensions (deg/rad) from linear dimensions (mm/in).
+    Separates angular dimensions (deg/rad) from linear dimensions (mm/in) using
+    standard CAD engineering brackets.
     """
     if not isinstance(dim, dict):
         return {}
@@ -86,20 +119,17 @@ def compute_dimension_bounds(dim: Dict[str, Any]) -> Dict[str, Any]:
     is_angle = "deg" in units or "rad" in units or "angular" in dim_type or dim.get("type_code") in (1, 3, 16)
 
     dim_copy = dict(dim)
+    bounds = compute_standard_bounds(val, is_angle)
 
     if is_angle:
         dim_copy["units"] = "deg"
         dim_copy["is_angle"] = True
-        dim_copy["min"] = 1.0
-        dim_copy["max"] = 360.0 if val > 180.0 else 180.0
-        dim_copy["step"] = 1.0
     else:
         dim_copy["is_angle"] = False
-        # Avoid zero or negative slider ranges
-        base_val = max(0.1, abs(val))
-        dim_copy["min"] = max(0.1, round(base_val * 0.2, 2))
-        dim_copy["max"] = max(10.0, round(base_val * 2.5, 2))
-        dim_copy["step"] = round(max(0.1, base_val * 0.01), 2)
+
+    dim_copy["min"] = bounds["min"]
+    dim_copy["max"] = bounds["max"]
+    dim_copy["step"] = bounds["step"]
 
     # Attach inferred semantic hint
     dim_copy["semantic_hint"] = infer_dimension_semantic_hint(dim_copy)

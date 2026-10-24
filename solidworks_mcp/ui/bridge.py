@@ -199,6 +199,9 @@ class FastBridgeHandler(BaseHTTPRequestHandler):
                     elif isinstance(res.get("dimensions"), list):
                         dims = res.get("dimensions", [])
 
+                from .generator import compute_dimension_bounds
+                processed_dims = [compute_dimension_bounds(d) for d in dims]
+
                 global _last_image_base64, _last_bbox
                 if not _last_image_base64:
                     _last_image_base64 = _capture_viewport_base64(automation, view_name="*Isometric")
@@ -210,7 +213,7 @@ class FastBridgeHandler(BaseHTTPRequestHandler):
                 self._send_json_response(200, {
                     "success": True,
                     "revision": _model_revision,
-                    "dimensions": dims,
+                    "dimensions": processed_dims,
                     "image_base64": _last_image_base64,
                     "bbox": _last_bbox,
                 })
@@ -239,10 +242,14 @@ class FastBridgeHandler(BaseHTTPRequestHandler):
                     dims = res
                 else:
                     dims = []
+
+                from .generator import compute_dimension_bounds
+                processed_dims = [compute_dimension_bounds(d) for d in dims]
+
                 self._send_json_response(200, {
                     "success": True,
-                    "dimensions": dims,
-                    "count": len(dims),
+                    "dimensions": processed_dims,
+                    "count": len(processed_dims),
                 })
             except Exception as e:
                 logger.error(f"Error fetching dimensions: {e}")

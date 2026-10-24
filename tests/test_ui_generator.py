@@ -8,13 +8,41 @@ and Fast-Bridge port injection.
 from pathlib import Path
 from solidworks_mcp.ui.generator import (
     compute_dimension_bounds,
+    compute_standard_bounds,
     sanitize_for_script,
     generate_studio_html,
 )
 
 
+def test_deterministic_engineering_brackets():
+    """Verify deterministic engineering brackets ensure identical min/max across values."""
+    # Test 41.86mm (the exact user case)
+    b_41 = compute_standard_bounds(41.86, is_angle=False)
+    assert b_41["min"] == 2.0
+    assert b_41["max"] == 120.0
+    assert b_41["step"] == 1.0
+
+    # Test small dimension
+    b_small = compute_standard_bounds(4.8, is_angle=False)
+    assert b_small["min"] == 0.5
+    assert b_small["max"] == 30.0
+    assert b_small["step"] == 0.5
+
+    # Test medium dimension
+    b_med = compute_standard_bounds(20.0, is_angle=False)
+    assert b_med["min"] == 1.0
+    assert b_med["max"] == 60.0
+    assert b_med["step"] == 0.5
+
+    # Test large dimension
+    b_large = compute_standard_bounds(350.0, is_angle=False)
+    assert b_large["min"] == 20.0
+    assert b_large["max"] == 1000.0
+    assert b_large["step"] == 5.0
+
+
 def test_linear_dimension_bounds():
-    """Verify linear dimension bounds calculation for standard mm dimensions."""
+    """Verify linear dimension bounds calculation uses standard CAD engineering brackets."""
     dim = {
         "full_name": "D1@Sketch1",
         "name": "D1",
@@ -25,9 +53,9 @@ def test_linear_dimension_bounds():
     bounded = compute_dimension_bounds(dim)
 
     assert bounded["is_angle"] is False
-    assert bounded["min"] == 10.0  # 50.0 * 0.2
-    assert bounded["max"] == 125.0  # 50.0 * 2.5
-    assert bounded["step"] == 0.5  # 50.0 * 0.01
+    assert bounded["min"] == 2.0   # Standard engineering bracket for 50mm
+    assert bounded["max"] == 120.0 # Standard engineering bracket for 50mm
+    assert bounded["step"] == 1.0
     assert bounded["units"] == "mm"
 
 

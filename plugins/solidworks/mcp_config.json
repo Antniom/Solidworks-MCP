@@ -1,13 +1,14 @@
 {
   "mcpServers": {
     "solidworks": {
-      "command": "C:\\Users\\anton\\Desktop\\SolidWorks MCP\\.venv\\Scripts\\python.exe",
+      "command": "C:\\test\\python.exe",
       "args": [
         "-m",
         "solidworks_mcp.server"
       ],
       "env": {
-        "PYTHONPATH": "C:\\Users\\anton\\Desktop\\SolidWorks MCP"
+        "PYTHONPATH": "C:\\Users\\anton\\Desktop\\SolidWorks MCP",
+        "SW_MCP_ALLOW_EXEC": "1"
       }
     }
   }

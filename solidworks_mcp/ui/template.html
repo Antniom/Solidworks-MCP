@@ -596,6 +596,21 @@
       } catch (e) {}
     }
 
+    function getStandardDimensionBounds(val, isAngle) {
+      if (isAngle) {
+        return { min: 1.0, max: val > 180 ? 360.0 : 180.0, step: 1.0 };
+      }
+      const v = Math.max(0.1, Math.abs(val));
+      if (v <= 15.0) return { min: 0.5, max: 30.0, step: 0.5 };
+      if (v <= 30.0) return { min: 1.0, max: 60.0, step: 0.5 };
+      if (v <= 60.0) return { min: 2.0, max: 120.0, step: 1.0 };
+      if (v <= 120.0) return { min: 5.0, max: 250.0, step: 1.0 };
+      if (v <= 250.0) return { min: 10.0, max: 500.0, step: 2.0 };
+      if (v <= 500.0) return { min: 20.0, max: 1000.0, step: 5.0 };
+      const maxVal = Math.ceil(v * 2.0 / 50.0) * 50.0;
+      return { min: 50.0, max: maxVal, step: 5.0 };
+    }
+
     function updateSingleDimension(name, val) {
       const dimObj = state.dimensions.find(d => 
         d.full_name === name || 
@@ -608,10 +623,24 @@
         dimObj.value = val;
         currentValues.set(dimObj.full_name, val);
 
+        const isAngle = dimObj.is_angle || dimObj.units === "deg";
+        const bounds = getStandardDimensionBounds(val, isAngle);
+
         const slider = document.getElementById(`slider-${sanitizeId(dimObj.full_name)}`);
         const numInput = document.getElementById(`num-${sanitizeId(dimObj.full_name)}`);
-        if (slider && document.activeElement !== slider) slider.value = val;
-        if (numInput && document.activeElement !== numInput) numInput.value = val;
+
+        if (slider) {
+          slider.min = bounds.min;
+          slider.max = bounds.max;
+          slider.step = bounds.step;
+          if (document.activeElement !== slider) slider.value = val;
+        }
+        if (numInput) {
+          numInput.min = bounds.min;
+          numInput.max = bounds.max;
+          numInput.step = bounds.step;
+          if (document.activeElement !== numInput) numInput.value = val;
+        }
 
         const orig = originalValues.get(dimObj.full_name);
         const dot = document.getElementById(`mod-dot-${sanitizeId(dimObj.full_name)}`);
@@ -774,9 +803,10 @@
 
           const isAngle = dim.is_angle || dim.units === "deg";
           const unitLabel = dim.units || (isAngle ? "deg" : "mm");
-          const stepVal = dim.step || (isAngle ? 1.0 : 0.5);
-          const minVal = dim.min !== undefined ? dim.min : (isAngle ? 1.0 : Math.max(0.1, dim.value * 0.2));
-          const maxVal = dim.max !== undefined ? dim.max : (isAngle ? 180.0 : Math.max(10.0, dim.value * 2.5));
+          const bounds = getStandardDimensionBounds(dim.value, isAngle);
+          const minVal = (dim.min !== undefined && dim.min !== null && !isNaN(dim.min)) ? dim.min : bounds.min;
+          const maxVal = (dim.max !== undefined && dim.max !== null && !isNaN(dim.max)) ? dim.max : bounds.max;
+          const stepVal = (dim.step !== undefined && dim.step !== null && !isNaN(dim.step)) ? dim.step : bounds.step;
 
           // Friendly label & semantic hint resolution
           let customDimLabel = null;
@@ -851,6 +881,13 @@
           numInput.addEventListener("change", (e) => {
             const val = parseFloat(e.target.value);
             if (!isNaN(val)) {
+              const bounds = getStandardDimensionBounds(val, isAngle);
+              slider.min = bounds.min;
+              slider.max = bounds.max;
+              slider.step = bounds.step;
+              numInput.min = bounds.min;
+              numInput.max = bounds.max;
+              numInput.step = bounds.step;
               slider.value = val;
               onDimensionInput(dim.full_name, val, unitLabel);
             }
@@ -860,7 +897,9 @@
             btn.addEventListener("click", () => {
               const delta = parseFloat(btn.getAttribute("data-delta"));
               const cur = parseFloat(slider.value);
-              const next = Math.max(minVal, Math.min(maxVal, parseFloat((cur + delta).toFixed(2))));
+              const minB = parseFloat(slider.min);
+              const maxB = parseFloat(slider.max);
+              const next = Math.max(minB, Math.min(maxB, parseFloat((cur + delta).toFixed(2))));
               slider.value = next;
               numInput.value = next;
               onDimensionInput(dim.full_name, next, unitLabel);
