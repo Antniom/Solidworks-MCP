@@ -219,3 +219,23 @@ def test_rename_feature_endpoint():
         feature_name="Boss-Extrude1",
         new_name="Hex-Head"
     )
+
+def test_sync_endpoint_and_revision_increment():
+    """Verify /api/sync returns model revision, dimensions, and viewport snapshot."""
+    mock_automation = MagicMock()
+    mock_automation.get_dimensions.return_value = {
+        "success": True,
+        "data": [{"full_name": "D1@Hex-Head", "name": "D1", "value": 15.0, "units": "mm"}]
+    }
+    set_automation_instance(mock_automation)
+
+    port = start_bridge(port_start=58421, port_max=58430)
+    url = f"http://127.0.0.1:{port}/api/sync"
+
+    with urllib.request.urlopen(url, timeout=2.0) as resp:
+        assert resp.status == 200
+        data = json.loads(resp.read().decode("utf-8"))
+        assert data.get("success") is True
+        assert "revision" in data
+        assert len(data.get("dimensions", [])) == 1
+        assert data["dimensions"][0]["value"] == 15.0

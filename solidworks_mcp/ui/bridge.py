@@ -25,6 +25,9 @@ _bridge_port: Optional[int] = None
 _automation_instance: Any = None
 _current_app_html: str = "<html><body><h3>SolidWorks Interactive Studio</h3></body></html>"
 _dimension_lock = threading.Lock()
+_model_revision: int = 1
+_last_image_base64: Optional[str] = None
+_last_bbox: Optional[Dict[str, Any]] = None
 
 
 def _dispatch_automation(automation: Any, func_name: str, *args: Any, **kwargs: Any) -> Any:
@@ -126,7 +129,44 @@ class FastBridgeHandler(BaseHTTPRequestHandler):
                 "status": "ok",
                 "port": _bridge_port,
                 "active_doc": str(doc_title),
+                "revision": _model_revision,
             })
+
+        elif path == "/api/sync":
+            automation = _get_automation()
+            if not automation:
+                self._send_json_response(503, {"success": False, "error": "SolidWorks automation not connected"})
+                return
+
+            try:
+                res = _dispatch_automation(automation, "get_dimensions")
+                dims = []
+                if isinstance(res, dict):
+                    data = res.get("data")
+                    if isinstance(data, list):
+                        dims = data
+                    elif isinstance(data, dict):
+                        dims = data.get("dimensions", [])
+                    elif isinstance(res.get("dimensions"), list):
+                        dims = res.get("dimensions", [])
+
+                global _last_image_base64, _last_bbox
+                if not _last_image_base64:
+                    _last_image_base64 = _capture_viewport_base64(automation, view_name="*Isometric")
+                if not _last_bbox:
+                    b = _get_model_bounds(automation)
+                    if b:
+                        _last_bbox = b.get("dimensions_mm")
+
+                self._send_json_response(200, {
+                    "success": True,
+                    "revision": _model_revision,
+                    "dimensions": dims,
+                    "image_base64": _last_image_base64,
+                    "bbox": _last_bbox,
+                })
+            except Exception as e:
+                self._send_json_response(500, {"success": False, "error": str(e)})
 
         elif path == "/api/dimensions":
             automation = _get_automation()
@@ -173,6 +213,7 @@ class FastBridgeHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         """Handle POST requests: /api/set_dimension, /api/capture."""
+        global _model_revision, _last_image_base64, _last_bbox
         path = self.path.split("?")[0].rstrip("/")
 
         # Read JSON body
@@ -248,8 +289,15 @@ class FastBridgeHandler(BaseHTTPRequestHandler):
                 image_base64 = _capture_viewport_base64(automation, view_name=view_name)
                 bbox_info = _get_model_bounds(automation)
 
+                _model_revision += 1
+                if image_base64:
+                    _last_image_base64 = image_base64
+                if bbox_info:
+                    _last_bbox = bbox_info.get("dimensions_mm")
+
                 self._send_json_response(200, {
                     "success": True,
+                    "revision": _model_revision,
                     "name": dim_name,
                     "value": float(target_val),
                     "units": units,
@@ -296,8 +344,11 @@ class FastBridgeHandler(BaseHTTPRequestHandler):
                     res = _dispatch_automation(automation, "manage_feature", action="rename", feature_name=str(feature_name).strip(), new_name=str(new_name).strip())
                     is_ok = isinstance(res, dict) and res.get("success", False)
                     status_code = 200 if is_ok else 422
+                    if is_ok:
+                        _model_revision += 1
                     self._send_json_response(status_code, {
                         "success": is_ok,
+                        "revision": _model_revision,
                         "old_name": feature_name,
                         "new_name": new_name,
                         "message": res.get("message") if isinstance(res, dict) else str(res)

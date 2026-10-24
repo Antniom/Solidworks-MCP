@@ -330,7 +330,8 @@
       bbox: null,
       featureLabels: {},
       dimensionLabels: {},
-      dimensions: []
+      dimensions: [],
+      revision: (window.__SW_STATE__ && window.__SW_STATE__.revision) || 1
     };
 
     // Tracking modified parameters
@@ -423,11 +424,17 @@
       // Bind reset all
       document.getElementById("btn-reset-all").addEventListener("click", resetAllDimensions);
 
-      // Test bridge connectivity & start heartbeat
+      // Test bridge connectivity & start 2-second live sync heartbeat
       checkBridgeHealth();
       if (!healthInterval) {
-        healthInterval = setInterval(checkBridgeHealth, 3500);
+        healthInterval = setInterval(checkBridgeHealth, 2000);
       }
+
+      // Instant synchronization whenever window/tab regains focus
+      window.addEventListener("focus", () => checkBridgeHealth());
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") checkBridgeHealth();
+      });
 
       // Bind connection badge click to re-sync
       const connBadge = document.getElementById("connection-badge");
@@ -510,6 +517,11 @@
           badge.className = "inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-emerald-950/60 border border-emerald-500/40 text-emerald-400 cursor-pointer hover:brightness-110 transition";
           badge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span><span>● :${port}</span>`;
           badge.title = `Fast-Bridge Connected (${data.active_doc || 'Ready'}) - Click to re-sync`;
+
+          // Detect if another client (e.g. browser tab or chat) modified dimensions
+          if (data.revision && data.revision > (state.revision || 1) && !isUpdating && !pendingUpdate) {
+            syncFromBridge();
+          }
           return true;
         }
       } catch (e) {}
@@ -517,6 +529,63 @@
       badge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-rose-400"></span><span>○ Offline (:${port})</span>`;
       badge.title = `Fast-Bridge Offline on port ${port} - Click to retry`;
       return false;
+    }
+
+
+    // Synchronize state from Fast-Bridge when modified by an external tab or chat
+    async function syncFromBridge() {
+      if (isUpdating || pendingUpdate) return;
+      const port = state.bridgePort || 54321;
+      try {
+        const resp = await fetch(`http://127.0.0.1:${port}/api/sync`, { method: "GET" });
+        if (!resp.ok) return;
+        const data = await resp.json();
+        if (data.success) {
+          state.revision = data.revision;
+
+          // 1. Update preview image
+          if (data.image_base64) {
+            const previewImg = document.getElementById("viewport-preview");
+            previewImg.src = data.image_base64;
+            onViewportImageLoaded(previewImg);
+          }
+
+          // 2. Update bounding box
+          if (data.bbox) updateBboxReadout(data.bbox);
+
+          // 3. Update dimension values seamlessly without tearing down DOM
+          if (data.dimensions && data.dimensions.length > 0) {
+            updateDimensionsSilently(data.dimensions);
+          }
+        }
+      } catch (e) {
+        console.debug("Sync failed:", e);
+      }
+    }
+
+    function updateDimensionsSilently(newDims) {
+      newDims.forEach(newDim => {
+        const fullName = newDim.full_name || `${newDim.name}@${newDim.owner_feature}`;
+        const oldDim = state.dimensions.find(d => (d.full_name && d.full_name === fullName) || (d.name === newDim.name && d.owner_feature === newDim.owner_feature));
+        if (oldDim) {
+          oldDim.value = newDim.value;
+          currentValues.set(oldDim.full_name, newDim.value);
+
+          const slider = document.getElementById(`slider-${sanitizeId(oldDim.full_name)}`);
+          const numInput = document.getElementById(`num-${sanitizeId(oldDim.full_name)}`);
+          if (slider && document.activeElement !== slider) slider.value = newDim.value;
+          if (numInput && document.activeElement !== numInput) numInput.value = newDim.value;
+
+          // Update modified dot
+          const orig = originalValues.get(oldDim.full_name);
+          const dot = document.getElementById(`mod-dot-${sanitizeId(oldDim.full_name)}`);
+          if (dot) {
+            const isMod = orig !== undefined && Math.abs(orig - newDim.value) > 0.001;
+            dot.classList.toggle("hidden", !isMod);
+          }
+        }
+      });
+      updateModifiedBadge();
     }
 
     // Render grouped dimension sliders with semantic labeling and inline feature renaming
@@ -805,6 +874,7 @@
         const data = await resp.json();
 
         if (resp.ok && data.success) {
+          if (data.revision) state.revision = data.revision;
           if (data.image_base64) {
             const previewImg = document.getElementById("viewport-preview");
             previewImg.src = data.image_base64;
