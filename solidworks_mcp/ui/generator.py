@@ -46,6 +46,14 @@ def infer_dimension_semantic_hint(dim: Dict[str, Any]) -> str:
         if "dia" in name or "d1" in name:
             return "Hole Diameter"
         return "Hole Depth"
+    if "head" in owner:
+        if name in ("d1", "depth", "thickness", "height"):
+            return "Head Thickness"
+        return "Head Dimension"
+    if "shaft" in owner or "shank" in owner or "body" in owner or "rod" in owner or "pin" in owner:
+        if name in ("d1", "length", "depth"):
+            return "Shaft Length"
+        return "Shaft Dimension"
     if "boss" in owner or "extrude" in owner or "extrusion" in owner:
         if name == "d1":
             return "Extrusion Depth / Length"
@@ -58,7 +66,9 @@ def infer_dimension_semantic_hint(dim: Dict[str, Any]) -> str:
         if "d2" in name:
             return "Secondary Sketch Dimension"
         return "Sketch Dimension"
-    return "Feature Dimension"
+    if name == "d1":
+        return "Primary Dimension / Length"
+    return "Dimension"
 
 
 def compute_dimension_bounds(dim: Dict[str, Any]) -> Dict[str, Any]:
