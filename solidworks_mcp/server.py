@@ -2674,8 +2674,11 @@ def _show_interactive_studio_handler(arguments: dict) -> Dict[str, Any]:
     generate interactive studio HTML artifact, and return embedding directives.
     """
     try:
-        from .ui.bridge import start_bridge, get_bridge_port
+        from .ui.bridge import start_bridge, get_bridge_port, set_automation_instance
         from .ui.generator import generate_studio_html
+        
+        # Ensure bridge uses active connected automation instance
+        set_automation_instance(sw_automation)
         
         # 1. Ensure Fast-Bridge is running
         port = get_bridge_port()

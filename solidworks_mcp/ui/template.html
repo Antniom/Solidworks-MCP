@@ -37,9 +37,11 @@
     html, body {
       margin: 0;
       padding: 0;
+      width: 100%;
       height: 100%;
-      max-height: 485px;
+      max-height: 476px;
       overflow: hidden;
+      box-sizing: border-box;
       background: transparent;
       color: var(--text);
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -99,8 +101,8 @@
     }
   </style>
 </head>
-<body class="p-1 sm:p-1.5 flex items-center justify-center">
-  <div id="app" class="w-full h-[478px] max-h-[478px] bg-slate-900 border border-slate-800 rounded-xl shadow-2xl overflow-hidden flex flex-col transition-all">
+<body class="p-1 flex items-center justify-center box-border">
+  <div id="app" class="w-full h-full max-h-[470px] bg-slate-900 border border-slate-800 rounded-xl shadow-2xl overflow-hidden flex flex-col transition-all">
     
     <!-- Top Header (Compact 40px) -->
     <header class="h-10 px-3 bg-slate-950/90 backdrop-blur-md border-b border-slate-800 flex items-center justify-between gap-2 shrink-0">
@@ -112,10 +114,10 @@
         <div class="flex items-center gap-1.5 min-w-0">
           <h1 id="model-title" class="text-xs font-bold text-white tracking-tight truncate max-w-[140px] sm:max-w-[200px]" title="SolidWorks Active Part">SolidWorks Part</h1>
           <span id="unit-badge" class="px-1 py-0.2 rounded text-[9px] font-mono font-semibold bg-slate-800 text-cyan-400 border border-slate-700 uppercase">MM</span>
-          <span id="connection-badge" class="hidden sm:inline-flex items-center gap-1 text-[10px] font-medium text-emerald-400">
+          <button id="connection-badge" type="button" title="Fast-Bridge Status - Click to re-sync" class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-emerald-950/60 border border-emerald-500/40 text-emerald-400 cursor-pointer hover:brightness-110 transition">
             <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
             <span id="connection-text">Live</span>
-          </span>
+          </button>
         </div>
       </div>
 
@@ -357,8 +359,28 @@
       // Bind reset all
       document.getElementById("btn-reset-all").addEventListener("click", resetAllDimensions);
 
-      // Test bridge connectivity
+      // Test bridge connectivity & start heartbeat
       checkBridgeHealth();
+      if (!healthInterval) {
+        healthInterval = setInterval(checkBridgeHealth, 3500);
+      }
+
+      // Bind connection badge click to re-sync
+      const connBadge = document.getElementById("connection-badge");
+      if (connBadge) {
+        connBadge.addEventListener("click", async () => {
+          showToast("Checking Fast-Bridge connection...", "info");
+          const ok = await checkBridgeHealth();
+          if (ok) {
+            showToast("Connected to Fast-Bridge!", "success");
+            fetchDimensions();
+            requestCapture(activeView);
+          } else {
+            const port = state.bridgePort || 54321;
+            showToast(`Fast-Bridge offline on port ${port}`, "error");
+          }
+        });
+      }
     });
 
     // Layout mode switcher
@@ -403,19 +425,31 @@
       window.open(url, "_blank");
     }
 
-    // Check Fast-Bridge health
+    // Heartbeat & status tracking
+    let healthInterval = null;
+
     async function checkBridgeHealth() {
       const port = state.bridgePort || 54321;
+      const badge = document.getElementById("connection-badge");
+      const text = document.getElementById("connection-text");
+      if (!badge || !text) return false;
       try {
-        const resp = await fetch(`http://127.0.0.1:${port}/health`, { method: "GET" });
+        const controller = new AbortController();
+        const tid = setTimeout(() => controller.abort(), 1200);
+        const resp = await fetch(`http://127.0.0.1:${port}/health`, { method: "GET", signal: controller.signal });
+        clearTimeout(tid);
         if (resp.ok) {
-          document.getElementById("connection-badge").className = "hidden sm:inline-flex items-center gap-1 text-[10px] font-medium text-emerald-400";
-          document.getElementById("connection-text").innerText = `:${port}`;
-          return;
+          const data = await resp.json().catch(() => ({}));
+          badge.className = "inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-emerald-950/60 border border-emerald-500/40 text-emerald-400 cursor-pointer hover:brightness-110 transition";
+          badge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span><span>● :${port}</span>`;
+          badge.title = `Fast-Bridge Connected (${data.active_doc || 'Ready'}) - Click to re-sync`;
+          return true;
         }
       } catch (e) {}
-      document.getElementById("connection-badge").className = "hidden sm:inline-flex items-center gap-1 text-[10px] font-medium text-sky-400";
-      document.getElementById("connection-text").innerText = "MCP App";
+      badge.className = "inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-rose-950/60 border border-rose-500/40 text-rose-400 cursor-pointer hover:brightness-110 transition";
+      badge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-rose-400"></span><span>○ Offline (:${port})</span>`;
+      badge.title = `Fast-Bridge Offline on port ${port} - Click to retry`;
+      return false;
     }
 
     // Render grouped dimension sliders with semantic labeling and inline feature renaming
@@ -696,7 +730,12 @@
           }
         }
       } catch (e) {
-        showToast(`Fast-Bridge Error: ${e.message}`, "error");
+        checkBridgeHealth();
+        const isOffline = !navigator.onLine || (e.message && (e.message.includes("fetch") || e.message.includes("Failed") || e.message.includes("Network")));
+        const msg = isOffline
+          ? `Fast-Bridge offline on port ${port}. Please click re-sync or prompt agent to start Fast-Bridge.`
+          : `Fast-Bridge Error: ${e.message}`;
+        showToast(msg, "error");
       } finally {
         isUpdating = false;
         setRebuildingUI(false);

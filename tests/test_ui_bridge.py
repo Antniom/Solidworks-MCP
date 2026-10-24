@@ -34,9 +34,9 @@ def cleanup_bridge():
 
 def test_fast_bridge_startup_and_health():
     """Verify bridge starts up and responds to /health with CORS headers."""
-    port = start_bridge(port_start=54321, port_max=54330)
+    port = start_bridge(port_start=58421, port_max=58430)
     assert is_bridge_running()
-    assert port >= 54321
+    assert port >= 58421
 
     url = f"http://127.0.0.1:{port}/health"
     req = urllib.request.Request(url)
@@ -51,7 +51,7 @@ def test_fast_bridge_startup_and_health():
 
 def test_cors_options_preflight():
     """Verify OPTIONS preflight request returns 204 with full CORS headers."""
-    port = start_bridge(port_start=54321, port_max=54330)
+    port = start_bridge(port_start=58421, port_max=58430)
     url = f"http://127.0.0.1:{port}/api/set_dimension"
 
     req = urllib.request.Request(url, method="OPTIONS")
@@ -71,14 +71,14 @@ def test_dynamic_port_fallback():
     """Verify bridge tries next port when port_start is already occupied."""
     # Occupy port 54321 with a raw socket
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.bind(("127.0.0.1", 54321))
+    sock.bind(("127.0.0.1", 58421))
     sock.listen(1)
 
     try:
         # Start server with port_start=54321
-        server = FastBridgeServer(port_start=54321, port_max=54330)
+        server = FastBridgeServer(port_start=58421, port_max=58430)
         port = server.start()
-        assert port == 54322, f"Expected port 54322, got {port}"
+        assert port == 58422, f"Expected port 54322, got {port}"
         server.stop()
     finally:
         sock.close()
@@ -96,7 +96,7 @@ def test_get_dimensions_endpoint():
     }
     set_automation_instance(mock_automation)
 
-    port = start_bridge(port_start=54321, port_max=54330)
+    port = start_bridge(port_start=58421, port_max=58430)
     url = f"http://127.0.0.1:{port}/api/dimensions"
 
     with urllib.request.urlopen(url, timeout=2.0) as resp:
@@ -125,7 +125,7 @@ def test_set_dimension_success_with_units():
     }
     set_automation_instance(mock_automation)
 
-    port = start_bridge(port_start=54321, port_max=54330)
+    port = start_bridge(port_start=58421, port_max=58430)
     url = f"http://127.0.0.1:{port}/api/set_dimension"
 
     payload = json.dumps({"name": "A1@Sketch1", "value": 90.0, "units": "deg"}).encode("utf-8")
@@ -157,7 +157,7 @@ def test_set_dimension_rebuild_failure_and_rollback():
     ]
     set_automation_instance(mock_automation)
 
-    port = start_bridge(port_start=54321, port_max=54330)
+    port = start_bridge(port_start=58421, port_max=58430)
     url = f"http://127.0.0.1:{port}/api/set_dimension"
 
     payload = json.dumps({"name": "D1@Sketch1", "value": 500.0, "units": "mm"}).encode("utf-8")
@@ -182,7 +182,7 @@ def test_app_html_endpoint():
     custom_html = "<!DOCTYPE html><html><body><h1>Custom Studio</h1></body></html>"
     set_current_app_html(custom_html)
 
-    port = start_bridge(port_start=54321, port_max=54330)
+    port = start_bridge(port_start=58421, port_max=58430)
     url = f"http://127.0.0.1:{port}/api/app.html"
 
     with urllib.request.urlopen(url, timeout=2.0) as resp:
@@ -201,7 +201,7 @@ def test_rename_feature_endpoint():
     }
     set_automation_instance(mock_automation)
 
-    port = start_bridge(port_start=54321, port_max=54330)
+    port = start_bridge(port_start=58421, port_max=58430)
     url = f"http://127.0.0.1:{port}/api/rename_feature"
 
     payload = json.dumps({"feature_name": "Boss-Extrude1", "new_name": "Hex-Head"}).encode("utf-8")
