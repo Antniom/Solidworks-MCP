@@ -25,17 +25,24 @@ Activate this skill immediately whenever:
 
 ## Tool Invocation Recipe
 
-### Step 1: Open the Interactive Studio
-Call the `show_interactive_studio` tool with the desired initial view orientation:
+### Step 1: Open the Interactive Studio with Meaningful Labels
+Always pass descriptive `feature_labels` and `dimension_labels` so the user immediately understands what each slider controls (e.g. "Head Thickness", "Shaft Length" instead of raw "D1"):
 
 ```json
 {
   "view_name": "*Isometric",
-  "feature_filter": null
+  "feature_labels": {
+    "Boss-Extrude1": "Hex Bolt Head",
+    "Boss-Extrude2": "Bolt Shaft"
+  },
+  "dimension_labels": {
+    "D1@Boss-Extrude1@Part1.Part": "Head Thickness",
+    "D1@Boss-Extrude2@Part1.Part": "Shaft Length"
+  }
 }
 ```
 
-*Optionally specify `feature_filter` (e.g. `"Sketch1"` or `"Boss-Extrude1"`) to limit the sliders to a specific feature.*
+*Optionally specify `feature_filter` (e.g. `"Hex-Head"` or `"Boss-Extrude1"`) to limit the sliders to a specific feature.*
 
 ### Step 2: Render in Chat
 The tool returns an `<agent-embed>` tag in its text message:
@@ -47,13 +54,20 @@ The tool returns an `<agent-embed>` tag in its text message:
 **Always include this `<agent-embed>` tag in your response.**
 Do not describe raw file paths or JSON envelopes; guide the user to adjust the sliders on screen.
 
-### Step 3: Handle User Prompt Agent Follow-ups
+### Step 3: Studio UI Features
+- **Ultra-Compact Zero-Scroll Layout**: Sized under 485px height to fit seamlessly inside Antigravity and Claude embed containers with zero vertical scroll cutoffs.
+- **Side-by-Side Live View**: Viewport stays visible on the left while sliders scroll smoothly on the right.
+- **Inline Feature Renaming ✏️**: Users can click the feature title or pencil icon in the studio to rename features live in SolidWorks via `/api/rename_feature` without opening CAD dialogs.
+- **View Mode Switcher**: Quick toggle between `Split` (side-by-side default), `Sliders Only`, and `3D View`.
+- **Full-Screen Popout ↗**: Users can click the expand icon to open the studio in a dedicated full browser tab.
+
+### Step 4: Handle User Prompt Agent Follow-ups
 When the user clicks **"Prompt Agent"** in the studio, a message like this arrives in chat:
 
-> *"I have adjusted the parametric dimensions in the SolidWorks Studio for **Bracket.SLDPRT**:*
-> *- **D1@Sketch1**: 50.0 -> 75.0 mm*
-> *- **D1@Boss-Extrude1**: 20.0 -> 30.0 mm*
-> *Please verify model integrity, update any associated drawings, and confirm."*
+> *"I have adjusted the SolidWorks model parameters via the interactive studio:*
+> *- Head Thickness (D1@Boss-Extrude1@Part1.Part) on Hex Bolt Head: changed from 4.8 to 6.0*
+> *- Shaft Length (D1@Boss-Extrude2@Part1.Part) on Bolt Shaft: changed from 50.0 to 65.0*
+> *Please verify the model geometry and update any associated technical drawings or stress simulations."*
 
 When you receive this:
 1. Call `verify_model` to verify that the active geometry has no rebuild errors or topological breaks.
@@ -66,5 +80,6 @@ When you receive this:
 ## Architecture & Live Synchronization
 
 1. **Sub-100ms Fast-Bridge**: Sliders communicate over a local HTTP daemon (`127.0.0.1:54321`) with single-flight debounced request coalescing.
-2. **Automatic Rollback**: If a dimension causes self-intersecting geometry or feature rebuild failure, SolidWorks reverts to the prior value automatically.
-3. **MCP Apps Dual Transport**: Fully compatible with Claude Desktop, VS Code, and browser-based AI environments via postMessage JSON-RPC 2.0 fallback.
+2. **Live Feature Renaming (`/api/rename_feature`)**: Dispatches `manage_feature {"action": "rename"}` over STA COM worker.
+3. **Automatic Rollback**: If a dimension causes self-intersecting geometry or feature rebuild failure, SolidWorks reverts to the prior value automatically.
+4. **MCP Apps Dual Transport**: Fully compatible with Claude Desktop, VS Code, and browser-based AI environments via postMessage JSON-RPC 2.0 fallback.

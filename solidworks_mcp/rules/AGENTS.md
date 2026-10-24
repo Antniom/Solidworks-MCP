@@ -15,9 +15,14 @@
    - Decompose parts into atomic sequential features: Base Prismatic Solid -> Primary Cutouts -> Secondary Bosses -> Ribs -> Auxiliary Planes -> Finishing Hole Wizard & Fillets.
    - Anchor secondary sketches onto existing planar faces (`create_sketch_on_face`) to guarantee automatic solid body merging (`merge_result=True`).
 
-4. **Design for Manufacturing (DFM) Verification**:
+4. **Meaningful Feature & Parameter Naming (Zero Cryptic Features)**:
+   - Never leave CAD features with cryptic default names like `Boss-Extrude1`, `Boss-Extrude2`, `Cut-Extrude1` when their engineering purpose is known.
+   - Immediately rename features to clear, functional engineering terms (`manage_feature {"action": "rename", "feature_name": "Boss-Extrude1", "new_name": "Hex-Head"}`) so the user understands the FeatureManager tree.
+   - When calling `show_interactive_studio`, always pass descriptive `feature_labels` (e.g. `{"Boss-Extrude1": "Hex Bolt Head"}`) and `dimension_labels` (e.g. `{"D1@Boss-Extrude1@Part1.Part": "Head Thickness"}`) so every slider explains what changing it does.
+
+5. **Design for Manufacturing (DFM) Verification**:
    - Maintain DFM/DfAM rules for the target fabrication process (minimum internal corner radii >= tool radius + 0.5mm for CNC milling; sheet metal bend radii >= 1T; 45° self-supporting rule for 3D printing; 1.0°+ draft angles and uniform wall thickness for injection molding).
    - Use `set_dimension` for parametric edits rather than redrawing from scratch.
 
-5. **Follow-Up Automation**:
+6. **Follow-Up Automation**:
    - When the user returns from the interactive studio with adjusted parameters, verify the model with `verify_model`, update associated drawing views with `create_drawing_from_model` or `export_drawing` if requested, and report the new physical properties.

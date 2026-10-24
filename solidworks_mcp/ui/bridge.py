@@ -279,6 +279,33 @@ class FastBridgeHandler(BaseHTTPRequestHandler):
                         "error": "Failed to capture viewport snapshot",
                     })
 
+        elif path == "/api/rename_feature":
+            feature_name = body.get("feature_name") or body.get("old_name")
+            new_name = body.get("new_name")
+            if not feature_name or not new_name:
+                self._send_json_response(400, {"success": False, "error": "Missing required fields: 'feature_name' and 'new_name'"})
+                return
+
+            automation = _get_automation()
+            if not automation:
+                self._send_json_response(503, {"success": False, "error": "SolidWorks automation not connected"})
+                return
+
+            with _dimension_lock:
+                try:
+                    res = _dispatch_automation(automation, "manage_feature", action="rename", feature_name=str(feature_name).strip(), new_name=str(new_name).strip())
+                    is_ok = isinstance(res, dict) and res.get("success", False)
+                    status_code = 200 if is_ok else 422
+                    self._send_json_response(status_code, {
+                        "success": is_ok,
+                        "old_name": feature_name,
+                        "new_name": new_name,
+                        "message": res.get("message") if isinstance(res, dict) else str(res)
+                    })
+                except Exception as e:
+                    logger.error(f"Error renaming feature {feature_name} -> {new_name}: {e}")
+                    self._send_json_response(500, {"success": False, "error": str(e)})
+
         else:
             self._send_json_response(404, {"success": False, "error": f"Path not found: {path}"})
 

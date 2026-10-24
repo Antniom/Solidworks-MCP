@@ -807,6 +807,14 @@ def _tool_definitions() -> list[Tool]:
                         "enum": ["*Isometric", "*Front", "*Top", "*Right", "*Bottom", "*Left", "*Back"],
                         "description": "Initial view orientation for viewport preview"
                     },
+                    "feature_labels": {
+                        "type": "object",
+                        "description": "Optional mapping of feature names to friendly labels (e.g. {'Boss-Extrude1': 'Hex Head', 'Boss-Extrude2': 'Shaft Body'})"
+                    },
+                    "dimension_labels": {
+                        "type": "object",
+                        "description": "Optional mapping of dimension names to friendly labels (e.g. {'D1@Boss-Extrude1@Part1.Part': 'Head Thickness'})"
+                    },
                     "feature_filter": {
                         "type": "string",
                         "description": "Optional feature name filter (e.g. 'Sketch1' or 'Boss-Extrude1')"
@@ -2757,6 +2765,9 @@ def _show_interactive_studio_handler(arguments: dict) -> Dict[str, Any]:
         if "mock" in str(model_title).lower():
             model_title = "SolidWorks Model" 
 
+        feature_labels = arguments.get("feature_labels") or {}
+        dimension_labels = arguments.get("dimension_labels") or {}
+
         generate_studio_html(
             model_title=model_title,
             dimensions=dims,
@@ -2764,6 +2775,8 @@ def _show_interactive_studio_handler(arguments: dict) -> Dict[str, Any]:
             initial_image_base64=img_b64,
             bbox=bbox_info.get("dimensions_mm") if bbox_info else None,
             bridge_port=port,
+            feature_labels=feature_labels,
+            dimension_labels=dimension_labels,
             output_path=str(artifact_path),
         )
 
@@ -2771,9 +2784,13 @@ def _show_interactive_studio_handler(arguments: dict) -> Dict[str, Any]:
         clean_path = str(artifact_path).replace("\\", "/")
         artifact_file_url = f"file:///{clean_path}"
         
-        table_lines = ["| Dimension | Value | Owner Feature |", "| :--- | :--- | :--- |"]
+        table_lines = ["| Dimension | Parameter / Purpose | Value | Feature |", "| :--- | :--- | :--- | :--- |"]
         for d in dims[:10]:
-            table_lines.append(f"| `{d.get('full_name')}` | `{d.get('value')} {d.get('units')}` | {d.get('owner_feature', '')} |")
+            d_full = d.get('full_name', '')
+            d_hint = dimension_labels.get(d_full) or d.get('semantic_hint', d.get('name', ''))
+            f_owner = d.get('owner_feature', '')
+            f_display = feature_labels.get(f_owner, f_owner)
+            table_lines.append(f"| `{d_full}` | **{d_hint}** | `{d.get('value')} {d.get('units')}` | {f_display} |")
         if len(dims) > 10:
             table_lines.append(f"| *...and {len(dims) - 10} more* | | |")
         

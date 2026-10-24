@@ -123,3 +123,35 @@ def test_generate_studio_html_file(tmp_path: Path):
     assert "window.__SW_STATE__" in html_content
     assert "data:image/png;base64,mock123" in html_content
     assert "Boss-Extrude1" in html_content
+
+
+def test_semantic_hints_and_custom_labels(tmp_path: Path):
+    """Verify semantic hint calculation and feature/dimension label injection."""
+    from solidworks_mcp.ui.generator import infer_dimension_semantic_hint
+
+    dim_extrude = {"name": "D1", "owner_feature": "Boss-Extrude1", "units": "mm"}
+    assert "Extrusion Depth" in infer_dimension_semantic_hint(dim_extrude)
+
+    dim_cut = {"name": "D1", "owner_feature": "Cut-Extrude2", "units": "mm"}
+    assert "Cut Depth" in infer_dimension_semantic_hint(dim_cut)
+
+    dim_fillet = {"name": "D1", "owner_feature": "Fillet1", "units": "mm"}
+    assert "Fillet Radius" in infer_dimension_semantic_hint(dim_fillet)
+
+    # Test custom labels in generated HTML
+    out_file = tmp_path / "studio_labels.html"
+    dims = [
+        {"full_name": "D1@Boss-Extrude1@Part1.Part", "name": "D1", "value": 4.8, "units": "mm", "owner_feature": "Boss-Extrude1"},
+        {"full_name": "D1@Boss-Extrude2@Part1.Part", "name": "D1", "value": 50.0, "units": "mm", "owner_feature": "Boss-Extrude2"},
+    ]
+    html = generate_studio_html(
+        model_title="Bolt.SLDPRT",
+        dimensions=dims,
+        feature_labels={"Boss-Extrude1": "Hex Head", "Boss-Extrude2": "Shaft Body"},
+        dimension_labels={"D1@Boss-Extrude1@Part1.Part": "Head Thickness", "D1@Boss-Extrude2@Part1.Part": "Shaft Length"},
+        output_path=str(out_file),
+    )
+    assert "Hex Head" in html
+    assert "Shaft Body" in html
+    assert "Head Thickness" in html
+    assert "Shaft Length" in html

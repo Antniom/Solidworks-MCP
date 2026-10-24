@@ -3,7 +3,7 @@ SolidWorks MCP - Studio HTML Generator
 --------------------------------------
 Generates unit-aware, self-contained interactive CAD studio widgets
 with parametric dimension sliders, live Fast-Bridge port injection,
-XSS sanitization, and automatic artifact rendering.
+semantic feature/dimension labeling, XSS sanitization, and automatic artifact rendering.
 """
 
 import os
@@ -17,6 +17,48 @@ from .bridge import get_bridge_port, set_current_app_html
 logger = logging.getLogger("SolidWorksMCP.UIGenerator")
 
 TEMPLATE_PATH = Path(__file__).parent / "template.html"
+
+
+def infer_dimension_semantic_hint(dim: Dict[str, Any]) -> str:
+    """
+    Infer a human-readable engineering meaning for standard CAD dimensions (e.g. D1, D2).
+    Helps users immediately understand what changing a dimension does.
+    """
+    full_name = str(dim.get("full_name", "")).lower()
+    name = str(dim.get("name", "")).lower()
+    owner = str(dim.get("owner_feature", "")).lower()
+    dim_type = str(dim.get("type", "")).lower()
+    units = str(dim.get("units", "mm")).lower()
+
+    if "deg" in units or "rad" in units or "angular" in dim_type or dim.get("is_angle"):
+        return "Angle"
+    if "fillet" in owner or "fillet" in name:
+        return "Fillet Radius"
+    if "chamfer" in owner or "chamfer" in name:
+        return "Chamfer Distance"
+    if "cut" in owner:
+        if name in ("d1", "depth"):
+            return "Cut Depth"
+        return "Cut Dimension"
+    if "revolve" in owner:
+        return "Revolve Angle"
+    if "hole" in owner or "wizard" in owner:
+        if "dia" in name or "d1" in name:
+            return "Hole Diameter"
+        return "Hole Depth"
+    if "boss" in owner or "extrude" in owner or "extrusion" in owner:
+        if name == "d1":
+            return "Extrusion Depth / Length"
+        return "Extrusion Dimension"
+    if "sketch" in owner:
+        if "dia" in name or "rad" in name:
+            return "Diameter / Radius"
+        if "d1" in name:
+            return "Primary Sketch Dimension"
+        if "d2" in name:
+            return "Secondary Sketch Dimension"
+        return "Sketch Dimension"
+    return "Feature Dimension"
 
 
 def compute_dimension_bounds(dim: Dict[str, Any]) -> Dict[str, Any]:
@@ -49,6 +91,9 @@ def compute_dimension_bounds(dim: Dict[str, Any]) -> Dict[str, Any]:
         dim_copy["max"] = max(10.0, round(base_val * 2.5, 2))
         dim_copy["step"] = round(max(0.1, base_val * 0.01), 2)
 
+    # Attach inferred semantic hint
+    dim_copy["semantic_hint"] = infer_dimension_semantic_hint(dim_copy)
+
     # Flag driven or read-only dimensions if specified
     if dim.get("driven") or dim.get("read_only"):
         dim_copy["readonly"] = True
@@ -74,6 +119,8 @@ def generate_studio_html(
     initial_image_base64: str = "",
     bbox: Optional[Dict[str, Any]] = None,
     bridge_port: Optional[int] = None,
+    feature_labels: Optional[Dict[str, str]] = None,
+    dimension_labels: Optional[Dict[str, str]] = None,
     output_path: Optional[str] = None,
 ) -> str:
     """
@@ -86,6 +133,8 @@ def generate_studio_html(
         initial_image_base64: Data-URI of initial viewport snapshot
         bbox: Bounding box dictionary from inspect_model()
         bridge_port: Port of local Fast-Bridge HTTP daemon (defaults to active bridge port)
+        feature_labels: Optional mapping of feature names to friendly labels (e.g. {'Boss-Extrude1': 'Bolt Head'})
+        dimension_labels: Optional mapping of dimension names to friendly labels (e.g. {'D1@Boss-Extrude1@Part1.Part': 'Head Height'})
         output_path: Filepath where the generated HTML file should be saved
 
     Returns:
@@ -125,6 +174,8 @@ def generate_studio_html(
         "units": clean_units,
         "initialImage": str(initial_image_base64 or ""),
         "bbox": bbox,
+        "featureLabels": feature_labels or {},
+        "dimensionLabels": dimension_labels or {},
         "dimensions": processed_dims,
     }
 

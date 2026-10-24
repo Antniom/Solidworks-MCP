@@ -11,7 +11,6 @@
       --card: #0f172a;
       --card-muted: #1e293b;
       --border: #1e293b;
-      --border-subtle: #334155;
       --text: #f8fafc;
       --text-muted: #94a3b8;
       --primary: #38bdf8;
@@ -26,7 +25,6 @@
         --card: #ffffff;
         --card-muted: #f1f5f9;
         --border: #e2e8f0;
-        --border-subtle: #cbd5e1;
         --text: #0f172a;
         --text-muted: #64748b;
         --primary: #0284c7;
@@ -36,12 +34,15 @@
         --success: #059669;
       }
     }
-    body {
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      max-height: 485px;
+      overflow: hidden;
       background: transparent;
       color: var(--text);
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-      margin: 0;
-      padding: 6px;
       user-select: none;
       -webkit-font-smoothing: antialiased;
     }
@@ -50,23 +51,23 @@
         radial-gradient(rgba(56, 189, 248, 0.12) 1px, transparent 1px),
         linear-gradient(to right, rgba(255, 255, 255, 0.02) 1px, transparent 1px),
         linear-gradient(to bottom, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
-      background-size: 20px 20px, 40px 40px, 40px 40px;
+      background-size: 16px 16px, 32px 32px, 32px 32px;
     }
     input[type=range] {
       -webkit-appearance: none;
-      height: 6px;
+      height: 5px;
       border-radius: 9999px;
       background: #1e293b;
       outline: none;
     }
     input[type=range]::-webkit-slider-thumb {
       -webkit-appearance: none;
-      width: 16px;
-      height: 16px;
+      width: 14px;
+      height: 14px;
       border-radius: 50%;
       background: #38bdf8;
       cursor: pointer;
-      box-shadow: 0 0 10px rgba(56, 189, 248, 0.6);
+      box-shadow: 0 0 8px rgba(56, 189, 248, 0.7);
       border: 2px solid #ffffff;
       transition: transform 0.1s ease;
     }
@@ -81,10 +82,10 @@
       0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.5); }
       50% { box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.2); }
     }
-    /* Custom scrollbar */
+    /* Sleek custom scrollbars */
     ::-webkit-scrollbar {
-      width: 5px;
-      height: 5px;
+      width: 4px;
+      height: 4px;
     }
     ::-webkit-scrollbar-track {
       background: transparent;
@@ -98,81 +99,84 @@
     }
   </style>
 </head>
-<body>
-  <div id="app" class="max-w-4xl mx-auto bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col transition-all">
+<body class="p-1 sm:p-1.5 flex items-center justify-center">
+  <div id="app" class="w-full h-[478px] max-h-[478px] bg-slate-900 border border-slate-800 rounded-xl shadow-2xl overflow-hidden flex flex-col transition-all">
     
-    <!-- Top Header -->
-    <header class="px-4 py-3 bg-slate-950/80 backdrop-blur-md border-b border-slate-800 flex items-center justify-between gap-3">
-      <div class="flex items-center gap-3 min-w-0">
+    <!-- Top Header (Compact 40px) -->
+    <header class="h-10 px-3 bg-slate-950/90 backdrop-blur-md border-b border-slate-800 flex items-center justify-between gap-2 shrink-0">
+      <div class="flex items-center gap-2 min-w-0">
         <!-- SolidWorks Emblem -->
-        <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-rose-500 to-red-600 text-white flex items-center justify-center font-black text-xs shadow-md shadow-rose-950/40 ring-1 ring-white/10 shrink-0">
+        <div class="w-6 h-6 rounded bg-gradient-to-br from-rose-500 to-red-600 text-white flex items-center justify-center font-black text-[10px] shadow-sm shadow-rose-950/50 ring-1 ring-white/10 shrink-0">
           SW
         </div>
-        <div class="min-w-0">
-          <div class="flex items-center gap-2">
-            <h1 id="model-title" class="text-sm font-bold text-white tracking-tight truncate max-w-[180px] sm:max-w-xs md:max-w-md">SolidWorks Part</h1>
-            <span id="unit-badge" class="px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold bg-slate-800 text-cyan-400 border border-slate-700 uppercase">MM</span>
-          </div>
-          <div class="flex items-center gap-2 text-xs text-slate-400 mt-0.5">
-            <span id="connection-badge" class="inline-flex items-center gap-1.5 font-medium text-emerald-400 text-[11px]">
-              <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-              <span id="connection-text">Fast-Bridge Active</span>
-            </span>
-            <span class="text-slate-600">•</span>
-            <span id="features-summary" class="text-slate-400 text-[11px]">Parametric CAD</span>
-          </div>
+        <div class="flex items-center gap-1.5 min-w-0">
+          <h1 id="model-title" class="text-xs font-bold text-white tracking-tight truncate max-w-[140px] sm:max-w-[200px]" title="SolidWorks Active Part">SolidWorks Part</h1>
+          <span id="unit-badge" class="px-1 py-0.2 rounded text-[9px] font-mono font-semibold bg-slate-800 text-cyan-400 border border-slate-700 uppercase">MM</span>
+          <span id="connection-badge" class="hidden sm:inline-flex items-center gap-1 text-[10px] font-medium text-emerald-400">
+            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span id="connection-text">Live</span>
+          </span>
         </div>
       </div>
 
+      <!-- Center View Mode Tabs -->
+      <div class="flex items-center p-0.5 rounded-lg bg-slate-950 border border-slate-800 text-[11px] shrink-0">
+        <button id="btn-mode-split" class="mode-btn px-2 py-0.5 rounded font-medium transition cursor-pointer bg-cyan-600 text-white shadow-xs" title="Side-by-side Viewport and Sliders">Split</button>
+        <button id="btn-mode-sliders" class="mode-btn px-2 py-0.5 rounded font-medium transition cursor-pointer text-slate-400 hover:text-slate-200" title="Maximize Sliders">Sliders</button>
+        <button id="btn-mode-3d" class="mode-btn px-2 py-0.5 rounded font-medium transition cursor-pointer text-slate-400 hover:text-slate-200" title="Maximize 3D Viewport">3D View</button>
+      </div>
+
       <!-- Action Buttons -->
-      <div class="flex items-center gap-2 shrink-0">
-        <button id="btn-refresh" title="Reload from SolidWorks" class="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition text-xs font-medium flex items-center gap-1.5 cursor-pointer shadow-sm">
+      <div class="flex items-center gap-1.5 shrink-0">
+        <button id="btn-refresh" title="Reload dimensions from SolidWorks" class="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition cursor-pointer">
           <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
-          <span class="hidden sm:inline">Sync</span>
         </button>
-        <button id="btn-prompt-agent" title="Send modifications to AI chat" class="px-3 py-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-sky-600 hover:from-cyan-400 hover:to-sky-500 text-white transition text-xs font-semibold flex items-center gap-1.5 shadow-md shadow-sky-950/40 cursor-pointer">
-          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
-          <span>Prompt Agent</span>
+        <button id="btn-popout" title="Open Studio in new full window/tab" class="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition cursor-pointer">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
+        </button>
+        <button id="btn-prompt-agent" title="Send modifications to AI chat" class="px-2.5 py-1 rounded-lg bg-gradient-to-r from-cyan-500 to-sky-600 hover:from-cyan-400 hover:to-sky-500 text-white transition text-[11px] font-semibold flex items-center gap-1 shadow-sm shadow-sky-950/40 cursor-pointer">
+          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+          <span class="hidden sm:inline">Prompt</span>
         </button>
       </div>
     </header>
 
-    <!-- Main Workspace: Viewport (Left/Top) + Parametric Sliders (Right/Bottom) -->
-    <div class="grid grid-cols-1 md:grid-cols-12 gap-0 border-b border-slate-800">
+    <!-- Main Workspace (Flex Row, Side-by-Side: Viewport Left + Sliders Right) -->
+    <div id="workspace-container" class="flex-1 min-h-0 flex flex-row overflow-hidden border-b border-slate-800">
       
-      <!-- 3D Viewport Stage (5 cols on md) -->
-      <div class="md:col-span-5 bg-slate-950/70 p-3 flex flex-col justify-between border-b md:border-b-0 md:border-r border-slate-800">
+      <!-- Left: 3D Viewport Column (w-[240px] to w-[280px]) -->
+      <div id="col-viewport" class="w-[230px] sm:w-[260px] shrink-0 bg-slate-950/80 p-2.5 flex flex-col justify-between border-r border-slate-800 overflow-hidden transition-all duration-200">
         
         <!-- Orientation Toolbar -->
-        <div class="flex items-center justify-between mb-2">
-          <div class="flex items-center p-0.5 rounded-lg bg-slate-900 border border-slate-800">
-            <button data-view="*Isometric" class="view-btn px-2.5 py-1 rounded text-xs font-medium transition cursor-pointer bg-cyan-600 text-white shadow-xs">Iso</button>
-            <button data-view="*Front" class="view-btn px-2.5 py-1 rounded text-xs font-medium transition cursor-pointer text-slate-400 hover:text-slate-200">Front</button>
-            <button data-view="*Top" class="view-btn px-2.5 py-1 rounded text-xs font-medium transition cursor-pointer text-slate-400 hover:text-slate-200">Top</button>
-            <button data-view="*Right" class="view-btn px-2.5 py-1 rounded text-xs font-medium transition cursor-pointer text-slate-400 hover:text-slate-200">Right</button>
+        <div class="flex items-center justify-between mb-1.5 shrink-0">
+          <div class="flex items-center p-0.5 rounded bg-slate-900 border border-slate-800 text-[10px]">
+            <button data-view="*Isometric" class="view-btn px-2 py-0.5 rounded font-medium transition cursor-pointer bg-cyan-600 text-white shadow-xs">Iso</button>
+            <button data-view="*Front" class="view-btn px-2 py-0.5 rounded font-medium transition cursor-pointer text-slate-400 hover:text-slate-200">Front</button>
+            <button data-view="*Top" class="view-btn px-2 py-0.5 rounded font-medium transition cursor-pointer text-slate-400 hover:text-slate-200">Top</button>
+            <button data-view="*Right" class="view-btn px-2 py-0.5 rounded font-medium transition cursor-pointer text-slate-400 hover:text-slate-200">Right</button>
           </div>
-          <span id="render-latency" class="text-[10px] font-mono text-slate-500">Live</span>
+          <span id="render-latency" class="text-[9px] font-mono text-slate-500">Live</span>
         </div>
 
         <!-- Viewport Render Area -->
-        <div id="viewport-stage" class="relative w-full aspect-square sm:aspect-[4/3] rounded-xl overflow-hidden bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 border border-slate-800 flex items-center justify-center select-none shadow-inner my-auto">
+        <div id="viewport-stage" class="relative flex-1 min-h-0 w-full rounded-lg overflow-hidden bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 border border-slate-800 flex items-center justify-center select-none shadow-inner my-auto">
           <!-- CAD Grid Background -->
-          <div class="absolute inset-0 cad-grid opacity-25 pointer-events-none"></div>
+          <div class="absolute inset-0 cad-grid opacity-20 pointer-events-none"></div>
 
-          <!-- Placeholder Stage when image is loading / empty -->
-          <div id="viewport-fallback" class="absolute inset-0 flex flex-col items-center justify-center p-4 text-center transition-opacity duration-300">
-            <div class="w-14 h-14 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400 mb-2.5 shadow-lg shadow-cyan-500/5 animate-pulse">
-              <svg class="w-7 h-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <!-- Fallback Stage -->
+          <div id="viewport-fallback" class="absolute inset-0 flex flex-col items-center justify-center p-3 text-center transition-opacity duration-300">
+            <div class="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400 mb-2 shadow-sm animate-pulse">
+              <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                 <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
                 <polyline points="3.27 6.96 12 12.01 20.73 6.96"/>
                 <line x1="12" y1="22.08" x2="12" y2="12"/>
               </svg>
             </div>
-            <p id="viewport-fallback-status" class="text-xs font-semibold text-slate-300 uppercase tracking-wider">SolidWorks Viewport</p>
-            <p class="text-[11px] text-slate-500 mt-0.5">Capturing live 3D orientation...</p>
-            <button id="btn-force-capture" class="mt-2.5 px-3 py-1 rounded-md text-[11px] font-medium bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 border border-cyan-500/30 transition flex items-center gap-1.5 cursor-pointer">
+            <p id="viewport-fallback-status" class="text-[11px] font-semibold text-slate-300 uppercase tracking-wider">SolidWorks Viewport</p>
+            <p class="text-[10px] text-slate-500 mt-0.5">Capturing live 3D preview...</p>
+            <button id="btn-force-capture" class="mt-2 px-2.5 py-0.5 rounded text-[10px] font-medium bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 border border-cyan-500/30 transition flex items-center gap-1 cursor-pointer">
               <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path></svg>
-              <span>Capture Viewport</span>
+              <span>Capture</span>
             </button>
           </div>
 
@@ -181,10 +185,10 @@
                src=""
                alt=""
                style="display: none;"
-               class="relative z-10 max-h-full max-w-full object-contain filter drop-shadow-[0_10px_20px_rgba(0,0,0,0.5)] transition-opacity duration-200">
+               class="relative z-10 max-h-full max-w-full object-contain filter drop-shadow-[0_8px_16px_rgba(0,0,0,0.6)] transition-opacity duration-200">
 
           <!-- Coordinate Axes Triad (Bottom-Left) -->
-          <div class="absolute bottom-2 left-2 z-20 flex items-center gap-1.5 px-2 py-0.5 rounded bg-slate-900/85 backdrop-blur-md border border-slate-800 text-[10px] font-mono shadow-sm">
+          <div class="absolute bottom-1.5 left-1.5 z-20 flex items-center gap-1 px-1.5 py-0.2 rounded bg-slate-900/85 backdrop-blur-md border border-slate-800 text-[9px] font-mono shadow-xs">
             <span class="text-rose-400 font-bold">X</span>
             <span class="text-emerald-400 font-bold">Y</span>
             <span class="text-sky-400 font-bold">Z</span>
@@ -193,56 +197,58 @@
           </div>
 
           <!-- Bounding Box Floating HUD (Bottom-Right) -->
-          <div id="bbox-readout" class="absolute bottom-2 right-2 z-20 px-2 py-0.5 rounded bg-slate-900/85 backdrop-blur-md border border-slate-800 text-[10px] font-mono text-slate-300 flex items-center gap-1 shadow-sm">
+          <div id="bbox-readout" class="absolute bottom-1.5 right-1.5 z-20 px-1.5 py-0.2 rounded bg-slate-900/85 backdrop-blur-md border border-slate-800 text-[9px] font-mono text-slate-300 flex items-center gap-1 shadow-xs">
             <svg class="w-2.5 h-2.5 text-cyan-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
             <span id="bbox-text">Bounds: --</span>
           </div>
 
           <!-- Rebuilding Progress Overlay -->
-          <div id="rebuild-spinner" class="absolute inset-0 z-30 bg-slate-950/70 backdrop-blur-xs flex flex-col items-center justify-center gap-2 opacity-0 pointer-events-none transition-opacity duration-150">
-            <div class="w-7 h-7 rounded-full border-2 border-cyan-400/20 border-t-cyan-400 animate-spin"></div>
-            <span class="text-[11px] font-medium text-cyan-200 tracking-wider uppercase drop-shadow">Rebuilding...</span>
+          <div id="rebuild-spinner" class="absolute inset-0 z-30 bg-slate-950/75 backdrop-blur-xs flex flex-col items-center justify-center gap-1.5 opacity-0 pointer-events-none transition-opacity duration-150">
+            <div class="w-6 h-6 rounded-full border-2 border-cyan-400/20 border-t-cyan-400 animate-spin"></div>
+            <span class="text-[10px] font-medium text-cyan-200 tracking-wider uppercase drop-shadow">Rebuilding...</span>
           </div>
         </div>
 
       </div>
 
-      <!-- Parametric Sliders Panel (7 cols on md) -->
-      <div class="md:col-span-7 p-4 flex flex-col justify-between max-h-[460px] overflow-y-auto bg-slate-900">
-        <div>
-          <div class="flex items-center justify-between pb-2.5 mb-3 border-b border-slate-800">
-            <div class="flex items-center gap-2">
-              <span class="text-xs font-bold text-white uppercase tracking-wider">Parametric Controls</span>
+      <!-- Right: Parametric Sliders Column -->
+      <div id="col-sliders" class="flex-1 min-w-0 p-3 flex flex-col justify-between overflow-hidden bg-slate-900">
+        <div class="flex-1 min-h-0 flex flex-col">
+          <!-- Controls Header Bar -->
+          <div class="flex items-center justify-between pb-2 mb-2 border-b border-slate-800 shrink-0">
+            <div class="flex items-center gap-1.5">
+              <span class="text-[11px] font-bold text-white uppercase tracking-wider">Parameters</span>
               <span id="dims-count" class="px-1.5 py-0.2 rounded text-[10px] font-mono bg-slate-800 text-slate-400 border border-slate-700">0</span>
             </div>
-            <span id="modified-count-badge" class="text-[11px] font-mono text-cyan-400 font-medium">0 modified</span>
+            <span id="modified-count-badge" class="text-[10px] font-mono text-cyan-400 font-medium">0 modified</span>
           </div>
           
-          <div id="dimensions-container" class="space-y-3.5">
-            <!-- Dynamically populated dimension groups -->
+          <!-- Scrollable Dimension List -->
+          <div id="dimensions-container" class="flex-1 min-h-0 overflow-y-auto space-y-2.5 pr-1">
+            <!-- Dynamically populated feature cards -->
           </div>
         </div>
 
-        <!-- Toast Feedback Bar -->
-        <div id="status-toast" class="mt-3 text-xs py-2 px-3 rounded-lg border border-transparent flex items-center justify-between transition-all opacity-0">
+        <!-- Toast Notification Bar (Compact) -->
+        <div id="status-toast" class="mt-2 text-[11px] py-1 px-2.5 rounded border border-transparent flex items-center justify-between transition-all opacity-0 shrink-0">
           <span id="toast-message" class="truncate font-medium">Ready</span>
         </div>
       </div>
 
     </div>
 
-    <!-- Quick Edit Action Bar -->
-    <footer class="px-4 py-2 bg-slate-950/60 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400">
+    <!-- Quick Edit Action Bar (Footer 30px) -->
+    <footer class="h-8 px-3 bg-slate-950/80 border-t border-slate-800 flex items-center justify-between text-[11px] text-slate-400 shrink-0">
       <div class="flex items-center gap-2">
         <label class="inline-flex items-center gap-1.5 cursor-pointer">
-          <input type="checkbox" id="chk-live-sync" checked class="rounded border-slate-700 text-cyan-500 focus:ring-0 w-3.5 h-3.5 bg-slate-800">
-          <span class="text-[11px]">Live Rebuild on Drag</span>
+          <input type="checkbox" id="chk-live-sync" checked class="rounded border-slate-700 text-cyan-500 focus:ring-0 w-3 h-3 bg-slate-800">
+          <span class="text-[10px] text-slate-300">Live Rebuild on Drag</span>
         </label>
       </div>
-      <div class="flex items-center gap-3">
-        <button id="btn-reset-all" class="text-[11px] text-slate-400 hover:text-rose-400 transition cursor-pointer">Reset All</button>
+      <div class="flex items-center gap-2.5">
+        <button id="btn-reset-all" class="text-[10px] text-slate-400 hover:text-rose-400 transition cursor-pointer">Reset All</button>
         <span class="text-slate-700">|</span>
-        <span class="font-mono text-[11px] text-slate-500">SolidWorks AI Studio</span>
+        <span class="font-mono text-[10px] text-slate-500">SolidWorks AI Studio</span>
       </div>
     </footer>
 
@@ -256,6 +262,8 @@
       units: "mm",
       initialImage: "",
       bbox: null,
+      featureLabels: {},
+      dimensionLabels: {},
       dimensions: []
     };
 
@@ -266,6 +274,7 @@
     let pendingUpdate = null;
     let debounceTimer = null;
     let activeView = "*Isometric";
+    let currentMode = "split"; // "split", "sliders", "3d"
 
     // Viewport image callbacks
     function onViewportImageLoaded(img) {
@@ -298,7 +307,6 @@
         previewImg.src = state.initialImage;
         previewImg.onload = () => onViewportImageLoaded(previewImg);
       } else {
-        // Automatically attempt to fetch viewport capture on startup
         requestCapture(activeView);
       }
 
@@ -323,6 +331,14 @@
         });
       });
 
+      // Bind Layout Mode Toggles
+      document.getElementById("btn-mode-split").addEventListener("click", () => setLayoutMode("split"));
+      document.getElementById("btn-mode-sliders").addEventListener("click", () => setLayoutMode("sliders"));
+      document.getElementById("btn-mode-3d").addEventListener("click", () => setLayoutMode("3d"));
+
+      // Bind popout / expand
+      document.getElementById("btn-popout").addEventListener("click", openFullStudio);
+
       // Bind force capture button
       const forceBtn = document.getElementById("btn-force-capture");
       if (forceBtn) {
@@ -345,25 +361,64 @@
       checkBridgeHealth();
     });
 
+    // Layout mode switcher
+    function setLayoutMode(mode) {
+      currentMode = mode;
+      const colViewport = document.getElementById("col-viewport");
+      const colSliders = document.getElementById("col-sliders");
+      const btns = {
+        split: document.getElementById("btn-mode-split"),
+        sliders: document.getElementById("btn-mode-sliders"),
+        "3d": document.getElementById("btn-mode-3d"),
+      };
+
+      Object.entries(btns).forEach(([k, btn]) => {
+        if (k === mode) {
+          btn.classList.add("bg-cyan-600", "text-white", "shadow-xs");
+          btn.classList.remove("text-slate-400");
+        } else {
+          btn.classList.remove("bg-cyan-600", "text-white", "shadow-xs");
+          btn.classList.add("text-slate-400");
+        }
+      });
+
+      if (mode === "split") {
+        colViewport.style.display = "flex";
+        colViewport.className = "w-[230px] sm:w-[260px] shrink-0 bg-slate-950/80 p-2.5 flex flex-col justify-between border-r border-slate-800 overflow-hidden transition-all duration-200";
+        colSliders.style.display = "flex";
+      } else if (mode === "sliders") {
+        colViewport.style.display = "none";
+        colSliders.style.display = "flex";
+      } else if (mode === "3d") {
+        colViewport.style.display = "flex";
+        colViewport.className = "flex-1 w-full bg-slate-950/80 p-3 flex flex-col justify-between border-r-0 overflow-hidden transition-all duration-200";
+        colSliders.style.display = "none";
+      }
+    }
+
+    // Open full studio in external window/tab
+    function openFullStudio() {
+      const port = state.bridgePort || 54321;
+      const url = `http://127.0.0.1:${port}/api/app.html`;
+      window.open(url, "_blank");
+    }
+
     // Check Fast-Bridge health
     async function checkBridgeHealth() {
       const port = state.bridgePort || 54321;
       try {
         const resp = await fetch(`http://127.0.0.1:${port}/health`, { method: "GET" });
         if (resp.ok) {
-          const data = await resp.json();
-          document.getElementById("connection-badge").className = "inline-flex items-center gap-1.5 font-medium text-emerald-400 text-[11px]";
-          document.getElementById("connection-text").innerText = `Fast-Bridge :${port}`;
+          document.getElementById("connection-badge").className = "hidden sm:inline-flex items-center gap-1 text-[10px] font-medium text-emerald-400";
+          document.getElementById("connection-text").innerText = `:${port}`;
           return;
         }
-      } catch (e) {
-        // Fallback to PostMessage MCP Apps mode
-      }
-      document.getElementById("connection-badge").className = "inline-flex items-center gap-1.5 font-medium text-sky-400 text-[11px]";
-      document.getElementById("connection-text").innerText = "MCP Apps Protocol";
+      } catch (e) {}
+      document.getElementById("connection-badge").className = "hidden sm:inline-flex items-center gap-1 text-[10px] font-medium text-sky-400";
+      document.getElementById("connection-text").innerText = "MCP App";
     }
 
-    // Render grouped dimension sliders
+    // Render grouped dimension sliders with semantic labeling and inline feature renaming
     function renderDimensions(dims) {
       const container = document.getElementById("dimensions-container");
       container.innerHTML = "";
@@ -393,27 +448,83 @@
 
       Object.entries(groups).forEach(([featName, featDims]) => {
         const groupEl = document.createElement("div");
-        groupEl.className = "rounded-xl border border-slate-800 bg-slate-950/40 overflow-hidden";
-        
-        // Group Header
+        groupEl.className = "rounded-lg border border-slate-800 bg-slate-950/50 overflow-hidden";
+        groupEl.id = `group-${sanitizeId(featName)}`;
+
+        // Friendly label resolution
+        const friendlyFeatLabel = (state.featureLabels && state.featureLabels[featName]) || featName;
+        const hasCustomFeatLabel = friendlyFeatLabel !== featName;
+
+        // Group Header with Inline Feature Renaming ✏️
         const headerEl = document.createElement("div");
-        headerEl.className = "px-3 py-2 bg-slate-950/80 border-b border-slate-800/80 flex items-center justify-between text-xs font-semibold text-slate-300";
+        headerEl.className = "px-2.5 py-1.5 bg-slate-950/80 border-b border-slate-800/80 flex items-center justify-between text-xs font-semibold text-slate-300";
         headerEl.innerHTML = `
-          <div class="flex items-center gap-2">
-            <svg class="w-3.5 h-3.5 text-cyan-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
-            <span>${featName}</span>
+          <div class="flex items-center gap-1.5 min-w-0 flex-1">
+            <svg class="w-3.5 h-3.5 text-cyan-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+            <div id="feat-title-wrap-${sanitizeId(featName)}" class="flex items-center gap-1 min-w-0">
+              <span id="feat-display-${sanitizeId(featName)}" class="font-bold text-white truncate max-w-[150px] cursor-pointer hover:text-cyan-300" title="Click to rename feature in SolidWorks">${friendlyFeatLabel}</span>
+              ${hasCustomFeatLabel ? `<span class="text-[9px] font-mono text-slate-500 truncate max-w-[80px]">(${featName})</span>` : ''}
+              <button class="rename-feat-btn text-slate-500 hover:text-cyan-400 transition p-0.5" title="Rename feature in SolidWorks" data-feat="${featName}">
+                <svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
+              </button>
+            </div>
+            <!-- Inline Rename Input (Hidden by default) -->
+            <div id="feat-rename-box-${sanitizeId(featName)}" class="hidden flex items-center gap-1">
+              <input type="text" id="feat-input-${sanitizeId(featName)}" value="${featName}" class="px-1.5 py-0.2 text-[11px] bg-slate-800 border border-cyan-500 rounded text-white font-medium focus:outline-none w-28">
+              <button class="save-rename-btn p-0.5 rounded bg-cyan-600 hover:bg-cyan-500 text-white" data-feat="${featName}" title="Save to SolidWorks">✓</button>
+              <button class="cancel-rename-btn p-0.5 text-slate-400 hover:text-white" data-feat="${featName}" title="Cancel">✕</button>
+            </div>
           </div>
-          <span class="text-[10px] font-mono text-slate-500">${featDims.length} dim</span>
+          <span class="text-[9px] font-mono text-slate-500 shrink-0">${featDims.length} dim</span>
         `;
         groupEl.appendChild(headerEl);
 
+        // Bind Rename Handlers
+        const renameBtn = headerEl.querySelector(".rename-feat-btn");
+        const titleSpan = headerEl.querySelector(`#feat-display-${sanitizeId(featName)}`);
+        const titleWrap = headerEl.querySelector(`#feat-title-wrap-${sanitizeId(featName)}`);
+        const renameBox = headerEl.querySelector(`#feat-rename-box-${sanitizeId(featName)}`);
+        const renameInput = headerEl.querySelector(`#feat-input-${sanitizeId(featName)}`);
+        const saveBtn = headerEl.querySelector(".save-rename-btn");
+        const cancelBtn = headerEl.querySelector(".cancel-rename-btn");
+
+        const startRename = () => {
+          titleWrap.classList.add("hidden");
+          renameBox.classList.remove("hidden");
+          renameInput.focus();
+          renameInput.select();
+        };
+
+        const cancelRename = () => {
+          renameBox.classList.add("hidden");
+          titleWrap.classList.remove("hidden");
+        };
+
+        const commitRename = async () => {
+          const newName = renameInput.value.trim();
+          if (!newName || newName === featName) {
+            cancelRename();
+            return;
+          }
+          await renameFeatureInSolidWorks(featName, newName);
+        };
+
+        renameBtn.addEventListener("click", startRename);
+        titleSpan.addEventListener("click", startRename);
+        cancelBtn.addEventListener("click", cancelRename);
+        saveBtn.addEventListener("click", commitRename);
+        renameInput.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") commitRename();
+          if (e.key === "Escape") cancelRename();
+        });
+
         // Group Body
         const bodyEl = document.createElement("div");
-        bodyEl.className = "p-3 space-y-3";
+        bodyEl.className = "p-2 space-y-2";
 
         featDims.forEach(dim => {
           const rowEl = document.createElement("div");
-          rowEl.className = "space-y-1.5";
+          rowEl.className = "space-y-1";
           rowEl.id = `dim-row-${sanitizeId(dim.full_name)}`;
 
           const isAngle = dim.is_angle || dim.units === "deg";
@@ -422,10 +533,16 @@
           const minVal = dim.min !== undefined ? dim.min : (isAngle ? 1.0 : Math.max(0.1, dim.value * 0.2));
           const maxVal = dim.max !== undefined ? dim.max : (isAngle ? 180.0 : Math.max(10.0, dim.value * 2.5));
 
+          // Friendly label & semantic hint
+          const customDimLabel = (state.dimensionLabels && state.dimensionLabels[dim.full_name]);
+          const semanticHint = customDimLabel || dim.semantic_hint || (dim.name || "Dimension");
+          const showSubName = customDimLabel || (dim.semantic_hint && dim.name !== dim.semantic_hint);
+
           rowEl.innerHTML = `
-            <div class="flex items-center justify-between text-xs">
+            <div class="flex items-center justify-between text-[11px]">
               <div class="flex items-center gap-1.5 min-w-0">
-                <span class="font-mono text-slate-300 font-semibold truncate max-w-[140px] sm:max-w-[180px]">${dim.name || dim.full_name}</span>
+                <span class="font-medium text-slate-200 truncate max-w-[120px] sm:max-w-[160px]" title="${dim.full_name}">${semanticHint}</span>
+                <span class="text-[9px] font-mono text-slate-500">${dim.name}</span>
                 <span id="mod-dot-${sanitizeId(dim.full_name)}" class="w-1.5 h-1.5 rounded-full bg-cyan-400 hidden"></span>
               </div>
               <div class="flex items-center gap-1">
@@ -435,12 +552,12 @@
                        step="${stepVal}" 
                        min="${minVal}" 
                        max="${maxVal}" 
-                       class="w-16 px-1.5 py-0.5 text-right font-mono text-xs bg-slate-800 border border-slate-700 rounded text-cyan-300 focus:outline-none focus:border-cyan-400">
-                <span class="text-[11px] font-mono text-slate-400">${unitLabel}</span>
+                       class="w-14 px-1 py-0.2 text-right font-mono text-[11px] bg-slate-800 border border-slate-700 rounded text-cyan-300 focus:outline-none focus:border-cyan-400">
+                <span class="text-[10px] font-mono text-slate-400">${unitLabel}</span>
               </div>
             </div>
-            <div class="flex items-center gap-2">
-              <button title="Decrease" class="step-btn px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white text-[11px] font-mono border border-slate-700" data-delta="-${stepVal * 5}">-</button>
+            <div class="flex items-center gap-1.5">
+              <button title="Decrease" class="step-btn px-1 py-0.2 rounded bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white text-[10px] font-mono border border-slate-700" data-delta="-${stepVal * 5}">-</button>
               <input type="range" 
                      id="slider-${sanitizeId(dim.full_name)}" 
                      value="${dim.value}" 
@@ -448,7 +565,7 @@
                      max="${maxVal}" 
                      step="${stepVal}" 
                      class="flex-1 accent-cyan-400 cursor-pointer">
-              <button title="Increase" class="step-btn px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white text-[11px] font-mono border border-slate-700" data-delta="+${stepVal * 5}">+</button>
+              <button title="Increase" class="step-btn px-1 py-0.2 rounded bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white text-[10px] font-mono border border-slate-700" data-delta="+${stepVal * 5}">+</button>
             </div>
           `;
 
@@ -489,6 +606,40 @@
       });
     }
 
+    // Rename feature live via Fast-Bridge
+    async function renameFeatureInSolidWorks(oldName, newName) {
+      showToast(`Renaming '${oldName}' to '${newName}'...`, "info");
+      const port = state.bridgePort || 54321;
+      try {
+        const resp = await fetch(`http://127.0.0.1:${port}/api/rename_feature`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ feature_name: oldName, new_name: newName })
+        });
+        const res = await resp.json();
+        if (resp.ok && res.success) {
+          showToast(`Renamed '${oldName}' -> '${newName}'`, "success");
+          // Update local state
+          state.dimensions.forEach(d => {
+            if (d.owner_feature === oldName) {
+              d.owner_feature = newName;
+              d.full_name = d.full_name.replace(`@${oldName}@`, `@${newName}@`);
+            }
+          });
+          if (state.featureLabels) {
+            state.featureLabels[newName] = newName;
+            delete state.featureLabels[oldName];
+          }
+          renderDimensions(state.dimensions);
+          return;
+        } else {
+          showToast(res.message || "Failed to rename feature", "error");
+        }
+      } catch (e) {
+        showToast(`Error renaming feature: ${e.message}`, "error");
+      }
+    }
+
     // Debounced dimension change handler
     function onDimensionInput(dimName, value, units) {
       currentValues.set(dimName, value);
@@ -502,86 +653,61 @@
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => {
         executePendingUpdate();
-      }, 60);
+      }, 75);
     }
 
-    // Execute single-flight update over Fast-Bridge
+    // Send dimension update to Fast-Bridge
     async function executePendingUpdate() {
-      if (isUpdating || !pendingUpdate) return;
-
+      if (!pendingUpdate || isUpdating) return;
       const update = pendingUpdate;
       pendingUpdate = null;
       isUpdating = true;
 
-      setRebuildingState(true);
-
+      setRebuildingUI(true);
       const port = state.bridgePort || 54321;
-      const url = `http://127.0.0.1:${port}/api/set_dimension`;
+      const startTime = performance.now();
 
       try {
-        const resp = await fetch(url, {
+        const resp = await fetch(`http://127.0.0.1:${port}/api/set_dimension`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(update)
         });
 
+        const elapsed = Math.round(performance.now() - startTime);
+        document.getElementById("render-latency").innerText = `${elapsed}ms`;
+
         const data = await resp.json();
 
-        if (data.success) {
-          showToast(`Rebuilt: ${update.name} → ${update.value} ${update.units}`, "success");
+        if (resp.ok && data.success) {
           if (data.image_base64) {
-            updateViewportImage(data.image_base64);
+            const previewImg = document.getElementById("viewport-preview");
+            previewImg.src = data.image_base64;
+            onViewportImageLoaded(previewImg);
           }
-          if (data.bbox) {
-            updateBboxReadout(data.bbox);
-          }
+          if (data.bbox) updateBboxReadout(data.bbox);
+          showToast(`Rebuilt: ${update.name.split('@')[0]} -> ${update.value} ${update.units}`, "success");
+          clearRowError(update.name);
         } else {
-          // Rebuild error with automatic rollback
-          showToast(`Rebuild error: ${data.error || 'Failed'}. Reverted.`, "danger");
-          const revertVal = data.revert_value !== undefined ? data.revert_value : originalValues.get(update.name);
-          if (revertVal !== undefined) {
-            syncInputElements(update.name, revertVal);
-            currentValues.set(update.name, revertVal);
-            updateModifiedIndicators();
-            flashErrorState(update.name);
+          highlightRowError(update.name);
+          showToast(data.error || "Rebuild failed - rolling back", "error");
+          if (data.revert_value !== undefined && data.revert_value !== null) {
+            revertLocalDimension(update.name, data.revert_value);
           }
         }
       } catch (e) {
-        // Fallback: PostMessage MCP Apps protocol
-        tryPostMessageSetDimension(update);
+        showToast(`Fast-Bridge Error: ${e.message}`, "error");
       } finally {
-        setRebuildingState(false);
         isUpdating = false;
-
-        if (pendingUpdate) {
-          executePendingUpdate();
-        }
+        setRebuildingUI(false);
+        if (pendingUpdate) executePendingUpdate();
       }
     }
 
-    // MCP Apps PostMessage fallback
-    function tryPostMessageSetDimension(update) {
-      if (window.parent && window.parent !== window) {
-        window.parent.postMessage({
-          jsonrpc: "2.0",
-          method: "tools/call",
-          params: {
-            name: "set_dimension",
-            arguments: {
-              name: update.name,
-              value: update.value,
-              units: update.units
-            }
-          },
-          id: Date.now()
-        }, "*");
-      }
-    }
-
-    // Request viewport image for view
+    // Request viewport snapshot
     async function requestCapture(viewName) {
-      setRebuildingState(true);
       const port = state.bridgePort || 54321;
+      setRebuildingUI(true);
       try {
         const resp = await fetch(`http://127.0.0.1:${port}/api/capture`, {
           method: "POST",
@@ -590,99 +716,95 @@
         });
         if (resp.ok) {
           const data = await resp.json();
-          if (data.success && data.image_base64) {
-            updateViewportImage(data.image_base64);
-            if (data.bbox) updateBboxReadout(data.bbox);
+          if (data.image_base64) {
+            const previewImg = document.getElementById("viewport-preview");
+            previewImg.src = data.image_base64;
+            onViewportImageLoaded(previewImg);
           }
         }
-      } catch (e) {
-        console.warn("Capture fetch failed:", e);
-      } finally {
-        setRebuildingState(false);
+      } catch (e) {}
+      finally {
+        setRebuildingUI(false);
       }
     }
 
-    // Update viewport preview image safely
-    function updateViewportImage(base64Data) {
-      const img = document.getElementById("viewport-preview");
-      if (!img) return;
-      img.src = base64Data;
-      img.onload = () => onViewportImageLoaded(img);
-    }
-
-    // Update Bounding Box HUD
-    function updateBboxReadout(bbox) {
-      const el = document.getElementById("bbox-text");
-      if (!el) return;
-      if (!bbox) {
-        el.innerText = "Bounds: Active";
-        return;
-      }
-      const dx = bbox.dx !== undefined ? bbox.dx : (bbox.width || "--");
-      const dy = bbox.dy !== undefined ? bbox.dy : (bbox.height || "--");
-      const dz = bbox.dz !== undefined ? bbox.dz : (bbox.depth || "--");
-      el.innerText = `${dx} × ${dy} × ${dz} mm`;
-    }
-
-    // Refresh dimensions list from server
+    // Refresh dimensions from SolidWorks
     async function fetchDimensions() {
       const port = state.bridgePort || 54321;
+      showToast("Fetching live dimensions...", "info");
       try {
-        const resp = await fetch(`http://127.0.0.1:${port}/api/dimensions`);
+        const resp = await fetch(`http://127.0.0.1:${port}/api/dimensions`, { method: "GET" });
         if (resp.ok) {
           const data = await resp.json();
           if (data.dimensions) {
-            renderDimensions(data.dimensions);
-            showToast("Dimensions synchronized with SolidWorks", "success");
+            state.dimensions = data.dimensions;
+            renderDimensions(state.dimensions);
+            showToast(`Loaded ${data.dimensions.length} dimensions`, "success");
           }
         }
       } catch (e) {
-        showToast("Sync failed: Fast-Bridge offline", "danger");
+        showToast("Failed to connect to Fast-Bridge", "error");
       }
     }
 
-    // Reset all parameters to initial values
-    function resetAllDimensions() {
-      originalValues.forEach((origVal, dimName) => {
-        syncInputElements(dimName, origVal);
-        onDimensionInput(dimName, origVal, state.units);
-      });
-      showToast("Reset all dimensions to initial values", "info");
+    function setRebuildingUI(active) {
+      const spinner = document.getElementById("rebuild-spinner");
+      if (spinner) spinner.style.opacity = active ? "1" : "0";
     }
 
-    function syncInputElements(dimName, val) {
-      const s = document.getElementById(`slider-${sanitizeId(dimName)}`);
-      const n = document.getElementById(`num-${sanitizeId(dimName)}`);
-      if (s) s.value = val;
-      if (n) n.value = val;
+    function updateBboxReadout(bbox) {
+      const el = document.getElementById("bbox-text");
+      if (!el) return;
+      if (bbox && bbox.dx !== undefined) {
+        el.innerText = `${round2(bbox.dx)} × ${round2(bbox.dy)} × ${round2(bbox.dz)} mm`;
+      } else {
+        el.innerText = "Bounds: active";
+      }
     }
 
     function updateModifiedIndicators() {
-      let modCount = 0;
+      let count = 0;
       currentValues.forEach((val, name) => {
         const orig = originalValues.get(name);
+        const row = document.getElementById(`dim-row-${sanitizeId(name)}`);
         const dot = document.getElementById(`mod-dot-${sanitizeId(name)}`);
-        if (Math.abs(val - orig) > 1e-4) {
-          modCount++;
+        if (orig !== undefined && Math.abs(val - orig) > 0.001) {
+          count++;
           if (dot) dot.classList.remove("hidden");
         } else {
           if (dot) dot.classList.add("hidden");
         }
       });
-      const badge = document.getElementById("modified-count-badge");
-      if (badge) badge.innerText = `${modCount} modified`;
+      document.getElementById("modified-count-badge").innerText = `${count} modified`;
     }
 
-    function flashErrorState(dimName) {
+    function highlightRowError(dimName) {
       const row = document.getElementById(`dim-row-${sanitizeId(dimName)}`);
-      if (!row) return;
-      row.classList.add("revert-error");
-      setTimeout(() => row.classList.remove("revert-error"), 1500);
+      if (row) row.classList.add("revert-error");
     }
 
-    function setRebuildingState(active) {
-      const sp = document.getElementById("rebuild-spinner");
-      if (sp) sp.style.opacity = active ? "1" : "0";
+    function clearRowError(dimName) {
+      const row = document.getElementById(`dim-row-${sanitizeId(dimName)}`);
+      if (row) row.classList.remove("revert-error");
+    }
+
+    function revertLocalDimension(dimName, value) {
+      currentValues.set(dimName, value);
+      const slider = document.getElementById(`slider-${sanitizeId(dimName)}`);
+      const numInput = document.getElementById(`num-${sanitizeId(dimName)}`);
+      if (slider) slider.value = value;
+      if (numInput) numInput.value = value;
+      updateModifiedIndicators();
+    }
+
+    function resetAllDimensions() {
+      originalValues.forEach((val, name) => {
+        revertLocalDimension(name, val);
+        const dimObj = state.dimensions.find(d => d.full_name === name);
+        const units = dimObj ? dimObj.units : "mm";
+        onDimensionInput(name, val, units);
+      });
+      showToast("Reset all dimensions to original values", "info");
     }
 
     function showToast(msg, type = "info") {
@@ -690,57 +812,58 @@
       const msgEl = document.getElementById("toast-message");
       if (!toast || !msgEl) return;
       msgEl.innerText = msg;
-      
-      toast.className = "mt-3 text-xs py-2 px-3 rounded-lg border flex items-center justify-between transition-all opacity-100 ";
+      toast.style.opacity = "1";
       if (type === "success") {
-        toast.className += "bg-emerald-950/60 border-emerald-800 text-emerald-300";
-      } else if (type === "danger") {
-        toast.className += "bg-rose-950/60 border-rose-800 text-rose-300";
+        toast.className = "mt-2 text-[10px] py-1 px-2.5 rounded border border-emerald-500/30 bg-emerald-950/40 text-emerald-300 flex items-center justify-between shrink-0";
+      } else if (type === "error") {
+        toast.className = "mt-2 text-[10px] py-1 px-2.5 rounded border border-rose-500/30 bg-rose-950/40 text-rose-300 flex items-center justify-between shrink-0";
       } else {
-        toast.className += "bg-slate-800/80 border-slate-700 text-slate-300";
+        toast.className = "mt-2 text-[10px] py-1 px-2.5 rounded border border-cyan-500/30 bg-cyan-950/40 text-cyan-300 flex items-center justify-between shrink-0";
       }
-
-      setTimeout(() => {
-        toast.classList.add("opacity-0");
-      }, 3500);
+      setTimeout(() => { toast.style.opacity = "0"; }, 3500);
     }
 
     function emitPromptToAgent() {
-      const mods = [];
+      const modified = [];
       currentValues.forEach((val, name) => {
         const orig = originalValues.get(name);
-        if (Math.abs(val - orig) > 1e-4) {
-          mods.push(`- \`${name}\`: changed from ${orig} to ${val}`);
+        if (orig !== undefined && Math.abs(val - orig) > 0.001) {
+          const dimObj = state.dimensions.find(d => d.full_name === name);
+          const feat = dimObj ? dimObj.owner_feature : "Feature";
+          const hint = (state.dimensionLabels && state.dimensionLabels[name]) || (dimObj && dimObj.semantic_hint) || dimObj?.name || name;
+          modified.push(`- ${hint} (${name}) on ${feat}: changed from ${orig} to ${val}`);
         }
       });
 
-      const promptText = mods.length > 0
-        ? `I adjusted the following parametric dimensions in SolidWorks Interactive Studio:\n${mods.join('\n')}\n\nPlease inspect the modified geometry with verify_model, verify DFM constraints, and proceed with the design.`
-        : `I inspected the SolidWorks model in Interactive Studio without changing dimensions. Please continue with the design.`;
+      if (modified.length === 0) {
+        showToast("No dimensions have been modified", "info");
+        return;
+      }
 
-      // 1. PostMessage ui/message
-      if (window.parent && window.parent !== window) {
+      const promptText = `I have adjusted the SolidWorks model parameters via the interactive studio:\n${modified.join('\n')}\nPlease verify the model geometry and update any associated technical drawings or stress simulations.`;
+
+      // Copy to clipboard
+      navigator.clipboard.writeText(promptText).then(() => {
+        showToast("Copied update prompt to clipboard!", "success");
+      }).catch(() => {
+        showToast("Prompt ready for agent", "success");
+      });
+
+      // Attempt postMessage for Generative UI
+      try {
         window.parent.postMessage({
-          jsonrpc: "2.0",
-          method: "ui/message",
-          params: { content: promptText }
+          type: "ui/message",
+          content: promptText
         }, "*");
-      }
-
-      // 2. Fallback: Copy to clipboard
-      if (navigator.clipboard) {
-        navigator.clipboard.writeText(promptText).then(() => {
-          showToast("Prompt copied to clipboard! Paste into chat.", "success");
-        }).catch(() => {
-          showToast("Copied parameters to prompt queue.", "info");
-        });
-      } else {
-        showToast("Parameters prepared for agent.", "info");
-      }
+      } catch (e) {}
     }
 
     function sanitizeId(str) {
-      return str.replace(/[^a-zA-Z0-9_-]/g, "_");
+      return String(str || "").replace(/[^a-zA-Z0-9_-]/g, "_");
+    }
+
+    function round2(val) {
+      return Number(val || 0).toFixed(1);
     }
   </script>
 </body>

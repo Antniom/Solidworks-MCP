@@ -190,3 +190,32 @@ def test_app_html_endpoint():
         assert "text/html" in resp.headers.get("Content-Type", "")
         content = resp.read().decode("utf-8")
         assert content == custom_html
+
+
+def test_rename_feature_endpoint():
+    """Verify /api/rename_feature dispatches manage_feature rename to automation."""
+    mock_automation = MagicMock()
+    mock_automation.manage_feature.return_value = {
+        "success": True,
+        "message": "Feature renamed successfully"
+    }
+    set_automation_instance(mock_automation)
+
+    port = start_bridge(port_start=54321, port_max=54330)
+    url = f"http://127.0.0.1:{port}/api/rename_feature"
+
+    payload = json.dumps({"feature_name": "Boss-Extrude1", "new_name": "Hex-Head"}).encode("utf-8")
+    req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
+
+    with urllib.request.urlopen(req, timeout=2.0) as resp:
+        assert resp.status == 200
+        data = json.loads(resp.read().decode("utf-8"))
+        assert data.get("success") is True
+        assert data.get("old_name") == "Boss-Extrude1"
+        assert data.get("new_name") == "Hex-Head"
+
+    mock_automation.manage_feature.assert_called_once_with(
+        action="rename",
+        feature_name="Boss-Extrude1",
+        new_name="Hex-Head"
+    )
