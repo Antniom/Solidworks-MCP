@@ -11,6 +11,7 @@ import os
 import json
 import base64
 import logging
+import queue
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
@@ -28,6 +29,18 @@ _dimension_lock = threading.Lock()
 _model_revision: int = 1
 _last_image_base64: Optional[str] = None
 _last_bbox: Optional[Dict[str, Any]] = None
+_sse_clients = []
+_sse_lock = threading.Lock()
+
+
+def _broadcast_sse(data: Dict[str, Any]) -> None:
+    """Broadcast real-time push update to all connected SSE clients."""
+    with _sse_lock:
+        for q in list(_sse_clients):
+            try:
+                q.put_nowait(data)
+            except Exception:
+                pass
 
 
 def _dispatch_automation(automation: Any, func_name: str, *args: Any, **kwargs: Any) -> Any:
@@ -131,6 +144,42 @@ class FastBridgeHandler(BaseHTTPRequestHandler):
                 "active_doc": str(doc_title),
                 "revision": _model_revision,
             })
+
+        elif path == "/api/events":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "keep-alive")
+            self._send_cors_headers()
+            self.end_headers()
+
+            client_queue = queue.Queue()
+            with _sse_lock:
+                _sse_clients.append(client_queue)
+
+            try:
+                init_msg = json.dumps({"type": "init", "revision": _model_revision})
+                self.wfile.write(f"data: {init_msg}\n\n".encode("utf-8"))
+                self.wfile.flush()
+
+                while True:
+                    try:
+                        msg = client_queue.get(timeout=2.0)
+                        if msg is None:
+                            break
+                        payload = f"data: {json.dumps(msg)}\n\n".encode("utf-8")
+                        self.wfile.write(payload)
+                        self.wfile.flush()
+                    except queue.Empty:
+                        self.wfile.write(b": keepalive\n\n")
+                        self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                pass
+            finally:
+                with _sse_lock:
+                    if client_queue in _sse_clients:
+                        _sse_clients.remove(client_queue)
+            return
 
         elif path == "/api/sync":
             automation = _get_automation()
@@ -295,6 +344,17 @@ class FastBridgeHandler(BaseHTTPRequestHandler):
                 if bbox_info:
                     _last_bbox = bbox_info.get("dimensions_mm")
 
+                # Broadcast push event to all open browser windows and chat widgets
+                _broadcast_sse({
+                    "type": "update",
+                    "revision": _model_revision,
+                    "name": dim_name,
+                    "value": float(target_val),
+                    "units": units,
+                    "image_base64": image_base64,
+                    "bbox": bbox_info.get("dimensions_mm") if bbox_info else None,
+                })
+
                 self._send_json_response(200, {
                     "success": True,
                     "revision": _model_revision,
@@ -346,6 +406,12 @@ class FastBridgeHandler(BaseHTTPRequestHandler):
                     status_code = 200 if is_ok else 422
                     if is_ok:
                         _model_revision += 1
+                        _broadcast_sse({
+                            "type": "rename",
+                            "revision": _model_revision,
+                            "old_name": feature_name,
+                            "new_name": new_name,
+                        })
                     self._send_json_response(status_code, {
                         "success": is_ok,
                         "revision": _model_revision,
@@ -489,6 +555,13 @@ def start_bridge(port_start: int = 54321, port_max: int = 54330) -> int:
 def stop_bridge() -> None:
     """Stop the running FastBridge server."""
     global _server_instance, _server_thread
+    with _sse_lock:
+        for q in list(_sse_clients):
+            try:
+                q.put_nowait(None)
+            except Exception:
+                pass
+        _sse_clients.clear()
     if _server_instance:
         _server_instance.stop()
         _server_instance = None
