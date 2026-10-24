@@ -441,7 +441,15 @@ def _get_automation() -> Any:
         return _automation_instance
     try:
         from solidworks_mcp.server import sw_automation
-        return sw_automation
+        if sw_automation is not None:
+            return sw_automation
+    except Exception:
+        pass
+    try:
+        from solidworks_mcp.automation import SolidWorksAutomation
+        _automation_instance = SolidWorksAutomation()
+        _automation_instance.connect()
+        return _automation_instance
     except Exception:
         return None
 
