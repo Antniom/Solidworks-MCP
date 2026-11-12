@@ -15,7 +15,15 @@ from .verification import ModelVerifier, VerificationReport, DimensionCheck
 from .knowledge import KnowledgeManager, KnowledgeRecord, PromotionState, get_knowledge_manager
 from .checkpoint import CheckpointManager, CheckpointMetadata, get_checkpoint_manager
 from .com_compat import get_attr_or_call, byref_int, byref_bool, byref_double, null_dispatch
-from .post_conditions import capture_pre_mutation_state, verify_mutation_post_condition, PreMutationState, get_model_rebuild_errors
+from .post_conditions import (
+    capture_pre_mutation_state,
+    verify_mutation_post_condition,
+    PreMutationState,
+    get_model_rebuild_errors,
+    capture_vol_state,
+    format_vol_delta,
+)
+from .mecagent_runner import MecAgentRunnerBridge, get_mecagent_runner
 
 __all__ = [
     "ResponseEnvelope",
@@ -51,4 +59,8 @@ __all__ = [
     "verify_mutation_post_condition",
     "PreMutationState",
     "get_model_rebuild_errors",
+    "capture_vol_state",
+    "format_vol_delta",
+    "MecAgentRunnerBridge",
+    "get_mecagent_runner",
 ]

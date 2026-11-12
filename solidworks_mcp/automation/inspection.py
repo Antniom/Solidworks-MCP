@@ -705,3 +705,508 @@ class InspectionOperations:
         except Exception as e:
             logger.error(f"Select by geometry error: {e}\n{traceback.format_exc()}")
             return self._result(False, f"select_by_geometry error: {e}", SwErrors.swGeneralError)
+
+    # ========================================================================
+    # Compact Token-Saving Topology Helpers & Showcase Rendering (lminventor)
+    # ========================================================================
+
+    def list_faces(
+        self,
+        body_index: int = 1,
+        min_area: float = 0.0,
+        max_count: int = 60,
+    ) -> Dict[str, Any]:
+        """
+        Compact face table: '[i] Plane A=90000 c=(0.0,225.0,12.5) n=(0.0,0.0,1.0)' one per line.
+        min_area in mm². body_index is 1-based.
+        """
+        try:
+            doc, err = self.get_active_doc()
+            if err:
+                return err
+
+            bodies = get_attr_or_call(doc, "GetBodies2", 0, False) or []
+            if not bodies:
+                return self._result(False, "No solid bodies in active document.", SwErrors.swInvalidCall)
+            if body_index < 1 or body_index > len(bodies):
+                return self._result(
+                    False,
+                    f"body_index={body_index} out of range (1..{len(bodies)})",
+                    SwErrors.swInvalidParameter,
+                )
+
+            body = bodies[body_index - 1]
+            faces = get_attr_or_call(body, "GetFaces") or []
+            lines = []
+            items = []
+
+            for idx, f in enumerate(faces, start=1):
+                try:
+                    area_m2 = float(get_attr_or_call(f, "GetArea") or 0.0)
+                    area_mm2 = area_m2 * 1e6
+                    if area_mm2 < min_area:
+                        continue
+
+                    surf = get_attr_or_call(f, "GetSurface")
+                    stype = "Surf"
+                    if surf:
+                        if get_attr_or_call(surf, "IsPlane"):
+                            stype = "Plane"
+                        elif get_attr_or_call(surf, "IsCylinder"):
+                            stype = "Cyl"
+                        elif get_attr_or_call(surf, "IsCone"):
+                            stype = "Cone"
+                        elif get_attr_or_call(surf, "IsSphere"):
+                            stype = "Sphere"
+                        elif get_attr_or_call(surf, "IsTorus"):
+                            stype = "Torus"
+
+                    box = get_attr_or_call(f, "GetBox")
+                    cx, cy, cz = 0.0, 0.0, 0.0
+                    if box and len(box) >= 6:
+                        cx = (box[0] + box[3]) * 500.0
+                        cy = (box[1] + box[4]) * 500.0
+                        cz = (box[2] + box[5]) * 500.0
+
+                    norm = get_attr_or_call(f, "Normal")
+                    n_str = ""
+                    if norm and len(norm) >= 3 and stype == "Plane":
+                        n_str = f" n=({norm[0]:.2f},{norm[1]:.2f},{norm[2]:.2f})"
+
+                    line = f"[{idx}] {stype} A={area_mm2:.0f} c=({cx:.1f},{cy:.1f},{cz:.1f}){n_str}"
+                    lines.append(line)
+                    items.append({
+                        "index": idx,
+                        "type": stype,
+                        "area_mm2": round(area_mm2, 1),
+                        "centroid_mm": [round(cx, 2), round(cy, 2), round(cz, 2)],
+                        "normal": [round(float(norm[0]), 3), round(float(norm[1]), 3), round(float(norm[2]), 3)] if (norm and len(norm) >= 3) else None,
+                    })
+                except Exception:
+                    lines.append(f"[{idx}] ?")
+                if len(lines) >= max_count:
+                    lines.append(f"... truncated at {max_count}")
+                    break
+
+            table_str = "\n".join(lines) if lines else "(no faces match)"
+            return self._result(
+                True,
+                table_str,
+                SwErrors.swSuccess,
+                {"table": table_str, "count": len(items), "faces": items},
+            )
+        except Exception as e:
+            logger.error(f"list_faces error: {e}")
+            return self._result(False, f"list_faces error: {e}", SwErrors.swGeneralError)
+
+    def list_edges(
+        self,
+        body_index: int = 1,
+        min_length: float = 0.0,
+        max_count: int = 60,
+    ) -> Dict[str, Any]:
+        """
+        Compact edge table: '[i] L=200.0 mid=(0.0,-225.0,0.8)' one per line.
+        min_length filters out tiny edges (mm). body_index is 1-based.
+        """
+        try:
+            doc, err = self.get_active_doc()
+            if err:
+                return err
+
+            bodies = get_attr_or_call(doc, "GetBodies2", 0, False) or []
+            if not bodies:
+                return self._result(False, "No solid bodies in active document.", SwErrors.swInvalidCall)
+            if body_index < 1 or body_index > len(bodies):
+                return self._result(
+                    False,
+                    f"body_index={body_index} out of range (1..{len(bodies)})",
+                    SwErrors.swInvalidParameter,
+                )
+
+            body = bodies[body_index - 1]
+            edges = get_attr_or_call(body, "GetEdges") or []
+            lines = []
+            items = []
+
+            for idx, e in enumerate(edges, start=1):
+                try:
+                    v1 = get_attr_or_call(e, "GetStartVertex")
+                    v2 = get_attr_or_call(e, "GetEndVertex")
+                    pt1 = get_attr_or_call(v1, "GetPoint") if v1 else None
+                    pt2 = get_attr_or_call(v2, "GetPoint") if v2 else None
+
+                    if pt1 and pt2:
+                        length_mm = math.sqrt(sum((a - b) ** 2 for a, b in zip(pt1, pt2))) * 1000.0
+                        if length_mm < min_length:
+                            continue
+                        mx = (pt1[0] + pt2[0]) * 500.0
+                        my = (pt1[1] + pt2[1]) * 500.0
+                        mz = (pt1[2] + pt2[2]) * 500.0
+                        lines.append(f"[{idx}] L={length_mm:.1f} mid=({mx:.1f},{my:.1f},{mz:.1f})")
+                        items.append({
+                            "index": idx,
+                            "length_mm": round(length_mm, 2),
+                            "midpoint_mm": [round(mx, 2), round(my, 2), round(mz, 2)],
+                        })
+                    else:
+                        curve = get_attr_or_call(e, "GetCurve")
+                        cparams = get_attr_or_call(curve, "CircleParams") if curve else None
+                        if cparams and len(cparams) >= 7:
+                            r_mm = float(cparams[6]) * 1000.0
+                            length_mm = 2.0 * math.pi * r_mm
+                            if length_mm < min_length:
+                                continue
+                            cx, cy, cz = cparams[0] * 1000.0, cparams[1] * 1000.0, cparams[2] * 1000.0
+                            lines.append(f"[{idx}] Circle R={r_mm:.1f} L={length_mm:.1f} c=({cx:.1f},{cy:.1f},{cz:.1f})")
+                            items.append({
+                                "index": idx,
+                                "length_mm": round(length_mm, 2),
+                                "radius_mm": round(r_mm, 2),
+                                "midpoint_mm": [round(cx, 2), round(cy, 2), round(cz, 2)],
+                            })
+                        else:
+                            lines.append(f"[{idx}] (closed curve)")
+                except Exception:
+                    lines.append(f"[{idx}] ?")
+                if len(lines) >= max_count:
+                    lines.append(f"... truncated at {max_count}")
+                    break
+
+            table_str = "\n".join(lines) if lines else "(no edges match)"
+            return self._result(
+                True,
+                table_str,
+                SwErrors.swSuccess,
+                {"table": table_str, "count": len(items), "edges": items},
+            )
+        except Exception as e:
+            logger.error(f"list_edges error: {e}")
+            return self._result(False, f"list_edges error: {e}", SwErrors.swGeneralError)
+
+    def find_face(
+        self,
+        body_index: int = 1,
+        x: Optional[float] = None,
+        y: Optional[float] = None,
+        z: Optional[float] = None,
+        min_area: float = 10.0,
+        surface_type: Optional[str] = "plane",
+        tolerance: float = 0.5,
+        select: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        Locate a body face by its centroid coordinates (mm) and optionally select it.
+        Returns 1-based face index.
+        """
+        try:
+            doc, err = self.get_active_doc()
+            if err:
+                return err
+
+            bodies = get_attr_or_call(doc, "GetBodies2", 0, False) or []
+            if not bodies or body_index < 1 or body_index > len(bodies):
+                return self._result(False, "Invalid body_index or no solid bodies.", SwErrors.swInvalidParameter)
+
+            body = bodies[body_index - 1]
+            faces = get_attr_or_call(body, "GetFaces") or []
+            stype_req = (surface_type or "").strip().lower()
+
+            for idx, f in enumerate(faces, start=1):
+                try:
+                    area_mm2 = float(get_attr_or_call(f, "GetArea") or 0.0) * 1e6
+                    if area_mm2 < min_area:
+                        continue
+                    surf = get_attr_or_call(f, "GetSurface")
+                    if stype_req and surf:
+                        if stype_req in ("plane", "5890") and not get_attr_or_call(surf, "IsPlane"):
+                            continue
+                        elif stype_req in ("cylinder", "cyl", "5891") and not get_attr_or_call(surf, "IsCylinder"):
+                            continue
+
+                    box = get_attr_or_call(f, "GetBox")
+                    if not box or len(box) < 6:
+                        continue
+                    cx = (box[0] + box[3]) * 500.0
+                    cy = (box[1] + box[4]) * 500.0
+                    cz = (box[2] + box[5]) * 500.0
+
+                    if x is not None and abs(cx - x) > tolerance:
+                        continue
+                    if y is not None and abs(cy - y) > tolerance:
+                        continue
+                    if z is not None and abs(cz - z) > tolerance:
+                        continue
+
+                    if select:
+                        try:
+                            doc.ClearSelection2(True)
+                            f.Select2(False, 0)
+                        except Exception:
+                            pass
+
+                    return self._result(
+                        True,
+                        f"Found face [{idx}] at ({cx:.1f},{cy:.1f},{cz:.1f})mm (A={area_mm2:.0f}mm²)",
+                        SwErrors.swSuccess,
+                        {
+                            "face_index": idx,
+                            "centroid_mm": [round(cx, 2), round(cy, 2), round(cz, 2)],
+                            "area_mm2": round(area_mm2, 1),
+                            "selected": select,
+                        },
+                    )
+                except Exception:
+                    continue
+
+            return self._result(
+                False,
+                f"No face matching centroid (x={x}, y={y}, z={z}) area>={min_area} tol={tolerance}mm",
+                SwErrors.swSelectionError,
+            )
+        except Exception as e:
+            logger.error(f"find_face error: {e}")
+            return self._result(False, f"find_face error: {e}", SwErrors.swGeneralError)
+
+    def find_edge(
+        self,
+        body_index: int = 1,
+        x: Optional[float] = None,
+        y: Optional[float] = None,
+        z: Optional[float] = None,
+        tolerance: float = 0.5,
+        select: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        Locate a body edge by its midpoint coordinates (mm) and optionally select it.
+        Returns 1-based edge index.
+        """
+        try:
+            doc, err = self.get_active_doc()
+            if err:
+                return err
+
+            bodies = get_attr_or_call(doc, "GetBodies2", 0, False) or []
+            if not bodies or body_index < 1 or body_index > len(bodies):
+                return self._result(False, "Invalid body_index or no solid bodies.", SwErrors.swInvalidParameter)
+
+            body = bodies[body_index - 1]
+            edges = get_attr_or_call(body, "GetEdges") or []
+
+            for idx, e in enumerate(edges, start=1):
+                try:
+                    v1 = get_attr_or_call(e, "GetStartVertex")
+                    v2 = get_attr_or_call(e, "GetEndVertex")
+                    pt1 = get_attr_or_call(v1, "GetPoint") if v1 else None
+                    pt2 = get_attr_or_call(v2, "GetPoint") if v2 else None
+                    if not pt1 or not pt2:
+                        continue
+                    mx = (pt1[0] + pt2[0]) * 500.0
+                    my = (pt1[1] + pt2[1]) * 500.0
+                    mz = (pt1[2] + pt2[2]) * 500.0
+
+                    if x is not None and abs(mx - x) > tolerance:
+                        continue
+                    if y is not None and abs(my - y) > tolerance:
+                        continue
+                    if z is not None and abs(mz - z) > tolerance:
+                        continue
+
+                    if select:
+                        try:
+                            doc.ClearSelection2(True)
+                            e.Select2(False, 0)
+                        except Exception:
+                            pass
+
+                    return self._result(
+                        True,
+                        f"Found edge [{idx}] at midpoint ({mx:.1f},{my:.1f},{mz:.1f})mm",
+                        SwErrors.swSuccess,
+                        {
+                            "edge_index": idx,
+                            "midpoint_mm": [round(mx, 2), round(my, 2), round(mz, 2)],
+                            "selected": select,
+                        },
+                    )
+                except Exception:
+                    continue
+
+            return self._result(
+                False,
+                f"No edge found matching midpoint (x={x}, y={y}, z={z}) tol={tolerance}mm",
+                SwErrors.swSelectionError,
+            )
+        except Exception as e:
+            logger.error(f"find_edge error: {e}")
+            return self._result(False, f"find_edge error: {e}", SwErrors.swGeneralError)
+
+    # Named appearance preset library (matching lminventor's appearance names)
+    _APPEARANCE_PRESETS: Dict[str, Tuple[List[int], float, float, float]] = {
+        # name_lower: ([R, G, B], ambient, specular, transparency)
+        "smooth - white": ([245, 245, 242], 0.6, 0.3, 0.0),
+        "white": ([245, 245, 242], 0.6, 0.3, 0.0),
+        "gold": ([212, 175, 55], 0.4, 0.9, 0.0),
+        "brass": ([181, 166, 66], 0.4, 0.85, 0.0),
+        "copper": ([184, 115, 51], 0.4, 0.85, 0.0),
+        "aluminum - polished": ([210, 215, 220], 0.4, 0.9, 0.0),
+        "aluminum": ([195, 200, 205], 0.45, 0.7, 0.0),
+        "stainless steel": ([180, 185, 190], 0.4, 0.85, 0.0),
+        "steel": ([140, 145, 150], 0.4, 0.65, 0.0),
+        "anodized black": ([35, 38, 42], 0.3, 0.5, 0.0),
+        "black": ([30, 30, 32], 0.3, 0.4, 0.0),
+        "clear glass": ([210, 235, 245], 0.5, 0.95, 0.75),
+        "glass": ([210, 235, 245], 0.5, 0.95, 0.75),
+        "red": ([210, 45, 45], 0.45, 0.5, 0.0),
+        "blue": ([40, 110, 215], 0.45, 0.5, 0.0),
+        "green": ([45, 165, 80], 0.45, 0.5, 0.0),
+    }
+
+    def apply_material_appearance(
+        self,
+        appearance_name: str = "Smooth - White",
+        color_rgb: Optional[List[int]] = None,
+        reflectivity: Optional[float] = None,
+        transparency: Optional[float] = None,
+        target_type: str = "part",
+        target_name: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Apply a named material appearance or custom RGB/optical properties to the active part,
+        feature, or component occurrence.
+        Matches lminventor's apply_material_appearance tool.
+        """
+        try:
+            doc, err = self.get_active_doc()
+            if err:
+                return err
+
+            preset_key = (appearance_name or "Smooth - White").strip().lower()
+            preset = self._APPEARANCE_PRESETS.get(preset_key)
+            if preset is None:
+                # Substring match fallback
+                for k, v in self._APPEARANCE_PRESETS.items():
+                    if k in preset_key or preset_key in k:
+                        preset = v
+                        break
+            if preset is None:
+                preset = ([200, 205, 210], 0.45, 0.6, 0.0)
+
+            rgb = color_rgb if (color_rgb and len(color_rgb) == 3) else preset[0]
+            ambient = preset[1]
+            spec = float(reflectivity) if reflectivity is not None else preset[2]
+            transp = float(transparency) if transparency is not None else preset[3]
+
+            # SolidWorks MaterialPropertyValues:
+            # [R, G, B, Ambient, Diffuse, Specular, Shininess, Transparency, Emission]
+            mat_vals = [
+                max(0.0, min(1.0, rgb[0] / 255.0)),
+                max(0.0, min(1.0, rgb[1] / 255.0)),
+                max(0.0, min(1.0, rgb[2] / 255.0)),
+                ambient,
+                0.8,
+                max(0.0, min(1.0, spec)),
+                max(0.1, min(1.0, spec)),
+                max(0.0, min(1.0, transp)),
+                0.0,
+            ]
+
+            ttype = (target_type or "part").strip().lower()
+            if ttype == "feature" and target_name:
+                feat = self._find_feature_by_name(doc, target_name) if hasattr(self, "_find_feature_by_name") else None
+                if feat is None:
+                    return self._result(False, f"Feature '{target_name}' not found.", SwErrors.swFeatureError)
+                feat.SetMaterialPropertyValues2(mat_vals, 1, None)
+            elif ttype in ("occurrence", "component") and target_name:
+                comps = get_attr_or_call(doc, "GetComponents", False) or []
+                target_comp = None
+                for c in comps:
+                    if str(getattr(c, "Name2", "")).lower() == target_name.lower():
+                        target_comp = c
+                        break
+                if target_comp is None:
+                    return self._result(False, f"Component '{target_name}' not found.", SwErrors.swSelectionError)
+                target_comp.MaterialPropertyValues = mat_vals
+            else:
+                doc.MaterialPropertyValues = mat_vals
+
+            try:
+                doc.GraphicsRedraw2()
+            except Exception:
+                pass
+
+            return self._result(
+                True,
+                f"Applied appearance '{appearance_name}' (RGB={rgb}, specular={spec:.2f}, transparency={transp:.2f}) to {ttype}",
+                SwErrors.swSuccess,
+                {
+                    "appearance_name": appearance_name,
+                    "color_rgb": rgb,
+                    "specular": spec,
+                    "transparency": transp,
+                    "target_type": ttype,
+                    "target_name": target_name,
+                },
+            )
+        except Exception as e:
+            logger.error(f"apply_material_appearance error: {e}")
+            return self._result(False, f"apply_material_appearance error: {e}", SwErrors.swGeneralError)
+
+    def render_showcase_viewport(
+        self,
+        eye_mm: Optional[List[float]] = None,
+        target_mm: Optional[List[float]] = None,
+        up_vec: Optional[List[float]] = None,
+        display_style: str = "shaded_with_edges",
+        filepath: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Set display mode ('shaded_with_edges', 'shaded', 'realistic', 'wireframe', 'hidden_lines_removed'),
+        orient camera via eye_mm/target_mm/up_vec (or isometric fit), and capture viewport PNG.
+        Matches lminventor's render_showcase_viewport tool.
+        """
+        try:
+            doc, err = self.get_active_doc()
+            if err:
+                return err
+
+            view = getattr(doc, "ActiveView", None)
+            style_clean = (display_style or "shaded_with_edges").strip().lower()
+            # swViewDisplayMode_e: 1=Wireframe, 2=HiddenLinesGrayed, 3=HiddenLinesRemoved, 4=Shaded, 5=ShadedWithEdges
+            style_map = {
+                "wireframe": 1,
+                "hidden_lines_visible": 2,
+                "hidden_lines_removed": 3,
+                "shaded": 4,
+                "realistic": 4,
+                "shaded_with_edges": 5,
+            }
+            if view is not None:
+                try:
+                    view.DisplayMode = style_map.get(style_clean, 5)
+                except Exception:
+                    pass
+
+            if eye_mm and target_mm and len(eye_mm) == 3 and len(target_mm) == 3:
+                try:
+                    # Orient via ShowNamedView2 + zoom to fit first, then adjust camera if available
+                    doc.ShowNamedView2("*Isometric", 7)
+                    doc.ViewZoomtofit2()
+                    cam = getattr(view, "Camera", None) if view else None
+                    if cam is not None:
+                        cam.SetPositionCartesian(eye_mm[0] / 1000.0, eye_mm[1] / 1000.0, eye_mm[2] / 1000.0)
+                        cam.SetTargetPointCartesian(target_mm[0] / 1000.0, target_mm[1] / 1000.0, target_mm[2] / 1000.0)
+                        if up_vec and len(up_vec) == 3:
+                            cam.SetUpVector(up_vec[0], up_vec[1], up_vec[2])
+                except Exception as cam_ex:
+                    logger.debug(f"Camera custom positioning fallback: {cam_ex}")
+
+            cap_res = self.capture_viewport(filepath=filepath, view_name="*Isometric")
+            if cap_res.get("success") and isinstance(cap_res.get("data"), dict):
+                cap_res["data"]["display_style"] = style_clean
+                cap_res["data"]["eye_mm"] = eye_mm
+                cap_res["data"]["target_mm"] = target_mm
+            return cap_res
+        except Exception as e:
+            logger.error(f"render_showcase_viewport error: {e}")
+            return self._result(False, f"render_showcase_viewport error: {e}", SwErrors.swGeneralError)

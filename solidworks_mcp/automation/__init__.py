@@ -19,13 +19,14 @@ from .assemblies import AssemblyOperations
 from .drawings import DrawingOperations
 from .simulation import SimulationOperations
 from .diagnostics import DiagnosticOperations
+from .sheet_metal import SheetMetalOperations
 
 
 class SolidWorksAutomation(_BaseAutomation, DocumentOperations, 
                            SketchOperations, FeatureOperations,
                            InspectionOperations, AssemblyOperations,
                            DrawingOperations, SimulationOperations,
-                           DiagnosticOperations):
+                           DiagnosticOperations, SheetMetalOperations):
     """
     Complete SolidWorks automation class
     
@@ -57,4 +58,5 @@ __all__ = [
     "DrawingOperations",
     "SimulationOperations",
     "DiagnosticOperations",
+    "SheetMetalOperations",
 ]

@@ -71,6 +71,9 @@ from .core import (
     get_checkpoint_manager,
     get_attr_or_call,
     find_blocking_modal_dialog,
+    get_mecagent_runner,
+    capture_vol_state,
+    format_vol_delta,
 )
 
 # Configure logging
@@ -226,15 +229,30 @@ def _tool_definitions() -> list[Tool]:
         # Sketch Tools
         Tool(
             name="create_sketch",
-            description="Create a new sketch on a plane.",
+            description="Create a new sketch on a plane, an offset reference plane, or a body face by 1-based face_index.",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "plane": {
                         "type": "string",
-                        "enum": ["Front", "Top", "Right"],
+                        "enum": ["Front", "Top", "Right", "XY", "XZ", "YZ"],
                         "default": "Front",
-                        "description": "Plane to sketch on"
+                        "description": "Plane to sketch on (Front/XY, Top/XZ, Right/YZ)"
+                    },
+                    "offset": {
+                        "type": "number",
+                        "default": 0.0,
+                        "description": "Optional offset distance from plane (creates an offset RefPlane automatically)"
+                    },
+                    "face_index": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Optional 1-based face index on body 1 to sketch on instead of a reference plane"
+                    },
+                    "unit": {
+                        "type": "string",
+                        "enum": ["mm", "inch", "m", "cm"],
+                        "description": "Unit for offset distance"
                     }
                 },
                 "required": []
@@ -607,11 +625,10 @@ def _tool_definitions() -> list[Tool]:
         Tool(
             name="execute_python",
             description=(
-                "Execute custom Python code with stdout capture and direct access to SolidWorks COM API ('sw', 'doc', 'automation'). "
+                "Execute custom Python code in a persistent stateful namespace ('sw', 'doc', 'automation', 'FinalAnswer') "
+                "with stdout capture, optional read_only fingerprint guard, and auto_transaction rollback on error. "
                 "SECURITY GATE: Disabled by default. If invoked without prior confirmation, it refuses execution and returns a "
                 "structured prompt instructing the calling AI agent to ask the human user for explicit consent. "
-                "Benefits: Direct access to full SolidWorks COM API (sw_app, model, SelectionMgr) for custom macros and niche APIs. "
-                "Risks: Arbitrary Python code execution on host Windows machine with current user privileges. "
                 "To unlock: set environment variable SW_MCP_ALLOW_EXEC=1, enable in config, or re-invoke with user_confirmed_risks=true "
                 "after user explicitly agrees in chat."
             ),
@@ -625,6 +642,21 @@ def _tool_definitions() -> list[Tool]:
                             "Explicit affirmative confirmation from the human user in chat acknowledging arbitrary Python execution risks and benefits."
                         ),
                         "default": False
+                    },
+                    "reset_session": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Clear persistent Python session variables before running this snippet"
+                    },
+                    "read_only": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Enforce read-only execution: rolls back and errors if volume or feature count changes"
+                    },
+                    "auto_transaction": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "Wrap execution in an Undo checkpoint and auto-rollback if an unhandled exception occurs"
                     }
                 },
                 "required": ["code"]
@@ -864,6 +896,8 @@ def _tool_definitions() -> list[Tool]:
                     "flip": {"type": "boolean", "default": False, "description": "Flip dimension direction"},
                     "distance": {"type": "number", "default": 0.0, "description": "Distance value (for distance mate)"},
                     "angle": {"type": "number", "default": 0.0, "description": "Angle in degrees (for angle mate)"},
+                    "min_limit": {"type": "number", "description": "Optional minimum limit for LimitDistance or LimitAngle mate"},
+                    "max_limit": {"type": "number", "description": "Optional maximum limit for LimitDistance or LimitAngle mate"},
                     "unit": {"type": "string", "default": "mm", "enum": ["mm", "inch", "m", "cm"], "description": "Distance unit"}
                 },
                 "required": ["mate_type", "entity1", "entity2"]
@@ -1252,6 +1286,620 @@ def _tool_definitions() -> list[Tool]:
             description="Forcefully reset and restart the Single-Threaded Apartment (STA) COM worker thread to recover from permanently hung or abandoned calls. NOTE: (a) The abandoned call may still complete later if SolidWorks unblocks, and may mutate the model (inspect model/document state before retrying mutating tools). (b) If SolidWorks itself is blocked by an active modal dialog, calls dispatched to the newly created STA worker will also detect the modal dialog and block until dismissed.",
             inputSchema={"type": "object", "properties": {}, "required": []}
         ),
+
+        # MecAgent .NET 10 Runner & C# CAD SDK Tools
+        Tool(
+            name="sw_execute_csharp",
+            description=(
+                "Execute a C# cell in MecAgent's stateful out-of-process .NET 10 Roslyn REPL (CellSession) "
+                "with pre-bound `ISldWorks swApp`, `FinalAnswer(string)` / `final_answer(string)`, `Print(object)`, "
+                "`SharedPath(string)`, `WorkPath(string)`, automatic `CS1061` COM interface cast repair (`CastRepair`), "
+                "static 12,780-member SolidWorks API effect classification (`sw-api-effects.json`), and runtime "
+                "`DocumentFingerprint` verification."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "code": {
+                        "type": "string",
+                        "description": "C# code cell (statements and optional trailing return expression) to compile and execute in the stateful Roslyn session"
+                    },
+                    "read_only_only": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "If true, statically block execution when CellEffectAnalyzer classifies the cell as mutating"
+                    },
+                    "timeout_ms": {
+                        "type": "integer",
+                        "default": 120000,
+                        "description": "Maximum execution time in milliseconds (default: 120000)"
+                    },
+                    "reset_session": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "If true, reset the stateful Roslyn C# REPL session before running this cell"
+                    }
+                },
+                "required": ["code"]
+            }
+        ),
+        Tool(
+            name="sw_execute_macro",
+            description=(
+                "Compile and execute a full C# `DynamicClass.Execute` macro via MecAgent's `ProgramRunner` "
+                "in a collectible `AssemblyLoadContext`, with automatic `CodeTransformer` COM timeout wrappers "
+                "(`GetErrorCode2`, `Feature.Name`) and static 12,780-member API effect classification."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "code": {
+                        "type": "string",
+                        "description": "Full C# source defining `public class DynamicClass { public static object Execute(...) { ... } }`"
+                    },
+                    "parameters": {
+                        "type": "array",
+                        "items": {},
+                        "description": "Optional parameter array passed to `DynamicClass.Execute`"
+                    },
+                    "read_only_only": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "If true, statically block execution when CellEffectAnalyzer classifies the macro as mutating"
+                    },
+                    "timeout_ms": {
+                        "type": "integer",
+                        "default": 120000,
+                        "description": "Maximum execution time in milliseconds (default: 120000)"
+                    }
+                },
+                "required": ["code"]
+            }
+        ),
+        Tool(
+            name="sw_capture_views",
+            description=(
+                "Capture MecAgent's stitched 7-view overview sheet (`1920x720` PNG: Front, Back, Left, Right, "
+                "Top, Bottom + Isometric) and up to 4 zoomed 3D feature-detail crops (`detail.png`) via `ViewCapture` and `ViewStitcher`."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "save_dir": {
+                        "type": "string",
+                        "description": "Optional directory path to save `overview_<ts>.png` and `detail_<ts>.png`"
+                    }
+                },
+                "required": []
+            }
+        ),
+        Tool(
+            name="sw_get_context_fast",
+            description=(
+                "High-speed (<50ms) SolidWorks context snapshot via MecAgent's `MCPMethods.getContextFast`: "
+                "open documents, active document info, resolved custom & cut-list properties, active viewport "
+                "selections with owning feature resolution (`SelectionOwnership`), and depth-controlled ASCII "
+                "feature/assembly/mate tree with UI updates frozen."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "depth": {
+                        "type": "integer",
+                        "default": 2,
+                        "minimum": 0,
+                        "maximum": 5,
+                        "description": "Feature/assembly tree expansion depth (0 = summary, 1-5 = tree depth)"
+                    },
+                    "target_path": {
+                        "type": "string",
+                        "description": "Optional slash-delimited feature/component path to expand specifically"
+                    },
+                    "document_name": {
+                        "type": "string",
+                        "description": "Optional open document title to inspect without switching active document"
+                    }
+                },
+                "required": []
+            }
+        ),
+        Tool(
+            name="sw_get_feature_tree_json",
+            description=(
+                "Build a complete parametric JSON Intermediate Representation (IR) of the active Part document "
+                "via `PartFeatureTreeJsonBuilder.Build`, including global equations, typed feature parameter "
+                "definitions (`GetDefinition`/`AccessSelections`), and 2D sketches with reconstructed closed "
+                "profile loops (`BuildSketchLoops`) and matched dimensions/constraints (`EntitySig`)."
+            ),
+            inputSchema={"type": "object", "properties": {}, "required": []}
+        ),
+        Tool(
+            name="sw_select_by_path",
+            description=(
+                "Select any SolidWorks feature, sketch, body, face, edge, or component using MecAgent's "
+                "deterministic slash-delimited topological path syntax (e.g., `'Boss-Extrude1'`, "
+                "`'Boss-Extrude1/Face[0]'`, `'Boss-Extrude1/Face[0]/Edge[2]'`, `'Component1/SubComp/Feature'`)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Slash-delimited topological path to select"
+                    },
+                    "multi_select": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Append to current selection instead of clearing"
+                    },
+                    "mark": {
+                        "type": "integer",
+                        "default": 0,
+                        "description": "Selection mark integer for `SelectByID2` / feature operations"
+                    }
+                },
+                "required": ["path"]
+            }
+        ),
+        Tool(
+            name="sw_navigate_topology",
+            description=(
+                "Inspect and navigate the active model's B-Rep & feature hierarchy at a given slash-delimited path "
+                "via `SolidworksSelectionController.Navigate` (use `''` or `'/'` for root overview, `'FeatureName'` "
+                "for faces/edges/parameters, `'FeatureName/Face[0]'` for face area, normal, UV bounds, sketch origin "
+                "offset `(centerU, centerV)`, and adjacent edges with dihedral angles)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "default": "",
+                        "description": "Slash-delimited path to inspect (`''` or `'/'` for root)"
+                    },
+                    "show_equations": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Include equation details when inspecting root or features"
+                    }
+                },
+                "required": []
+            }
+        ),
+        Tool(
+            name="sw_find_related_files",
+            description=(
+                "Discover all related CAD files (parts, sub-assemblies, parent assemblies, and referencing `.SLDDRW` "
+                "drawings) for the active document via `CadDataDiscoveryController.FindRelatedFiles`, including "
+                "recursive `GetDocumentDependencies2` traversal, backward drawing discovery, OneDrive cloud-placeholder "
+                "detection, and `SwDocumentMgr` Toolbox fastener filtering."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "max_drawings_probed": {
+                        "type": "integer",
+                        "default": 200,
+                        "description": "Maximum candidate `.SLDDRW` files to probe during backward drawing search"
+                    }
+                },
+                "required": []
+            }
+        ),
+        Tool(
+            name="sw_get_edge_analysis",
+            description=(
+                "Analyze all edges on a selected face path via `SolidworksConnexionController.GetEdgeAnalysis` "
+                "(e.g. `'Boss-Extrude1/Face[0]'`), returning edge index, type, start/end/mid 3D coordinates (mm), "
+                "length (mm), and selection syntax."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "face_path": {
+                        "type": "string",
+                        "default": "",
+                        "description": "Slash-delimited face path (e.g. 'Boss-Extrude1/Face[0]') or empty for currently selected face"
+                    }
+                },
+                "required": []
+            }
+        ),
+        Tool(
+            name="sw_modify_feature_parameter_by_path",
+            description=(
+                "Modify feature parameters directly by feature path via `SolidworksModificationController.ModifyFeatureParameterByPath` "
+                "(e.g. extrusion depth_mm, reverse_direction, draft_enabled, draft_angle_deg, or fillet_radius_mm) with automatic rebuild."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "feature_path": {"type": "string", "description": "Slash-delimited feature path (e.g. 'Boss-Extrude1' or 'Fillet1')"},
+                    "depth_mm": {"type": "number", "description": "New extrusion/cut depth in mm"},
+                    "reverse_direction": {"type": "boolean", "description": "Reverse extrusion/cut direction"},
+                    "draft_enabled": {"type": "boolean", "description": "Enable/disable draft on extrusion"},
+                    "draft_angle_deg": {"type": "number", "description": "Draft angle in degrees"},
+                    "fillet_radius_mm": {"type": "number", "description": "New constant fillet radius in mm"}
+                },
+                "required": ["feature_path"]
+            }
+        ),
+        # lminventor Parity Tools: Sketch, Holes, Parameters, Compact Topology, Sheet Metal, Kinematics, Supervisor
+        Tool(
+            name="draw_closed_profile",
+            description="Draw a closed polygon/profile loop from a list of [x, y] points (mm) in a single call.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "points": {
+                        "type": "array",
+                        "items": {
+                            "type": "array",
+                            "items": {"type": "number"},
+                            "minItems": 2,
+                            "maxItems": 2
+                        },
+                        "minItems": 3,
+                        "description": "Ordered list of [x, y] coordinates forming a closed loop"
+                    },
+                    "unit": {
+                        "type": "string",
+                        "enum": ["mm", "inch", "m", "cm"],
+                        "description": "Coordinate unit (default: active unit, usually mm)"
+                    }
+                },
+                "required": ["points"]
+            }
+        ),
+        Tool(
+            name="hole_linear",
+            description=(
+                "Place a hole on a planar face (face_axis == face_value) positioned parametrically at dist1 from "
+                "ref1_axis==ref1_value and dist2 from ref2_axis==ref2_value. Verifies material removal via volume delta."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "face_axis": {"type": "string", "enum": ["x", "y", "z", "X", "Y", "Z"], "description": "Normal axis of target planar face"},
+                    "face_value": {"type": "number", "description": "Coordinate value (mm) of the planar face along face_axis"},
+                    "ref1_axis": {"type": "string", "enum": ["x", "y", "z", "X", "Y", "Z"], "description": "First reference edge constant axis"},
+                    "ref1_value": {"type": "number", "description": "Coordinate (mm) of first reference edge"},
+                    "dist1": {"type": "number", "description": "Distance (mm) from first reference edge"},
+                    "ref2_axis": {"type": "string", "enum": ["x", "y", "z", "X", "Y", "Z"], "description": "Second reference edge constant axis"},
+                    "ref2_value": {"type": "number", "description": "Coordinate (mm) of second reference edge"},
+                    "dist2": {"type": "number", "description": "Distance (mm) from second reference edge"},
+                    "diameter": {"type": "number", "default": 5.5, "description": "Hole diameter in mm"},
+                    "depth": {"type": "number", "default": 0.0, "description": "Hole depth in mm (0 = through-all)"},
+                    "tapped": {"type": "boolean", "default": False, "description": "Whether hole is tapped"},
+                    "cbore_diameter": {"type": "number", "default": 0.0, "description": "Counterbore diameter in mm (0 = none)"},
+                    "cbore_depth": {"type": "number", "default": 0.0, "description": "Counterbore depth in mm"}
+                },
+                "required": ["face_axis", "face_value", "ref1_axis", "ref1_value", "dist1", "ref2_axis", "ref2_value", "dist2"]
+            }
+        ),
+        Tool(
+            name="get_parameters",
+            description="Get all SolidWorks Global Variables, Equations (IEquationMgr), and Model Dimensions.",
+            inputSchema={"type": "object", "properties": {}, "required": []}
+        ),
+        Tool(
+            name="add_parameter",
+            description="Add a new Global Variable or Equation to SolidWorks IEquationMgr (e.g. name='Width', expression='100mm').",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Parameter or dimension name (e.g. 'Width' or 'D1@Sketch1')"},
+                    "expression": {"type": "string", "description": "Value or formula expression (e.g. '100mm' or '\"Width\" * 2')"},
+                    "units": {"type": "string", "default": "mm", "description": "Units (default: mm)"}
+                },
+                "required": ["name", "expression"]
+            }
+        ),
+        Tool(
+            name="set_parameter",
+            description="Update an existing Global Variable, Equation, or Model Dimension expression and rebuild.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Parameter or dimension name"},
+                    "expression": {"type": "string", "description": "New value or formula expression"},
+                    "units": {"type": "string", "default": "mm", "description": "Units (default: mm)"}
+                },
+                "required": ["name", "expression"]
+            }
+        ),
+        Tool(
+            name="list_faces",
+            description="Compact 1-line-per-face topology table: '[i] Plane A=90000 c=(0.0,225.0,12.5) n=(0,0,1)'.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "body_index": {"type": "integer", "default": 1, "minimum": 1, "description": "1-based solid body index"},
+                    "min_area": {"type": "number", "default": 0.0, "description": "Minimum face area filter in mm²"},
+                    "max_count": {"type": "integer", "default": 60, "minimum": 1, "description": "Max faces to list"}
+                },
+                "required": []
+            }
+        ),
+        Tool(
+            name="list_edges",
+            description="Compact 1-line-per-edge topology table: '[i] L=200.0 mid=(0.0,-225.0,0.8)'.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "body_index": {"type": "integer", "default": 1, "minimum": 1, "description": "1-based solid body index"},
+                    "min_length": {"type": "number", "default": 0.0, "description": "Minimum edge length filter in mm"},
+                    "max_count": {"type": "integer", "default": 60, "minimum": 1, "description": "Max edges to list"}
+                },
+                "required": []
+            }
+        ),
+        Tool(
+            name="find_face",
+            description="Locate a body face by its centroid coordinates (mm) and optionally select it. Returns 1-based face index.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "body_index": {"type": "integer", "default": 1, "minimum": 1, "description": "1-based solid body index"},
+                    "x": {"type": "number", "description": "Expected centroid X in mm (omit to ignore)"},
+                    "y": {"type": "number", "description": "Expected centroid Y in mm (omit to ignore)"},
+                    "z": {"type": "number", "description": "Expected centroid Z in mm (omit to ignore)"},
+                    "min_area": {"type": "number", "default": 10.0, "description": "Minimum face area in mm²"},
+                    "surface_type": {"type": "string", "default": "plane", "description": "Surface type ('plane', 'cylinder', or '')"},
+                    "tolerance": {"type": "number", "default": 0.5, "description": "Centroid coordinate tolerance in mm"},
+                    "select": {"type": "boolean", "default": True, "description": "Select the matched face in SolidWorks"}
+                },
+                "required": []
+            }
+        ),
+        Tool(
+            name="find_edge",
+            description="Locate a body edge by its midpoint coordinates (mm) and optionally select it. Returns 1-based edge index.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "body_index": {"type": "integer", "default": 1, "minimum": 1, "description": "1-based solid body index"},
+                    "x": {"type": "number", "description": "Expected midpoint X in mm (omit to ignore)"},
+                    "y": {"type": "number", "description": "Expected midpoint Y in mm (omit to ignore)"},
+                    "z": {"type": "number", "description": "Expected midpoint Z in mm (omit to ignore)"},
+                    "tolerance": {"type": "number", "default": 0.5, "description": "Midpoint coordinate tolerance in mm"},
+                    "select": {"type": "boolean", "default": True, "description": "Select the matched edge in SolidWorks"}
+                },
+                "required": []
+            }
+        ),
+        Tool(
+            name="set_sheet_metal_thickness",
+            description="Set the active sheet-metal thickness (mm), optional bend radius, and K-factor.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "thickness_mm": {"type": "number", "description": "Sheet thickness in mm"},
+                    "bend_radius_mm": {"type": "number", "description": "Optional inner bend radius in mm"},
+                    "k_factor": {"type": "number", "default": 0.5, "description": "Neutral axis K-factor"}
+                },
+                "required": ["thickness_mm"]
+            }
+        ),
+        Tool(
+            name="sheet_metal_face",
+            description="Create a base sheet-metal Face (Base-Flange) from the active or last closed sketch profile.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "thickness_mm": {"type": "number", "description": "Optional override thickness in mm"},
+                    "bend_radius_mm": {"type": "number", "description": "Optional override bend radius in mm"},
+                    "reverse_dir": {"type": "boolean", "default": False, "description": "Reverse thickness direction"}
+                },
+                "required": []
+            }
+        ),
+        Tool(
+            name="flange",
+            description="Add a Sheet Metal Flange of height 'distance' (mm) at bend 'angle' (deg) on 1-based edge_indices.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "edge_indices": {
+                        "type": "array",
+                        "items": {"type": "integer", "minimum": 1},
+                        "description": "1-based edge indices on body"
+                    },
+                    "distance": {"type": "number", "default": 25.0, "description": "Flange height in mm"},
+                    "angle": {"type": "number", "default": 90.0, "description": "Bend angle in degrees"},
+                    "body_index": {"type": "integer", "default": 1, "minimum": 1, "description": "1-based body index"}
+                },
+                "required": ["edge_indices"]
+            }
+        ),
+        Tool(
+            name="sheet_metal_cut",
+            description="Cut perpendicular through the sheet-metal part using the active or last sketch profile.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "through_all": {"type": "boolean", "default": True, "description": "Cut through entire sheet"},
+                    "depth": {"type": "number", "description": "Optional finite cut depth in mm"},
+                    "normal_cut": {"type": "boolean", "default": True, "description": "Ensure normal cut perpendicular to sheet face"}
+                },
+                "required": []
+            }
+        ),
+        Tool(
+            name="delete_assembly_constraint",
+            description="Delete a specific assembly mate / constraint by name.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "constraint_name": {"type": "string", "description": "Name of the mate to delete (e.g. 'Coincident1')"}
+                },
+                "required": ["constraint_name"]
+            }
+        ),
+        Tool(
+            name="manage_subassembly_kinematics",
+            description=(
+                "Manage component/subassembly kinematic states: 'set_grounded' (fix), 'set_floating' (unfix), "
+                "'set_flexible', 'set_rigid', or 'enforce_rigidity' (fix all static components except exclude_keywords)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["set_grounded", "set_floating", "set_flexible", "set_rigid", "enforce_rigidity", "fix", "unfix"],
+                        "default": "set_flexible",
+                        "description": "Kinematic action to apply"
+                    },
+                    "occurrence_name": {"type": "string", "description": "Target component/subassembly occurrence name"},
+                    "exclude_keywords": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Keywords of moving components to leave floating during enforce_rigidity"
+                    }
+                },
+                "required": ["action"]
+            }
+        ),
+        Tool(
+            name="inspect_assembly_kinematics",
+            description="Audit assembly hierarchy for fixed vs floating components, rigid vs flexible subassemblies, and mate health.",
+            inputSchema={"type": "object", "properties": {}, "required": []}
+        ),
+        Tool(
+            name="drive_kinematic_motion",
+            description="Interpolate a driving mate dimension from start_value to end_value across steps with live rebuilds and optional collision check.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "constraint_name": {"type": "string", "description": "Driving mate or dimension name (e.g. 'Distance1' or 'D1@Angle1')"},
+                    "start_value": {"type": "number", "default": 0.0, "description": "Starting dimension value"},
+                    "end_value": {"type": "number", "default": 90.0, "description": "Ending dimension value"},
+                    "steps": {"type": "integer", "default": 10, "minimum": 1, "description": "Number of interpolation steps"},
+                    "unit": {"type": "string", "default": "mm", "enum": ["mm", "deg", "inch", "m", "cm"], "description": "Dimension unit"},
+                    "check_interference": {"type": "boolean", "default": False, "description": "Run collision check at each step"}
+                },
+                "required": ["constraint_name", "start_value", "end_value"]
+            }
+        ),
+        Tool(
+            name="manage_positional_representations",
+            description="Manage named mechanism states (Positional Representations) via Assembly Configurations and mate overrides ('list', 'create', 'activate', 'set_override').",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["list", "create", "activate", "set_override"],
+                        "default": "list",
+                        "description": "Positional representation action"
+                    },
+                    "name": {"type": "string", "description": "Representation / configuration name (e.g. 'Porta_Aberta_Max')"},
+                    "constraint_name": {"type": "string", "description": "Target mate/constraint name for 'set_override'"},
+                    "value": {"type": "string", "description": "Override dimension value (e.g. '90 deg' or '380 mm')"},
+                    "suppress_constraint": {"type": "boolean", "description": "Optional mate suppression state in this representation"}
+                },
+                "required": ["action"]
+            }
+        ),
+        Tool(
+            name="apply_material_appearance",
+            description="Apply a named material appearance ('Gold', 'Smooth - White', 'Clear Glass', 'Aluminum - Polished', etc.) or custom RGB/reflectivity/transparency.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "appearance_name": {"type": "string", "default": "Smooth - White", "description": "Preset appearance name"},
+                    "color_rgb": {
+                        "type": "array",
+                        "items": {"type": "integer", "minimum": 0, "maximum": 255},
+                        "minItems": 3,
+                        "maxItems": 3,
+                        "description": "Optional custom [R, G, B] override"
+                    },
+                    "reflectivity": {"type": "number", "minimum": 0.0, "maximum": 1.0, "description": "Optional specular reflectivity (0.0–1.0)"},
+                    "transparency": {"type": "number", "minimum": 0.0, "maximum": 1.0, "description": "Optional transparency (0.0–1.0)"},
+                    "target_type": {"type": "string", "enum": ["part", "feature", "occurrence", "component"], "default": "part", "description": "Scope to apply appearance"},
+                    "target_name": {"type": "string", "description": "Feature or component name when target_type != 'part'"}
+                },
+                "required": []
+            }
+        ),
+        Tool(
+            name="render_showcase_viewport",
+            description="Configure viewport display style ('shaded_with_edges', 'realistic', 'shaded', 'wireframe') and 3D camera eye/target/up vectors, then capture showcase PNG.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "eye_mm": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "minItems": 3,
+                        "maxItems": 3,
+                        "description": "Optional camera eye position [x, y, z] in mm"
+                    },
+                    "target_mm": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "minItems": 3,
+                        "maxItems": 3,
+                        "description": "Optional camera target point [x, y, z] in mm"
+                    },
+                    "up_vec": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "minItems": 3,
+                        "maxItems": 3,
+                        "description": "Optional camera up vector [ux, uy, uz]"
+                    },
+                    "display_style": {
+                        "type": "string",
+                        "enum": ["shaded_with_edges", "realistic", "shaded", "wireframe", "hidden_lines_removed"],
+                        "default": "shaded_with_edges",
+                        "description": "Viewport rendering style"
+                    },
+                    "filepath": {"type": "string", "description": "Optional output image path"}
+                },
+                "required": []
+            }
+        ),
+        Tool(
+            name="supervisor_clean_processes",
+            description="Audit all running SolidWorks processes, identify orphaned headless zombies (not in ROT or no window), and optionally terminate them when confirm=True.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "confirm": {"type": "boolean", "default": False, "description": "Set True to terminate orphaned zombie processes; False for dry-run audit"},
+                    "target_pids": {
+                        "type": "array",
+                        "items": {"type": "integer"},
+                        "description": "Optional explicit list of PIDs to terminate when confirm=True"
+                    }
+                },
+                "required": []
+            }
+        ),
+        Tool(
+            name="transaction",
+            description="Wrap multi-step CAD operations in an Undo transaction ('begin', 'commit', 'abort') with volume delta tracking.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["begin", "commit", "abort"],
+                        "default": "begin",
+                        "description": "Transaction action"
+                    },
+                    "name": {"type": "string", "default": "MCP batch", "description": "Transaction label"}
+                },
+                "required": []
+            }
+        ),
+        Tool(
+            name="reload_api",
+            description="Hot-reload solidworks_mcp Python modules in-place without dropping the active SolidWorks COM session.",
+            inputSchema={"type": "object", "properties": {}, "required": []}
+        ),
     ]
 
     for t in tools:
@@ -1261,7 +1909,10 @@ def _tool_definitions() -> list[Tool]:
             props = schema.get("properties", {})
             for p_name, p_spec in props.items():
                 if p_name in ("radius", "depth", "distance", "thickness") and p_spec.get("type") == "number":
-                    p_spec["exclusiveMinimum"] = 0
+                    if t.name in ("hole_linear", "add_mate", "sheet_metal_cut") and p_name in ("depth", "distance"):
+                        p_spec["minimum"] = 0
+                    else:
+                        p_spec["exclusiveMinimum"] = 0
     return tools
 
 
@@ -1382,7 +2033,12 @@ def _dispatch_tool(name: str, arguments: dict) -> Dict[str, Any]:
     
     # Sketch Tools
     elif name == "create_sketch":
-        result = sw_automation.create_sketch(arguments.get("plane", "Front"))
+        result = sw_automation.create_sketch(
+            plane=arguments.get("plane", "Front"),
+            offset=arguments.get("offset", 0.0),
+            face_index=arguments.get("face_index"),
+            unit=arguments.get("unit"),
+        )
     
     elif name == "create_sketch_on_face":
         result = sw_automation.create_sketch_on_face(
@@ -1575,7 +2231,13 @@ def _dispatch_tool(name: str, arguments: dict) -> Dict[str, Any]:
         if not code:
             result = sw_automation._result(False, "Code is required", SwErrors.swInvalidInput)
         else:
-            result = _execute_python_fixed(code, user_confirmed_risks=user_confirmed_risks)
+            result = _execute_python_fixed(
+                code,
+                user_confirmed_risks=user_confirmed_risks,
+                reset_session=bool(arguments.get("reset_session", False)),
+                read_only=bool(arguments.get("read_only", False)),
+                auto_transaction=bool(arguments.get("auto_transaction", True)),
+            )
     
     # Inspection, Verification & Viewport Tools (Phase 2)
     elif name == "inspect_model":
@@ -1655,6 +2317,8 @@ def _dispatch_tool(name: str, arguments: dict) -> Dict[str, Any]:
             flip=arguments.get("flip", False),
             distance=arguments.get("distance", 0.0),
             angle=arguments.get("angle", 0.0),
+            min_limit=arguments.get("min_limit"),
+            max_limit=arguments.get("max_limit"),
             unit=arguments.get("unit", "mm"),
         )
 
@@ -1887,6 +2551,355 @@ def _dispatch_tool(name: str, arguments: dict) -> Dict[str, Any]:
 
     elif name == "inspect_rebuild_errors":
         result = sw_automation.inspect_rebuild_errors()
+
+    # MecAgent .NET 10 Runner & C# CAD SDK Handlers
+    elif name == "sw_execute_csharp":
+        runner = get_mecagent_runner()
+        if arguments.get("reset_session"):
+            runner.reset_session()
+        res = runner.execute_csharp(
+            code=arguments.get("code", ""),
+            read_only_only=bool(arguments.get("read_only_only", False)),
+            timeout_ms=int(arguments.get("timeout_ms", 120000)),
+        )
+        ok = bool(res.get("success", False))
+        result = {
+            "success": ok,
+            "message": res.get("message", "C# cell executed" if ok else "C# cell failed"),
+            "error_code": 0 if ok else int(SwErrors.swGeneralError),
+            "error_name": "swSuccess" if ok else "swGeneralError",
+            "data": res,
+        }
+
+    elif name == "sw_execute_macro":
+        runner = get_mecagent_runner()
+        res = runner.execute_macro(
+            code=arguments.get("code", ""),
+            parameters=arguments.get("parameters"),
+            read_only_only=bool(arguments.get("read_only_only", False)),
+            timeout_ms=int(arguments.get("timeout_ms", 120000)),
+        )
+        ok = bool(res.get("success", False))
+        result = {
+            "success": ok,
+            "message": res.get("message", "C# macro executed" if ok else "C# macro failed"),
+            "error_code": 0 if ok else int(SwErrors.swGeneralError),
+            "error_name": "swSuccess" if ok else "swGeneralError",
+            "data": res,
+        }
+
+    elif name == "sw_capture_views":
+        runner = get_mecagent_runner()
+        res = runner.capture_views(save_dir=arguments.get("save_dir"))
+        ok = bool(res.get("success", False))
+        result = {
+            "success": ok,
+            "message": res.get("message", "Captured views" if ok else "View capture failed"),
+            "error_code": 0 if ok else int(SwErrors.swGeneralError),
+            "error_name": "swSuccess" if ok else "swGeneralError",
+            "data": res,
+        }
+
+    elif name == "sw_get_context_fast":
+        runner = get_mecagent_runner()
+        res = runner.invoke_sdk_method(
+            "getContextFast",
+            {
+                "depth": int(arguments.get("depth", 2)),
+                "targetPath": arguments.get("target_path"),
+                "documentName": arguments.get("document_name"),
+            },
+        )
+        ok = bool(res.get("success", False))
+        msg = res.get("message") or (
+            f"Context retrieved (features={res.get('featureCount', 0)}, selections={res.get('selectionCount', 0)})"
+            if ok
+            else (res.get("error") or "Failed to get fast context")
+        )
+        result = {
+            "success": ok,
+            "message": msg,
+            "error_code": 0 if ok else int(SwErrors.swGeneralError),
+            "error_name": "swSuccess" if ok else "swGeneralError",
+            "data": res,
+        }
+
+    elif name == "sw_get_feature_tree_json":
+        runner = get_mecagent_runner()
+        res = runner.invoke_sdk_method("getFeatureTreeJson", {})
+        ok = bool(res.get("success", False))
+        result = {
+            "success": ok,
+            "message": "Built parametric feature tree JSON IR" if ok else (res.get("error") or "Failed to build feature tree JSON"),
+            "error_code": 0 if ok else int(SwErrors.swGeneralError),
+            "error_name": "swSuccess" if ok else "swGeneralError",
+            "data": res,
+        }
+
+    elif name == "sw_select_by_path":
+        runner = get_mecagent_runner()
+        res = runner.invoke_sdk_method(
+            "selectByPath",
+            {
+                "path": arguments.get("path", ""),
+                "multiSelect": bool(arguments.get("multi_select", False)),
+                "mark": int(arguments.get("mark", 0)),
+            },
+        )
+        ok = bool(res.get("success", False))
+        result = {
+            "success": ok,
+            "message": res.get("details") if ok else (res.get("errorMessage") or res.get("error") or "Selection by path failed"),
+            "error_code": 0 if ok else int(SwErrors.swGeneralError),
+            "error_name": "swSuccess" if ok else "swGeneralError",
+            "data": res,
+        }
+
+    elif name == "sw_navigate_topology":
+        runner = get_mecagent_runner()
+        res = runner.invoke_sdk_method(
+            "navigate",
+            {
+                "path": arguments.get("path", ""),
+                "showEquations": bool(arguments.get("show_equations", False)),
+            },
+        )
+        ok = bool(res.get("success", False))
+        result = {
+            "success": ok,
+            "message": res.get("details") if ok else (res.get("errorMessage") or res.get("error") or "Topology navigation failed"),
+            "error_code": 0 if ok else int(SwErrors.swGeneralError),
+            "error_name": "swSuccess" if ok else "swGeneralError",
+            "data": res,
+        }
+
+    elif name == "sw_find_related_files":
+        runner = get_mecagent_runner()
+        res = runner.invoke_sdk_method(
+            "findRelatedCadFiles",
+            {
+                "maxDrawingsProbed": int(arguments.get("max_drawings_probed", 200)),
+            },
+        )
+        ok = bool(res.get("success", False))
+        result = {
+            "success": ok,
+            "message": res.get("summary") or ("Discovered related CAD files" if ok else (res.get("errorMessage") or res.get("error") or "Related file discovery failed")),
+            "error_code": 0 if ok else int(SwErrors.swGeneralError),
+            "error_name": "swSuccess" if ok else "swGeneralError",
+            "data": res,
+        }
+
+    elif name == "sw_get_edge_analysis":
+        runner = get_mecagent_runner()
+        res = runner.invoke_sdk_method(
+            "getEdgeAnalysis",
+            {"facePath": arguments.get("face_path", "")},
+        )
+        ok = bool(res.get("success", False))
+        result = {
+            "success": ok,
+            "message": res.get("details") if ok else (res.get("errorMessage") or res.get("error") or "Edge analysis failed"),
+            "error_code": 0 if ok else int(SwErrors.swGeneralError),
+            "error_name": "swSuccess" if ok else "swGeneralError",
+            "data": res,
+        }
+
+    elif name == "sw_modify_feature_parameter_by_path":
+        runner = get_mecagent_runner()
+        res = runner.invoke_sdk_method(
+            "modifyFeatureParameterByPath",
+            {
+                "featurePath": arguments.get("feature_path", ""),
+                "depthMm": arguments.get("depth_mm"),
+                "reverseDirection": arguments.get("reverse_direction"),
+                "draftEnabled": arguments.get("draft_enabled"),
+                "draftAngleDeg": arguments.get("draft_angle_deg"),
+                "filletRadiusMm": arguments.get("fillet_radius_mm"),
+            },
+        )
+        ok = bool(res.get("success", False))
+        result = {
+            "success": ok,
+            "message": res.get("details") if ok else (res.get("errorMessage") or res.get("error") or "Feature parameter modification failed"),
+            "error_code": 0 if ok else int(SwErrors.swGeneralError),
+            "error_name": "swSuccess" if ok else "swGeneralError",
+            "data": res,
+        }
+
+    # lminventor Parity Handlers
+    elif name == "draw_closed_profile":
+        result = sw_automation.draw_closed_profile(
+            points=arguments.get("points", []),
+            unit=arguments.get("unit"),
+        )
+
+    elif name == "hole_linear":
+        result = sw_automation.hole_linear(
+            face_axis=arguments.get("face_axis", "z"),
+            face_value=arguments.get("face_value", 0.0),
+            ref1_axis=arguments.get("ref1_axis", "x"),
+            ref1_value=arguments.get("ref1_value", 0.0),
+            dist1=arguments.get("dist1", 5.0),
+            ref2_axis=arguments.get("ref2_axis", "y"),
+            ref2_value=arguments.get("ref2_value", 0.0),
+            dist2=arguments.get("dist2", 5.0),
+            diameter=arguments.get("diameter", 5.5),
+            depth=arguments.get("depth", 0.0),
+            tapped=arguments.get("tapped", False),
+            cbore_diameter=arguments.get("cbore_diameter", 0.0),
+            cbore_depth=arguments.get("cbore_depth", 0.0),
+        )
+
+    elif name == "get_parameters":
+        result = sw_automation.get_parameters()
+
+    elif name == "add_parameter":
+        result = sw_automation.add_parameter(
+            name=arguments.get("name", ""),
+            expression=arguments.get("expression", ""),
+            units=arguments.get("units", "mm"),
+        )
+
+    elif name == "set_parameter":
+        result = sw_automation.set_parameter(
+            name=arguments.get("name", ""),
+            expression=arguments.get("expression", ""),
+            units=arguments.get("units", "mm"),
+        )
+
+    elif name == "list_faces":
+        result = sw_automation.list_faces(
+            body_index=arguments.get("body_index", 1),
+            min_area=arguments.get("min_area", 0.0),
+            max_count=arguments.get("max_count", 60),
+        )
+
+    elif name == "list_edges":
+        result = sw_automation.list_edges(
+            body_index=arguments.get("body_index", 1),
+            min_length=arguments.get("min_length", 0.0),
+            max_count=arguments.get("max_count", 60),
+        )
+
+    elif name == "find_face":
+        result = sw_automation.find_face(
+            body_index=arguments.get("body_index", 1),
+            x=arguments.get("x"),
+            y=arguments.get("y"),
+            z=arguments.get("z"),
+            min_area=arguments.get("min_area", 10.0),
+            surface_type=arguments.get("surface_type", "plane"),
+            tolerance=arguments.get("tolerance", 0.5),
+            select=arguments.get("select", True),
+        )
+
+    elif name == "find_edge":
+        result = sw_automation.find_edge(
+            body_index=arguments.get("body_index", 1),
+            x=arguments.get("x"),
+            y=arguments.get("y"),
+            z=arguments.get("z"),
+            tolerance=arguments.get("tolerance", 0.5),
+            select=arguments.get("select", True),
+        )
+
+    elif name == "set_sheet_metal_thickness":
+        result = sw_automation.set_sheet_metal_thickness(
+            thickness_mm=arguments.get("thickness_mm", 1.5),
+            bend_radius_mm=arguments.get("bend_radius_mm"),
+            k_factor=arguments.get("k_factor", 0.5),
+        )
+
+    elif name == "sheet_metal_face":
+        result = sw_automation.sheet_metal_face(
+            thickness_mm=arguments.get("thickness_mm"),
+            bend_radius_mm=arguments.get("bend_radius_mm"),
+            reverse_dir=arguments.get("reverse_dir", False),
+        )
+
+    elif name == "flange":
+        result = sw_automation.flange(
+            edge_indices=arguments.get("edge_indices"),
+            distance=arguments.get("distance", 25.0),
+            angle=arguments.get("angle", 90.0),
+            body_index=arguments.get("body_index", 1),
+        )
+
+    elif name == "sheet_metal_cut":
+        result = sw_automation.sheet_metal_cut(
+            through_all=arguments.get("through_all", True),
+            depth=arguments.get("depth"),
+            normal_cut=arguments.get("normal_cut", True),
+        )
+
+    elif name == "delete_assembly_constraint":
+        result = sw_automation.delete_assembly_constraint(
+            constraint_name=arguments.get("constraint_name", ""),
+        )
+
+    elif name == "manage_subassembly_kinematics":
+        result = sw_automation.manage_subassembly_kinematics(
+            action=arguments.get("action", "set_flexible"),
+            occurrence_name=arguments.get("occurrence_name", ""),
+            exclude_keywords=arguments.get("exclude_keywords"),
+        )
+
+    elif name == "inspect_assembly_kinematics":
+        result = sw_automation.inspect_assembly_kinematics()
+
+    elif name == "drive_kinematic_motion":
+        result = sw_automation.drive_kinematic_motion(
+            constraint_name=arguments.get("constraint_name", ""),
+            start_value=arguments.get("start_value", 0.0),
+            end_value=arguments.get("end_value", 90.0),
+            steps=arguments.get("steps", 10),
+            unit=arguments.get("unit", "mm"),
+            check_interference=arguments.get("check_interference", False),
+        )
+
+    elif name == "manage_positional_representations":
+        result = sw_automation.manage_positional_representations(
+            action=arguments.get("action", "list"),
+            name=arguments.get("name"),
+            constraint_name=arguments.get("constraint_name"),
+            value=arguments.get("value"),
+            suppress_constraint=arguments.get("suppress_constraint"),
+        )
+
+    elif name == "apply_material_appearance":
+        result = sw_automation.apply_material_appearance(
+            appearance_name=arguments.get("appearance_name", "Smooth - White"),
+            color_rgb=arguments.get("color_rgb"),
+            reflectivity=arguments.get("reflectivity"),
+            transparency=arguments.get("transparency"),
+            target_type=arguments.get("target_type", "part"),
+            target_name=arguments.get("target_name"),
+        )
+
+    elif name == "render_showcase_viewport":
+        result = sw_automation.render_showcase_viewport(
+            eye_mm=arguments.get("eye_mm"),
+            target_mm=arguments.get("target_mm"),
+            up_vec=arguments.get("up_vec"),
+            display_style=arguments.get("display_style", "shaded_with_edges"),
+            filepath=arguments.get("filepath"),
+        )
+
+    elif name == "supervisor_clean_processes":
+        result = sw_automation.supervisor_clean_processes(
+            confirm=bool(arguments.get("confirm", False)),
+            target_pids=arguments.get("target_pids"),
+        )
+
+    elif name == "transaction":
+        result = sw_automation.transaction(
+            action=arguments.get("action", "begin"),
+            name=arguments.get("name", "MCP batch"),
+        )
+
+    elif name == "reload_api":
+        result = _reload_api_handler()
     
     else:
         result = sw_automation._result(False, f"Unknown tool: {name}", SwErrors.swUnknownError)
@@ -1906,8 +2919,37 @@ def _dispatch_dialog_tool(name: str, arguments: dict) -> Dict[str, Any]:
     return sw_automation._result(False, f"Unknown dialog tool: {name}", SwErrors.swUnknownError)
 
 
+_PART_MUTATING_TOOLS = {
+    "extrude_sketch",
+    "cut_extrude",
+    "revolve_sketch",
+    "fillet_edges",
+    "chamfer_edges",
+    "create_shell",
+    "create_pattern",
+    "create_hole_wizard",
+    "set_dimension",
+    "manage_feature",
+    "hole_linear",
+    "set_parameter",
+    "sheet_metal_face",
+    "flange",
+    "sheet_metal_cut",
+    "sw_modify_feature_parameter_by_path",
+    "execute_python",
+    "sw_execute_csharp",
+    "sw_execute_macro",
+}
+
+_SUBTRACTIVE_TOOLS = {
+    "cut_extrude",
+    "create_hole_wizard",
+    "sheet_metal_cut",
+}
+
+
 def _execute_tool_on_sta(name: str, arguments: dict) -> Tuple[Dict[str, Any], Optional[str], Optional[str], Optional[int]]:
-    """Execute tool on STA worker thread and capture diagnostic metadata without crossing thread boundaries."""
+    """Execute tool on STA worker thread and capture diagnostic metadata + volume delta without crossing thread boundaries."""
     tid = threading.get_ident()
     dlg = find_blocking_modal_dialog()
     if dlg:
@@ -1920,6 +2962,16 @@ def _execute_tool_on_sta(name: str, arguments: dict) -> Tuple[Dict[str, Any], Op
             dispatched=False,
         )
 
+    vol_before = None
+    if name in _PART_MUTATING_TOOLS:
+        try:
+            if sw_automation.is_connected and sw_automation._sw_app is not None:
+                doc_pre = sw_automation._sw_app.ActiveDoc
+                if doc_pre is not None:
+                    vol_before = capture_vol_state(doc_pre)
+        except Exception:
+            pass
+
     result = _dispatch_tool(name, arguments)
     sw_ver = None
     act_doc = None
@@ -1931,6 +2983,20 @@ def _execute_tool_on_sta(name: str, arguments: dict) -> Tuple[Dict[str, Any], Op
             if doc is not None:
                 title = doc.GetTitle
                 act_doc = str(title() if callable(title) else title)
+                if name in _PART_MUTATING_TOOLS and isinstance(result, dict) and result.get("success"):
+                    vol_after = capture_vol_state(doc)
+                    suffix, delta_dict = format_vol_delta(vol_before, vol_after)
+                    if suffix:
+                        cur_msg = str(result.get("message", ""))
+                        if " | V " not in cur_msg:
+                            result["message"] = f"{cur_msg}{suffix}"
+                        if not isinstance(result.get("data"), dict):
+                            result["data"] = {"value": result.get("data")}
+                        result["data"]["geometry_delta"] = delta_dict
+                        if name in _SUBTRACTIVE_TOOLS and delta_dict and abs(delta_dict.get("volume_delta_mm3", 0.0)) < 0.01:
+                            warn_txt = " [WARNING: ΔV=0 mm³, check cut direction/sketch placement]"
+                            result["message"] = f"{result['message']}{warn_txt}"
+                            result["data"]["zero_volume_change_warning"] = True
     except Exception:
         pass
     return result, sw_ver, act_doc, tid
@@ -1947,6 +3013,10 @@ def get_tool_timeout(tool_name: str, cfg: Any) -> float:
         "create_new_drawing",
         "create_drawing_from_model",
         "connect_solidworks",
+        "sw_execute_csharp",
+        "sw_execute_macro",
+        "sw_capture_views",
+        "sw_find_related_files",
     ):
         return float(getattr(cfg, "open_save_timeout", 120.0))
     elif tool_name in ("export_drawing",):
@@ -2193,18 +3263,54 @@ server = Server(
 
 
 # ============================================================================
-# FIXED: Execute Python with stdout capture
+# FIXED: Stateful Execute Python with stdout capture, FinalAnswer & Rollback
 # ============================================================================
 
 _session_exec_unlocked: bool = False
+_python_exec_ns: Dict[str, Any] = {}
 
 
-def _execute_python_fixed(code: str, user_confirmed_risks: bool = False) -> Dict:
+class _PythonFinalAnswerSignal(Exception):
+    """Internal control-flow signal raised by FinalAnswer(val) in execute_python."""
+    def __init__(self, value: Any):
+        self.value = value
+
+
+def _reload_api_handler() -> Dict[str, Any]:
+    """Hot-reload solidworks_mcp submodules without dropping the active SolidWorks COM session."""
+    import importlib
+    reloaded = []
+    errors = []
+    target_prefixes = ("solidworks_mcp.core.", "solidworks_mcp.automation.", "solidworks_mcp.utils.")
+    for mod_name, mod_obj in list(sys.modules.items()):
+        if mod_obj is not None and mod_name.startswith(target_prefixes):
+            try:
+                importlib.reload(mod_obj)
+                reloaded.append(mod_name)
+            except Exception as ex:
+                errors.append({"module": mod_name, "error": str(ex)})
+    return {
+        "success": len(errors) == 0,
+        "message": f"Hot-reloaded {len(reloaded)} module(s) ({len(errors)} error(s))",
+        "error_code": 0 if len(errors) == 0 else int(SwErrors.swGeneralError),
+        "error_name": "swSuccess" if len(errors) == 0 else "swGeneralError",
+        "data": {"reloaded_modules": reloaded, "errors": errors},
+    }
+
+
+def _execute_python_fixed(
+    code: str,
+    user_confirmed_risks: bool = False,
+    reset_session: bool = False,
+    read_only: bool = False,
+    auto_transaction: bool = True,
+) -> Dict:
     """
-    Execute custom Python code with access to SolidWorks.
+    Execute custom Python code in a persistent stateful namespace with access to SolidWorks.
+    Supports FinalAnswer(val), read_only fingerprint enforcement, and auto_transaction rollback.
     NOTE: Guarded by interactive consent gate and config flag 'enable_execute_python' (default: False).
     """
-    global _session_exec_unlocked
+    global _session_exec_unlocked, _python_exec_ns
     cfg = get_config()
 
     # Check if unlocked via config, env var, prior session approval, or explicit argument
@@ -2224,7 +3330,7 @@ def _execute_python_fixed(code: str, user_confirmed_risks: bool = False) -> Dict
             "You MUST ask the human user for explicit permission in chat before executing arbitrary Python code.\n\n"
             "Explain the following to the user:\n"
             "- BENEFITS: Grants direct access to the full SolidWorks COM API (`sw_app`, `model`, `SelectionMgr`) "
-            "for custom macros, niche COM operations not covered by the 65 standard MCP tools, and complex batch geometry math.\n"
+            "for custom macros, niche COM operations not covered by the standard MCP tools, and complex batch geometry math.\n"
             "- RISKS: Executes arbitrary Python code with the current Windows user's privileges on the host system, "
             "bypassing standard MCP tool parameter guards and filesystem sandbox allowlists.\n\n"
             "Once the user gives explicit consent in chat, re-invoke `execute_python` with `user_confirmed_risks=true` "
@@ -2242,6 +3348,9 @@ def _execute_python_fixed(code: str, user_confirmed_risks: bool = False) -> Dict
     # Unlock session if explicit user confirmation was provided
     if user_confirmed_risks:
         _session_exec_unlocked = True
+
+    if reset_session:
+        _python_exec_ns.clear()
 
     try:
         if not sw_automation.is_connected:
@@ -2261,26 +3370,47 @@ def _execute_python_fixed(code: str, user_confirmed_risks: bool = False) -> Dict
         import pythoncom
         import math
         import os as os_module
-        
-        # Prepare execution context with many useful objects
-        exec_globals = {
-            # SolidWorks objects
+
+        doc = sw_automation.app.ActiveDoc if sw_automation.app else None
+        vol_before = capture_vol_state(doc) if doc is not None else None
+        feat_count_before = None
+        if doc is not None:
+            try:
+                fm = getattr(doc, "FeatureManager", None)
+                if fm is not None:
+                    feat_count_before = fm.GetFeatureCount(True)
+            except Exception:
+                pass
+
+        if auto_transaction and doc is not None:
+            try:
+                start_undo = getattr(doc, "StartUndoRecord", None)
+                if callable(start_undo):
+                    start_undo()
+            except Exception:
+                pass
+
+        final_answer_box = {"called": False, "value": None}
+
+        def _final_answer(val: Any = None):
+            final_answer_box["called"] = True
+            final_answer_box["value"] = val
+            raise _PythonFinalAnswerSignal(val)
+
+        # Update persistent namespace with fresh SolidWorks handles while keeping user variables
+        _python_exec_ns.update({
             'sw': sw_automation.app,
-            'doc': sw_automation.app.ActiveDoc if sw_automation.app else None,
+            'doc': doc,
+            'model': doc,
             'automation': sw_automation,
-            
-            # COM libraries
             'win32com': win32com,
             'pythoncom': pythoncom,
-            
-            # Standard libraries
             'math': math,
             'os': os_module,
             'json': json,
-            
-            # Result placeholder
+            'FinalAnswer': _final_answer,
             'result': None,
-        }
+        })
         
         # Capture stdout and stderr
         old_stdout = sys.stdout
@@ -2291,19 +3421,69 @@ def _execute_python_fixed(code: str, user_confirmed_risks: bool = False) -> Dict
         try:
             sys.stdout = captured_stdout
             sys.stderr = captured_stderr
-            
-            # Execute the code
-            exec(code, exec_globals)
-            
+            try:
+                exec(code, _python_exec_ns)
+            except _PythonFinalAnswerSignal:
+                pass
+        except Exception:
+            if auto_transaction and doc is not None:
+                try:
+                    end_undo = getattr(doc, "EndUndoRecord", None)
+                    if callable(end_undo):
+                        end_undo()
+                    undo_fn = getattr(doc, "EditUndo2", None)
+                    if callable(undo_fn):
+                        undo_fn(1)
+                except Exception:
+                    pass
+            raise
         finally:
-            # Always restore stdout/stderr
             sys.stdout = old_stdout
             sys.stderr = old_stderr
-        
+            if auto_transaction and doc is not None:
+                try:
+                    end_undo = getattr(doc, "EndUndoRecord", None)
+                    if callable(end_undo):
+                        end_undo()
+                except Exception:
+                    pass
+
+        # Enforce read_only fingerprint if requested
+        doc_after = sw_automation.app.ActiveDoc if sw_automation.app else None
+        vol_after = capture_vol_state(doc_after) if doc_after is not None else None
+        feat_count_after = None
+        if doc_after is not None:
+            try:
+                fm_after = getattr(doc_after, "FeatureManager", None)
+                if fm_after is not None:
+                    feat_count_after = fm_after.GetFeatureCount(True)
+            except Exception:
+                pass
+
+        if read_only and (vol_before != vol_after or feat_count_before != feat_count_after):
+            if doc_after is not None:
+                try:
+                    undo_fn = getattr(doc_after, "EditUndo2", None)
+                    if callable(undo_fn):
+                        undo_fn(1)
+                except Exception:
+                    pass
+            return {
+                "success": False,
+                "message": (
+                    f"Read-only violation in execute_python: document state changed "
+                    f"(vol: {vol_before} -> {vol_after}, features: {feat_count_before} -> {feat_count_after}). Rolled back."
+                ),
+                "error_code": int(SwErrors.swInvalidCall),
+                "error_name": "swInvalidCall",
+                "timestamp": datetime.datetime.now().isoformat(),
+                "data": {"read_only_violation": True, "vol_before": vol_before, "vol_after": vol_after},
+            }
+
         # Get captured output
         stdout_text = captured_stdout.getvalue()
         stderr_text = captured_stderr.getvalue()
-        result_val = exec_globals.get('result')
+        result_val = final_answer_box["value"] if final_answer_box["called"] else _python_exec_ns.get('result')
         
         # Build response message
         message_parts = []
@@ -2329,7 +3509,8 @@ def _execute_python_fixed(code: str, user_confirmed_risks: bool = False) -> Dict
             "data": {
                 "stdout": stdout_text,
                 "stderr": stderr_text,
-                "result": str(result_val) if result_val is not None else None
+                "result": str(result_val) if result_val is not None else None,
+                "final_answer_called": final_answer_box["called"],
             }
         }
         

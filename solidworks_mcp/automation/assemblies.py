@@ -136,6 +136,8 @@ class AssemblyOperations:
         flip: bool = False,
         distance: float = 0.0,
         angle: float = 0.0,
+        min_limit: Optional[float] = None,
+        max_limit: Optional[float] = None,
         unit: str = "mm",
     ) -> Dict:
         """
@@ -225,6 +227,10 @@ class AssemblyOperations:
             # Convert dimensional parameters
             dist_m = abs(self._units.to_meters(distance, unit))
             angle_rad = angle * 3.141592653589793 / 180.0
+            dist_upper_m = abs(self._units.to_meters(max_limit, unit)) if (max_limit is not None and sw_mate_type == 5) else dist_m
+            dist_lower_m = abs(self._units.to_meters(min_limit, unit)) if (min_limit is not None and sw_mate_type == 5) else dist_m
+            angle_upper_rad = (float(max_limit) * 3.141592653589793 / 180.0) if (max_limit is not None and sw_mate_type == 6) else angle_rad
+            angle_lower_rad = (float(min_limit) * 3.141592653589793 / 180.0) if (min_limit is not None and sw_mate_type == 6) else angle_rad
 
             if not HAS_PYWIN32:
                 return self._result(False, "pywin32 not available", SwErrors.swGeneralError)
@@ -238,11 +244,11 @@ class AssemblyOperations:
                 int(align),
                 bool(flip),
                 dist_m,
-                0.0,
-                0.0,
+                dist_upper_m,
+                dist_lower_m,
                 angle_rad,
-                0.0,
-                0.0,
+                angle_upper_rad,
+                angle_lower_rad,
                 False,
                 False,
                 0,
@@ -420,3 +426,454 @@ class AssemblyOperations:
         except Exception as e:
             logger.error(f"list_components error: {e}")
             return self._result(False, f"List components error: {e}", SwErrors.swGeneralError)
+
+    # ========================================================================
+    # Assembly Kinematics, Rigidity, Motion & Positional Representations
+    # (lminventor parity suite)
+    # ========================================================================
+
+    def delete_assembly_constraint(self, constraint_name: str) -> Dict[str, Any]:
+        """
+        Delete a specific mate / assembly constraint by name.
+        Matches lminventor's delete_assembly_constraint tool.
+        """
+        try:
+            doc, err = self.get_active_doc()
+            if err:
+                return err
+
+            doc_type_active = get_attr_or_call(doc, "GetType")
+            if doc_type_active != SwDocumentTypes.swDocASSEMBLY:
+                return self._result(False, "Active document is not an assembly.", SwErrors.swInvalidDocumentType)
+
+            null_callout = win32com.client.VARIANT(pythoncom.VT_DISPATCH, None) if HAS_PYWIN32 else None
+            doc.ClearSelection2(True)
+            selected = doc.Extension.SelectByID2(constraint_name, "MATE", 0.0, 0.0, 0.0, False, 0, null_callout, 0)
+            if not selected:
+                selected = doc.Extension.SelectByID2(constraint_name, "", 0.0, 0.0, 0.0, False, 0, null_callout, 0)
+            if not selected:
+                return self._result(
+                    False,
+                    f"Mate/constraint '{constraint_name}' not found in assembly.",
+                    SwErrors.swSelectionError,
+                )
+
+            deleted = bool(doc.Extension.DeleteSelection2(1))
+            get_attr_or_call(doc, "EditRebuild3")
+            return self._result(
+                deleted,
+                f"Deleted assembly constraint '{constraint_name}'" if deleted else f"Failed to delete '{constraint_name}'",
+                SwErrors.swSuccess if deleted else SwErrors.swGeneralError,
+                {"constraint_name": constraint_name, "deleted": deleted},
+            )
+        except Exception as e:
+            logger.error(f"delete_assembly_constraint error: {e}")
+            return self._result(False, f"delete_assembly_constraint error: {e}", SwErrors.swGeneralError)
+
+    def manage_subassembly_kinematics(
+        self,
+        action: str = "set_flexible",
+        occurrence_name: str = "",
+        exclude_keywords: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Manage component/subassembly kinematic states in an assembly:
+        - 'set_grounded' / 'fix': Fix (ground) the specified component occurrence
+        - 'set_floating' / 'unfix': Float (unground) the specified component occurrence
+        - 'set_flexible': Set a subassembly occurrence to Flexible solving
+        - 'set_rigid': Set a subassembly occurrence to Rigid solving
+        - 'enforce_rigidity': Fix all internal static components while leaving components matching exclude_keywords floating
+        Matches lminventor's manage_subassembly_kinematics tool.
+        """
+        try:
+            doc, err = self.get_active_doc()
+            if err:
+                return err
+
+            doc_type_active = get_attr_or_call(doc, "GetType")
+            if doc_type_active != SwDocumentTypes.swDocASSEMBLY:
+                return self._result(False, "Active document is not an assembly.", SwErrors.swInvalidDocumentType)
+
+            act = (action or "").strip().lower()
+            comps = doc.GetComponents(False) or []
+
+            def _find_comp(cname: str):
+                for c in comps:
+                    n2 = str(getattr(c, "Name2", ""))
+                    if n2.lower() == cname.lower() or cname.lower() in n2.lower():
+                        return c
+                return None
+
+            if act == "enforce_rigidity":
+                excl = [k.lower() for k in (exclude_keywords or ["porta", "door", "gaveta", "drawer", "tambor", "drum", "hinge", "dobradica", "carril", "rail"])]
+                fixed_names = []
+                skipped_names = []
+                for c in comps:
+                    n2 = str(getattr(c, "Name2", ""))
+                    if any(k in n2.lower() for k in excl):
+                        skipped_names.append(n2)
+                        continue
+                    try:
+                        doc.ClearSelection2(True)
+                        c.Select2(False, 0)
+                        doc.FixComponent()
+                        fixed_names.append(n2)
+                    except Exception:
+                        pass
+                doc.ClearSelection2(True)
+                get_attr_or_call(doc, "EditRebuild3")
+                return self._result(
+                    True,
+                    f"Enforced rigidity: fixed {len(fixed_names)} component(s), kept {len(skipped_names)} kinematic component(s) free.",
+                    SwErrors.swSuccess,
+                    {"fixed": fixed_names, "excluded_free": skipped_names},
+                )
+
+            target = _find_comp(occurrence_name)
+            if target is None:
+                return self._result(
+                    False,
+                    f"Component '{occurrence_name}' not found in assembly.",
+                    SwErrors.swSelectionError,
+                )
+
+            comp_name = str(getattr(target, "Name2", occurrence_name))
+            doc.ClearSelection2(True)
+            target.Select2(False, 0)
+
+            if act in ("set_grounded", "fix", "ground"):
+                doc.FixComponent()
+                get_attr_or_call(doc, "EditRebuild3")
+                return self._result(
+                    True,
+                    f"Component '{comp_name}' is now Fixed (Grounded).",
+                    SwErrors.swSuccess,
+                    {"component": comp_name, "action": act, "fixed": True},
+                )
+            elif act in ("set_floating", "unfix", "float"):
+                doc.UnfixComponent()
+                get_attr_or_call(doc, "EditRebuild3")
+                return self._result(
+                    True,
+                    f"Component '{comp_name}' is now Floating (Unfixed).",
+                    SwErrors.swSuccess,
+                    {"component": comp_name, "action": act, "fixed": False},
+                )
+            elif act in ("set_flexible", "flexible", "set_rigid", "rigid"):
+                want_flexible = act in ("set_flexible", "flexible")
+                # swComponentSolvingOption_e: 0 = swComponentRigidSolving, 1 = swComponentFlexibleSolving
+                solving_code = 1 if want_flexible else 0
+                applied = False
+                try:
+                    # CompConfigProperties5(Suppression, Solving, Visibility, UseNamedRefConfig, RefConfigName, ExcludeFromBOM, IsEnvelope)
+                    ref_cfg = str(get_attr_or_call(target, "ReferencedConfiguration") or "Default")
+                    applied = bool(doc.CompConfigProperties5(2, solving_code, True, True, ref_cfg, False, False))
+                except Exception:
+                    try:
+                        applied = bool(doc.CompConfigProperties4(2, solving_code, True, True, ""))
+                    except Exception:
+                        pass
+                get_attr_or_call(doc, "EditRebuild3")
+                state_label = "Flexible" if want_flexible else "Rigid"
+                return self._result(
+                    True,
+                    f"Subassembly '{comp_name}' set to {state_label} solving (applied={applied}).",
+                    SwErrors.swSuccess,
+                    {"component": comp_name, "solving": state_label.lower(), "applied": applied},
+                )
+            else:
+                return self._result(
+                    False,
+                    f"Unknown action '{action}'. Use 'set_grounded', 'set_floating', 'set_flexible', 'set_rigid', or 'enforce_rigidity'.",
+                    SwErrors.swInvalidParameter,
+                )
+        except Exception as e:
+            logger.error(f"manage_subassembly_kinematics error: {e}")
+            return self._result(False, f"manage_subassembly_kinematics error: {e}", SwErrors.swGeneralError)
+
+    def inspect_assembly_kinematics(self) -> Dict[str, Any]:
+        """
+        Audit assembly components (Fixed vs Floating, Rigid vs Flexible, suppressed)
+        and all mates under MateGroup (type, error status, suppression).
+        Matches lminventor's inspect_assembly_kinematics tool.
+        """
+        try:
+            from ..core.com_compat import byref_bool
+
+            doc, err = self.get_active_doc()
+            if err:
+                return err
+
+            doc_type_active = get_attr_or_call(doc, "GetType")
+            if doc_type_active != SwDocumentTypes.swDocASSEMBLY:
+                return self._result(False, "Active document is not an assembly.", SwErrors.swInvalidDocumentType)
+
+            comps = doc.GetComponents(False) or []
+            comp_records = []
+            fixed_count = 0
+            floating_count = 0
+            flexible_count = 0
+
+            for c in comps:
+                name = str(getattr(c, "Name2", "Unknown"))
+                is_fixed = bool(get_attr_or_call(c, "IsFixed"))
+                is_supp = bool(get_attr_or_call(c, "IsSuppressed"))
+                solving_val = get_attr_or_call(c, "Solving")
+                is_flex = (solving_val == 1)
+                if is_fixed:
+                    fixed_count += 1
+                else:
+                    floating_count += 1
+                if is_flex:
+                    flexible_count += 1
+                comp_records.append({
+                    "name": name,
+                    "fixed": is_fixed,
+                    "suppressed": is_supp,
+                    "solving": "flexible" if is_flex else "rigid",
+                })
+
+            mates_records = []
+            healthy_mates = 0
+            sick_mates = 0
+            try:
+                feat = doc.FirstFeature
+                while feat is not None:
+                    ftype = str(get_attr_or_call(feat, "GetTypeName2") or "")
+                    if ftype == "MateGroup":
+                        sub = get_attr_or_call(feat, "GetFirstSubFeature")
+                        while sub is not None:
+                            mname = str(getattr(sub, "Name", "Mate"))
+                            mtype = str(get_attr_or_call(sub, "GetTypeName2") or "Mate")
+                            is_warn = byref_bool(False)
+                            err_code = 0
+                            try:
+                                err_code = int(sub.GetErrorCode2(is_warn) or 0)
+                            except Exception:
+                                pass
+                            healthy = (err_code == 0)
+                            if healthy:
+                                healthy_mates += 1
+                            else:
+                                sick_mates += 1
+                            mates_records.append({
+                                "name": mname,
+                                "type": mtype,
+                                "error_code": err_code,
+                                "is_warning": bool(is_warn.value),
+                                "healthy": healthy,
+                            })
+                            sub = get_attr_or_call(sub, "GetNextSubFeature")
+                        break
+                    feat = feat.GetNextFeature
+            except Exception as m_ex:
+                logger.debug(f"MateGroup traversal warning: {m_ex}")
+
+            msg = (
+                f"Kinematics audit: {len(comp_records)} components ({fixed_count} fixed, {floating_count} floating, "
+                f"{flexible_count} flexible), {len(mates_records)} mates ({healthy_mates} healthy, {sick_mates} with errors)."
+            )
+            return self._result(
+                True,
+                msg,
+                SwErrors.swSuccess,
+                {
+                    "component_count": len(comp_records),
+                    "fixed_count": fixed_count,
+                    "floating_count": floating_count,
+                    "flexible_count": flexible_count,
+                    "components": comp_records,
+                    "mate_count": len(mates_records),
+                    "healthy_mates": healthy_mates,
+                    "sick_mates": sick_mates,
+                    "mates": mates_records,
+                },
+            )
+        except Exception as e:
+            logger.error(f"inspect_assembly_kinematics error: {e}")
+            return self._result(False, f"inspect_assembly_kinematics error: {e}", SwErrors.swGeneralError)
+
+    def drive_kinematic_motion(
+        self,
+        constraint_name: str,
+        start_value: float = 0.0,
+        end_value: float = 90.0,
+        steps: int = 10,
+        unit: str = "mm",
+        check_interference: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Step-interpolate a driving mate dimension (e.g. 'D1@Distance1' or 'Distance1')
+        from start_value to end_value across steps with live viewport updates and optional
+        collision detection at each step.
+        Matches lminventor's drive_kinematic_motion tool.
+        """
+        try:
+            doc, err = self.get_active_doc()
+            if err:
+                return err
+
+            n_steps = max(1, int(steps))
+            dim_name = constraint_name if "@" in constraint_name else f"D1@{constraint_name}"
+            step_results = []
+            collisions_detected = 0
+
+            for i in range(n_steps + 1):
+                t = i / float(n_steps)
+                val = float(start_value) + t * (float(end_value) - float(start_value))
+                set_res = self.set_dimension(name=dim_name, value=val, units=unit)
+                if not set_res.get("success") and "@" not in constraint_name:
+                    set_res = self.set_dimension(name=constraint_name, value=val, units=unit)
+                try:
+                    doc.EditRebuild3()
+                    doc.GraphicsRedraw2()
+                except Exception:
+                    pass
+
+                step_entry: Dict[str, Any] = {
+                    "step": i,
+                    "value": round(val, 3),
+                    "updated": bool(set_res.get("success")),
+                }
+                if check_interference:
+                    itf_res = self.check_interference(treat_coincidence_as_interference=False)
+                    itf_cnt = itf_res.get("data", {}).get("interference_count", 0)
+                    step_entry["interferences"] = itf_cnt
+                    if itf_cnt > 0:
+                        collisions_detected += 1
+                step_results.append(step_entry)
+
+            return self._result(
+                True,
+                f"Drove '{constraint_name}' from {start_value} to {end_value} ({unit}) across {n_steps} steps "
+                f"(collisions={collisions_detected})",
+                SwErrors.swSuccess,
+                {
+                    "constraint_name": constraint_name,
+                    "dimension_name": dim_name,
+                    "start_value": start_value,
+                    "end_value": end_value,
+                    "steps": n_steps,
+                    "unit": unit,
+                    "collisions_detected": collisions_detected,
+                    "trajectory": step_results,
+                },
+            )
+        except Exception as e:
+            logger.error(f"drive_kinematic_motion error: {e}")
+            return self._result(False, f"drive_kinematic_motion error: {e}", SwErrors.swGeneralError)
+
+    def manage_positional_representations(
+        self,
+        action: str = "list",
+        name: Optional[str] = None,
+        constraint_name: Optional[str] = None,
+        value: Optional[str] = None,
+        suppress_constraint: Optional[bool] = None,
+    ) -> Dict[str, Any]:
+        """
+        Manage named mechanism states (Positional Representations) in SolidWorks via Assembly Configurations
+        and configuration-specific mate dimension/suppression overrides.
+        action: 'list' | 'create' | 'activate' | 'set_override'
+        Matches lminventor's manage_positional_representations tool.
+        """
+        try:
+            doc, err = self.get_active_doc()
+            if err:
+                return err
+
+            act = (action or "list").strip().lower()
+            cfg_names = list(get_attr_or_call(doc, "GetConfigurationNames") or [])
+            active_cfg_obj = get_attr_or_call(doc, "GetActiveConfiguration")
+            active_cfg_name = str(getattr(active_cfg_obj, "Name", "Default")) if active_cfg_obj else "Default"
+
+            if act == "list":
+                return self._result(
+                    True,
+                    f"Positional representations (configurations): {cfg_names} (active='{active_cfg_name}')",
+                    SwErrors.swSuccess,
+                    {"representations": cfg_names, "active": active_cfg_name},
+                )
+
+            if not name:
+                return self._result(False, "Parameter 'name' is required for create/activate/set_override.", SwErrors.swInvalidParameter)
+
+            if act == "create":
+                if name not in cfg_names:
+                    cfg_mgr = getattr(doc, "ConfigurationManager", None)
+                    if cfg_mgr is not None:
+                        cfg_mgr.AddConfiguration2(name, f"Positional Representation {name}", "", 0, "", "", True)
+                    else:
+                        doc.AddConfiguration3(name, f"Positional Representation {name}", "", 0)
+                doc.ShowConfiguration2(name)
+                return self._result(
+                    True,
+                    f"Created and activated positional representation '{name}'",
+                    SwErrors.swSuccess,
+                    {"name": name, "active": name},
+                )
+
+            elif act == "activate":
+                ok = bool(doc.ShowConfiguration2(name))
+                get_attr_or_call(doc, "EditRebuild3")
+                return self._result(
+                    ok,
+                    f"Activated positional representation '{name}'" if ok else f"Configuration '{name}' not found",
+                    SwErrors.swSuccess if ok else SwErrors.swInvalidParameter,
+                    {"name": name, "activated": ok},
+                )
+
+            elif act == "set_override":
+                if name not in cfg_names:
+                    self.manage_positional_representations(action="create", name=name)
+                else:
+                    doc.ShowConfiguration2(name)
+
+                if not constraint_name:
+                    return self._result(False, "constraint_name is required for set_override.", SwErrors.swInvalidParameter)
+
+                override_result = {}
+                if suppress_constraint is not None:
+                    act_str = "suppress" if suppress_constraint else "unsuppress"
+                    override_result["suppression"] = self.manage_feature(
+                        action=act_str,
+                        feature_name=constraint_name,
+                        config_scope=1,  # swThisConfiguration = 1
+                    )
+
+                if value is not None:
+                    raw_val = str(value).strip().lower()
+                    unit_inferred = "deg" if "deg" in raw_val else "mm"
+                    num_str = "".join(ch for ch in raw_val if (ch.isdigit() or ch in ".-+"))
+                    num_val = float(num_str) if num_str else 0.0
+                    dim_target = constraint_name if "@" in constraint_name else f"D1@{constraint_name}"
+                    override_result["dimension"] = self.set_dimension(
+                        name=dim_target,
+                        value=num_val,
+                        units=unit_inferred,
+                        config_scope="this_configuration",
+                    )
+
+                get_attr_or_call(doc, "EditRebuild3")
+                return self._result(
+                    True,
+                    f"Set override on '{constraint_name}' in positional representation '{name}' (value={value}, suppress={suppress_constraint})",
+                    SwErrors.swSuccess,
+                    {
+                        "representation": name,
+                        "constraint_name": constraint_name,
+                        "value": value,
+                        "suppress_constraint": suppress_constraint,
+                        "details": override_result,
+                    },
+                )
+
+            else:
+                return self._result(
+                    False,
+                    f"Unknown action '{action}'. Use 'list', 'create', 'activate', or 'set_override'.",
+                    SwErrors.swInvalidParameter,
+                )
+        except Exception as e:
+            logger.error(f"manage_positional_representations error: {e}")
+            return self._result(False, f"manage_positional_representations error: {e}", SwErrors.swGeneralError)

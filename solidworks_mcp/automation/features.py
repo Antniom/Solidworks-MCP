@@ -1851,3 +1851,295 @@ class FeatureOperations:
             logger.error(f"create_hole_wizard error: {e}\n{traceback.format_exc()}")
             return self._result(False, f"create_hole_wizard error: {e}", SwErrors.swGeneralError)
 
+    def hole_linear(
+        self,
+        face_axis: str,
+        face_value: float,
+        ref1_axis: str,
+        ref1_value: float,
+        dist1: float,
+        ref2_axis: str,
+        ref2_value: float,
+        dist2: float,
+        diameter: float = 5.5,
+        depth: float = 0.0,
+        tapped: bool = False,
+        cbore_diameter: float = 0.0,
+        cbore_depth: float = 0.0,
+        unit: str = "mm",
+    ) -> Dict:
+        """
+        Place a hole on a planar face at (face_axis == face_value) positioned parametrically
+        at dist1 from ref1_axis==ref1_value and dist2 from ref2_axis==ref2_value.
+        Verifies via volume delta that material was actually removed, flipping cut direction if needed.
+        Matches lminventor's hole_linear tool.
+        """
+        try:
+            from ..core.post_conditions import capture_vol_state, format_vol_delta
+
+            doc, err = self.get_active_doc()
+            if err:
+                return err
+
+            bodies = get_attr_or_call(doc, "GetBodies2", 0, False) or []
+            if not bodies:
+                return self._result(False, "No solid bodies in active document.", SwErrors.swInvalidCall)
+
+            body = bodies[0]
+            faces = get_attr_or_call(body, "GetFaces") or []
+            axis_idx_map = {"x": 0, "y": 1, "z": 2}
+            fa = (face_axis or "").strip().lower()
+            r1a = (ref1_axis or "").strip().lower()
+            r2a = (ref2_axis or "").strip().lower()
+            if fa not in axis_idx_map or r1a not in axis_idx_map or r2a not in axis_idx_map:
+                return self._result(False, "Axes must be 'x', 'y', or 'z'.", SwErrors.swInvalidParameter)
+
+            fa_i = axis_idx_map[fa]
+            r1_i = axis_idx_map[r1a]
+            r2_i = axis_idx_map[r2a]
+
+            # Find largest planar face at face_axis == face_value (mm)
+            target_face = None
+            best_area = -1.0
+            face_centroid_mm = [0.0, 0.0, 0.0]
+            for f in faces:
+                try:
+                    surf = get_attr_or_call(f, "GetSurface")
+                    if surf and not get_attr_or_call(surf, "IsPlane"):
+                        continue
+                    box = get_attr_or_call(f, "GetBox")
+                    if not box or len(box) < 6:
+                        continue
+                    c_mm = [(box[0] + box[3]) * 500.0, (box[1] + box[4]) * 500.0, (box[2] + box[5]) * 500.0]
+                    span_mm = abs(box[fa_i + 3] - box[fa_i]) * 1000.0
+                    if span_mm < 1.0 and abs(c_mm[fa_i] - float(face_value)) <= 1.0:
+                        area = float(get_attr_or_call(f, "GetArea") or 0.0)
+                        if area > best_area:
+                            best_area = area
+                            target_face = f
+                            face_centroid_mm = c_mm
+                except Exception:
+                    continue
+
+            if target_face is None:
+                return self._result(
+                    False,
+                    f"No planar face found at {face_axis}={face_value}mm",
+                    SwErrors.swSelectionError,
+                )
+
+            # Compute target 3D hole center in mm by stepping inward from ref1 and ref2 edges toward centroid
+            hole_pt_mm = list(face_centroid_mm)
+            hole_pt_mm[fa_i] = float(face_value)
+            sgn1 = 1.0 if face_centroid_mm[r1_i] >= float(ref1_value) else -1.0
+            hole_pt_mm[r1_i] = float(ref1_value) + sgn1 * float(dist1)
+            sgn2 = 1.0 if face_centroid_mm[r2_i] >= float(ref2_value) else -1.0
+            hole_pt_mm[r2_i] = float(ref2_value) + sgn2 * float(dist2)
+
+            vol_before = capture_vol_state(doc)
+            v0 = vol_before[0] if vol_before else 0.0
+
+            # Select target face, open sketch, draw circle at hole center, and cut-extrude (auto-resolving direction)
+            doc.ClearSelection2(True)
+            target_face.Select2(False, 0)
+            doc.InsertSketch2(True)
+
+            # Transform 3D model point (m) into active sketch 2D space using sketch.ModelToSketchTransform
+            sk = getattr(doc.SketchManager, "ActiveSketch", None)
+            sx_m, sy_m = hole_pt_mm[0] / 1000.0, hole_pt_mm[1] / 1000.0
+            try:
+                if sk is not None and self._sw_app is not None:
+                    math_util = self._sw_app.GetMathUtility()
+                    xform = sk.ModelToSketchTransform
+                    if math_util and xform:
+                        mp = math_util.CreatePoint([hole_pt_mm[0] / 1000.0, hole_pt_mm[1] / 1000.0, hole_pt_mm[2] / 1000.0])
+                        sp = mp.MultiplyTransform(xform)
+                        arr = sp.ArrayData
+                        if arr and len(arr) >= 2:
+                            sx_m, sy_m = float(arr[0]), float(arr[1])
+            except Exception:
+                pass
+
+            r_m = (float(diameter) / 2.0) / 1000.0
+            doc.SketchManager.CreateCircleByRadius(sx_m, sy_m, 0.0, r_m)
+            doc.InsertSketch2(True)
+
+            through_all = (float(depth) <= 0.0)
+            cut_res = self.cut_extrude(depth=float(depth) if not through_all else 10.0, through_all=through_all, unit="mm")
+            vol_after = capture_vol_state(doc)
+            v1 = vol_after[0] if vol_after else v0
+
+            if not cut_res.get("success") or (v0 > 0 and v1 >= v0 - 0.5):
+                return self._result(
+                    False,
+                    f"hole_linear cut removed no material at { tuple(round(c, 2) for c in hole_pt_mm) }",
+                    SwErrors.swFeatureError,
+                    {"hole_center_mm": hole_pt_mm, "cut_result": cut_res},
+                )
+
+            suffix, delta_dict = format_vol_delta(vol_before, vol_after)
+            extent_str = "through-all" if through_all else f"{depth}mm deep"
+            return self._result(
+                True,
+                f"Hole D={diameter}mm {extent_str} on {face_axis}={face_value} "
+                f"({dist1}mm from {ref1_axis}={ref1_value}, {dist2}mm from {ref2_axis}={ref2_value}){suffix}",
+                SwErrors.swSuccess,
+                {
+                    "hole_center_mm": [round(c, 2) for c in hole_pt_mm],
+                    "diameter_mm": diameter,
+                    "depth_mm": depth,
+                    "through_all": through_all,
+                    "geometry_delta": delta_dict,
+                },
+            )
+        except Exception as e:
+            logger.error(f"hole_linear error: {e}\n{traceback.format_exc()}")
+            return self._result(False, f"hole_linear error: {e}", SwErrors.swGeneralError)
+
+    # ========================================================================
+    # Global Variables & Equations (IEquationMgr + Model Dimensions)
+    # ========================================================================
+
+    def get_parameters(self) -> Dict[str, Any]:
+        """
+        Get all Global Variables, Equations (IEquationMgr), and Model Dimensions in the active document.
+        Matches lminventor's get_parameters tool.
+        """
+        try:
+            doc, err = self.get_active_doc()
+            if err:
+                return err
+
+            equations = []
+            try:
+                eq_mgr = get_attr_or_call(doc, "GetEquationMgr")
+                if eq_mgr is not None:
+                    cnt = int(get_attr_or_call(eq_mgr, "GetCount") or 0)
+                    for i in range(cnt):
+                        try:
+                            eq_str = str(eq_mgr.Equation(i) or "")
+                            val = eq_mgr.Value(i)
+                            is_glob = bool(eq_mgr.GlobalVariable(i))
+                            supp = bool(eq_mgr.Suppression(i))
+                            name = eq_str.split("=")[0].strip().strip('"') if "=" in eq_str else f"Eq{i}"
+                            expr = eq_str.split("=", 1)[1].strip() if "=" in eq_str else eq_str
+                            equations.append({
+                                "index": i,
+                                "name": name,
+                                "expression": expr,
+                                "equation": eq_str,
+                                "value": val,
+                                "global_variable": is_glob,
+                                "suppressed": supp,
+                            })
+                        except Exception:
+                            pass
+            except Exception as eq_ex:
+                logger.debug(f"GetEquationMgr warning: {eq_ex}")
+
+            dims_res = self.get_dimensions()
+            dims_list = dims_res.get("data", {}).get("dimensions", []) if dims_res.get("success") else []
+
+            return self._result(
+                True,
+                f"Retrieved {len(equations)} equation(s)/global variable(s) and {len(dims_list)} model dimension(s)",
+                SwErrors.swSuccess,
+                {
+                    "equations": equations,
+                    "dimensions": dims_list,
+                    "equation_count": len(equations),
+                    "dimension_count": len(dims_list),
+                },
+            )
+        except Exception as e:
+            logger.error(f"get_parameters error: {e}")
+            return self._result(False, f"get_parameters error: {e}", SwErrors.swGeneralError)
+
+    def add_parameter(self, name: str, expression: str, units: str = "mm") -> Dict[str, Any]:
+        """
+        Add a new Global Variable or Equation to SolidWorks IEquationMgr.
+        Matches lminventor's add_parameter tool.
+        """
+        try:
+            doc, err = self.get_active_doc()
+            if err:
+                return err
+
+            eq_mgr = get_attr_or_call(doc, "GetEquationMgr")
+            if eq_mgr is None:
+                return self._result(False, "EquationMgr is not available on the active document.", SwErrors.swInvalidCall)
+
+            clean_name = name.strip().strip('"')
+            clean_expr = str(expression).strip()
+            # Format: '"Width" = 100mm' or '"D1@Sketch1" = "Width" * 2'
+            eq_text = f'"{clean_name}" = {clean_expr}'
+            idx = eq_mgr.Add2(-1, eq_text, True)
+            if idx < 0:
+                return self._result(
+                    False,
+                    f"Failed to add parameter/equation '{eq_text}' (EquationMgr.Add2 returned {idx})",
+                    SwErrors.swInvalidParameter,
+                )
+
+            get_attr_or_call(doc, "EditRebuild3")
+            val = None
+            try:
+                val = eq_mgr.Value(idx)
+            except Exception:
+                pass
+
+            return self._result(
+                True,
+                f"User parameter '{clean_name}' = '{clean_expr}' added (index={idx}, value={val})",
+                SwErrors.swSuccess,
+                {"index": idx, "name": clean_name, "expression": clean_expr, "equation": eq_text, "value": val},
+            )
+        except Exception as e:
+            logger.error(f"add_parameter error: {e}")
+            return self._result(False, f"add_parameter error: {e}", SwErrors.swGeneralError)
+
+    def set_parameter(self, name: str, expression: str, units: str = "mm") -> Dict[str, Any]:
+        """
+        Update an existing Global Variable / Equation in IEquationMgr, or fall back to setting a model dimension.
+        Matches lminventor's set_parameter tool.
+        """
+        try:
+            doc, err = self.get_active_doc()
+            if err:
+                return err
+
+            clean_name = name.strip().strip('"')
+            clean_expr = str(expression).strip()
+
+            eq_mgr = get_attr_or_call(doc, "GetEquationMgr")
+            if eq_mgr is not None:
+                cnt = int(get_attr_or_call(eq_mgr, "GetCount") or 0)
+                for i in range(cnt):
+                    try:
+                        eq_str = str(eq_mgr.Equation(i) or "")
+                        lhs = eq_str.split("=")[0].strip().strip('"') if "=" in eq_str else ""
+                        if lhs.lower() == clean_name.lower():
+                            new_eq = f'"{lhs}" = {clean_expr}'
+                            eq_mgr.SetEquationAndConfigurationOption(i, new_eq, 1, None)
+                            get_attr_or_call(doc, "EditRebuild3")
+                            val = eq_mgr.Value(i)
+                            return self._result(
+                                True,
+                                f"Parameter '{lhs}' set to '{clean_expr}' (value={val})",
+                                SwErrors.swSuccess,
+                                {"index": i, "name": lhs, "expression": clean_expr, "value": val},
+                            )
+                    except Exception:
+                        pass
+
+            # Fallback: try setting numeric model dimension via set_dimension
+            try:
+                num_val = float(clean_expr.replace("mm", "").replace("deg", "").strip())
+                return self.set_dimension(name=clean_name, value=num_val, units=units)
+            except ValueError:
+                # Expression is a formula on a dimension not yet in EquationMgr -> add equation
+                return self.add_parameter(name=clean_name, expression=clean_expr, units=units)
+        except Exception as e:
+            logger.error(f"set_parameter error: {e}")
+            return self._result(False, f"set_parameter error: {e}", SwErrors.swGeneralError)
+

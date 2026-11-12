@@ -399,3 +399,240 @@ class DiagnosticOperations:
             ok, msg, data = res
             return self._result(ok, msg, SwErrors.swSuccess if ok else SwErrors.swGeneralError, data)
         return res
+
+    def supervisor_clean_processes(
+        self,
+        confirm: bool = False,
+        target_pids: Optional[List[int]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Audit all running CAD processes, distinguishing active visible user windows
+        from orphaned headless/background processes (not in ROT or MainWindowTitle == '').
+        If confirm=False (default), performs a dry-run audit.
+        If confirm=True, terminates orphaned zombies (or specific target_pids).
+        """
+        try:
+            import pythoncom
+            import win32api
+            import win32con
+            import win32process
+            from .base import find_sldworks_pids, get_process_details
+
+            pids = find_sldworks_pids()
+            if not pids:
+                return self._result(
+                    True,
+                    "No running SolidWorks processes found.",
+                    SwErrors.swSuccess,
+                    {"processes": [], "zombies": [], "terminated_pids": [], "confirm": confirm},
+                )
+
+            # Discover which PIDs are registered in the Running Object Table (ROT)
+            rot_pids = set()
+            try:
+                pythoncom.CoInitialize()
+                rot = pythoncom.GetRunningObjectTable()
+                enum = rot.EnumRunning()
+                ctx = pythoncom.CreateBindCtx()
+                for m in enum:
+                    try:
+                        disp_name = m.GetDisplayName(ctx, None).lower()
+                        if "solidworks_pid_" in disp_name:
+                            tail = disp_name.split("solidworks_pid_")[-1]
+                            num_str = "".join(ch for ch in tail if ch.isdigit())
+                            if num_str:
+                                rot_pids.add(int(num_str))
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+            connected_pid = getattr(self, "_connected_pid", None)
+            processes_info = []
+            zombie_pids = []
+
+            for pid in pids:
+                info = get_process_details(pid)
+                in_rot = pid in rot_pids
+                has_title = bool(str(info.get("window_title") or "").strip())
+                is_active_user = has_title or (in_rot and info.get("working_set_mb", 0.0) > 150.0) or (pid == connected_pid and has_title)
+                classification = "active_visible" if is_active_user else "orphaned_zombie"
+                entry = {
+                    **info,
+                    "in_rot": in_rot,
+                    "classification": classification,
+                }
+                processes_info.append(entry)
+                if classification == "orphaned_zombie":
+                    zombie_pids.append(pid)
+
+            to_kill = []
+            if target_pids is not None:
+                req_set = {int(p) for p in target_pids}
+                to_kill = [p for p in pids if p in req_set]
+            else:
+                to_kill = list(zombie_pids)
+
+            terminated = []
+            errors = []
+            if confirm and to_kill:
+                for kpid in to_kill:
+                    try:
+                        h = win32api.OpenProcess(win32con.PROCESS_TERMINATE, False, int(kpid))
+                        win32process.TerminateProcess(h, 1)
+                        win32api.CloseHandle(h)
+                        terminated.append(int(kpid))
+                        if getattr(self, "_connected_pid", None) == int(kpid):
+                            self._connected = False
+                            self._sw_app = None
+                            self._connected_pid = None
+                    except Exception as kex:
+                        errors.append({"pid": int(kpid), "error": str(kex)})
+
+            if not confirm:
+                msg = (
+                    f"Dry-run process audit: {len(pids)} SolidWorks process(es) found, "
+                    f"{len(zombie_pids)} orphaned/headless zombie(s) ({zombie_pids}). "
+                    f"Pass confirm=True to terminate {to_kill}."
+                )
+            else:
+                msg = (
+                    f"Terminated {len(terminated)} orphaned process(es): {terminated} "
+                    f"(remaining active: {[p for p in pids if p not in terminated]})."
+                )
+
+            return self._result(
+                True,
+                msg,
+                SwErrors.swSuccess,
+                {
+                    "processes": processes_info,
+                    "zombies": zombie_pids,
+                    "target_kill_pids": to_kill,
+                    "terminated_pids": terminated,
+                    "errors": errors,
+                    "confirm": confirm,
+                },
+            )
+        except Exception as e:
+            logger.error(f"supervisor_clean_processes error: {e}")
+            return self._result(False, f"Process supervisor error: {e}", SwErrors.swGeneralError)
+
+    def transaction(self, action: str = "begin", name: str = "MCP batch") -> Dict[str, Any]:
+        """
+        Manage an Undo transaction wrapping multi-step CAD operations.
+        action: 'begin' | 'commit' | 'abort'
+        """
+        try:
+            from ..core import get_checkpoint_manager, capture_vol_state, format_vol_delta
+
+            act = (action or "begin").strip().lower()
+            doc, err = self.get_active_doc()
+            if err:
+                return err
+
+            active_txn = getattr(self, "_active_txn", None)
+
+            if act == "begin":
+                if active_txn is not None:
+                    return self._result(
+                        False,
+                        f"Transaction '{active_txn.get('name')}' is already open — commit or abort it first.",
+                        SwErrors.swInvalidCall,
+                        {"active_transaction": active_txn},
+                    )
+                vol_before = capture_vol_state(doc)
+                ckpt_name = f"txn_{name}_{int(os.times().elapsed * 1000) if hasattr(os, 'times') else '0'}"
+                ckpt_res = get_checkpoint_manager().create_checkpoint(
+                    doc=doc,
+                    name=ckpt_name,
+                    description=f"Undo transaction: {name}",
+                )
+                undo_started = False
+                try:
+                    start_undo = getattr(doc, "StartUndoRecord", None)
+                    if callable(start_undo):
+                        start_undo()
+                        undo_started = True
+                    elif start_undo is not None:
+                        undo_started = True
+                except Exception:
+                    pass
+
+                self._active_txn = {
+                    "name": name,
+                    "checkpoint_name": ckpt_name if ckpt_res.get("success") else None,
+                    "undo_record_active": undo_started,
+                    "vol_before": vol_before,
+                }
+                return self._result(
+                    True,
+                    f"Transaction '{name}' started",
+                    SwErrors.swSuccess,
+                    self._active_txn,
+                )
+
+            elif act == "commit":
+                if active_txn is None:
+                    return self._result(False, "No open transaction to commit.", SwErrors.swInvalidCall)
+                try:
+                    end_undo = getattr(doc, "EndUndoRecord", None)
+                    if callable(end_undo):
+                        end_undo()
+                except Exception:
+                    pass
+                vol_after = capture_vol_state(doc)
+                suffix, delta_dict = format_vol_delta(active_txn.get("vol_before"), vol_after)
+                txn_name = active_txn.get("name", name)
+                self._active_txn = None
+                return self._result(
+                    True,
+                    f"Transaction '{txn_name}' committed{suffix}",
+                    SwErrors.swSuccess,
+                    {"transaction": txn_name, "status": "committed", "geometry_delta": delta_dict},
+                )
+
+            elif act == "abort":
+                if active_txn is None:
+                    return self._result(False, "No open transaction to abort.", SwErrors.swInvalidCall)
+                try:
+                    end_undo = getattr(doc, "EndUndoRecord", None)
+                    if callable(end_undo):
+                        end_undo()
+                except Exception:
+                    pass
+
+                txn_name = active_txn.get("name", name)
+                ckpt_name = active_txn.get("checkpoint_name")
+                rolled_back = False
+
+                if ckpt_name:
+                    rb_res = get_checkpoint_manager().rollback_checkpoint(doc=doc, name=ckpt_name)
+                    rolled_back = bool(rb_res.get("success"))
+
+                if not rolled_back:
+                    try:
+                        undo_fn = getattr(doc, "EditUndo2", None)
+                        if callable(undo_fn):
+                            undo_fn(1)
+                            rolled_back = True
+                    except Exception:
+                        pass
+
+                self._active_txn = None
+                return self._result(
+                    True,
+                    f"Transaction '{txn_name}' aborted — all changes since 'begin' rolled back",
+                    SwErrors.swSuccess,
+                    {"transaction": txn_name, "status": "aborted", "rolled_back": rolled_back},
+                )
+
+            else:
+                return self._result(
+                    False,
+                    f"Unknown transaction action '{action}'. Use 'begin', 'commit', or 'abort'.",
+                    SwErrors.swInvalidParameter,
+                )
+        except Exception as e:
+            logger.error(f"transaction error: {e}")
+            return self._result(False, f"Transaction error: {e}", SwErrors.swGeneralError)

@@ -27,21 +27,55 @@ class SketchOperations:
     - _units: UnitConverter instance
     """
     
-    def create_sketch(self, plane: str = "Front") -> Dict:
+    def create_sketch(
+        self,
+        plane: str = "Front",
+        offset: float = 0.0,
+        face_index: Optional[int] = None,
+        unit: Optional[str] = None,
+    ) -> Dict:
         """
-        Create a new sketch on specified plane
+        Create a new sketch on a specified plane, an offset reference plane, or a body face by 1-based face_index.
         
         Args:
-            plane: Plane name - "Front", "Top", or "Right"
+            plane: Plane name - "Front" ("XY"), "Top" ("XZ"), or "Right" ("YZ")
+            offset: Optional offset distance from plane (creates an offset RefPlane automatically)
+            face_index: Optional 1-based face index on solid body 1
+            unit: Unit for offset (default active unit, usually mm)
         
         Returns:
             Result dictionary
         """
         try:
+            from ..core.com_compat import get_attr_or_call
+
             doc, err = self.get_active_doc()
             if err:
                 return err
-            
+
+            empty_callout = win32com.client.VARIANT(pythoncom.VT_DISPATCH, None)
+
+            if face_index is not None:
+                bodies = get_attr_or_call(doc, "GetBodies2", 0, False) or []
+                if not bodies:
+                    return self._result(False, "No solid bodies found for face_index selection.", SwErrors.swSelectionError)
+                faces = get_attr_or_call(bodies[0], "GetFaces") or []
+                if face_index < 1 or face_index > len(faces):
+                    return self._result(
+                        False,
+                        f"face_index={face_index} out of range (1..{len(faces)})",
+                        SwErrors.swInvalidParameter,
+                    )
+                doc.ClearSelection2(True)
+                faces[face_index - 1].Select2(False, 0)
+                doc.InsertSketch2(True)
+                return self._result(
+                    True,
+                    f"Sketch created on face [{face_index}]",
+                    SwErrors.swSuccess,
+                    {"face_index": face_index, "sketch_active": True},
+                )
+
             plane_map = {
                 "front": "Front Plane",
                 "top": "Top Plane",
@@ -49,28 +83,47 @@ class SketchOperations:
                 "front plane": "Front Plane",
                 "top plane": "Top Plane",
                 "right plane": "Right Plane",
+                "xy": "Front Plane",
+                "xz": "Top Plane",
+                "yz": "Right Plane",
             }
             plane_key = (plane or "").strip().lower()
             if plane_key not in plane_map:
                 return self._result(
                     False,
-                    f"Invalid plane '{plane}'. Valid planes are: Front, Top, Right",
+                    f"Invalid plane '{plane}'. Valid planes are: Front (XY), Top (XZ), Right (YZ)",
                     SwErrors.swInvalidParameter,
                 )
             plane_name = plane_map[plane_key]
-            
-            # Create empty variant for callout parameter
-            empty_callout = win32com.client.VARIANT(pythoncom.VT_DISPATCH, None)
-            
-            # Select plane
+            target_plane_label = plane_name
+
+            # Select base plane
+            doc.ClearSelection2(True)
             result = doc.Extension.SelectByID2(
                 plane_name, "PLANE", 0, 0, 0, False, 0, empty_callout, 0
             )
-            
             if not result:
-                return self._result(False, f"Could not select {plane_name}",
-                                  SwErrors.swSelectionError)
-            
+                return self._result(False, f"Could not select {plane_name}", SwErrors.swSelectionError)
+
+            # Optional offset plane creation
+            if abs(float(offset or 0.0)) > 1e-9:
+                unit_str = unit or self._units.default_unit.value
+                offset_m = abs(self._units.to_meters(float(offset), unit))
+                # swRefPlaneReferenceConstraint_Distance = 8, Flip = 256 (8 | 256 = 264 when negative)
+                constraint_flag = 8 if float(offset) > 0 else (8 | 256)
+                ref_plane = doc.FeatureManager.InsertRefPlane(constraint_flag, offset_m, 0, 0, 0, 0)
+                if ref_plane is None:
+                    return self._result(
+                        False,
+                        f"Failed to create offset reference plane ({offset}{unit_str} from {plane_name})",
+                        SwErrors.swFeatureError,
+                    )
+                ref_plane_name = getattr(ref_plane, "Name", None)
+                if ref_plane_name:
+                    doc.ClearSelection2(True)
+                    doc.Extension.SelectByID2(ref_plane_name, "PLANE", 0, 0, 0, False, 0, empty_callout, 0)
+                target_plane_label = f"{plane_name} ({offset:+g}{unit_str} offset -> {ref_plane_name or 'RefPlane'})"
+
             # Insert sketch
             doc.InsertSketch2(True)
             
@@ -84,7 +137,6 @@ class SketchOperations:
                 pass
             if not is_active:
                 try:
-                    from ..core.com_compat import get_attr_or_call
                     if get_attr_or_call(doc, "GetSketchMode"):
                         is_active = True
                 except Exception:
@@ -93,12 +145,16 @@ class SketchOperations:
             if not is_active:
                 return self._result(
                     False,
-                    f"Post-condition failed: Active sketch mode was not entered on {plane_name}",
+                    f"Post-condition failed: Active sketch mode was not entered on {target_plane_label}",
                     SwErrors.swSketchError,
                 )
             
-            return self._result(True, f"Sketch created on {plane_name}",
-                              SwErrors.swSuccess, {"plane": plane_name, "sketch_active": True})
+            return self._result(
+                True,
+                f"Sketch created on {target_plane_label}",
+                SwErrors.swSuccess,
+                {"plane": target_plane_label, "offset": offset, "sketch_active": True},
+            )
             
         except Exception as e:
             logger.error(f"Create sketch error: {e}\n{traceback.format_exc()}")
@@ -676,4 +732,63 @@ class SketchOperations:
             )
         except Exception as e:
             logger.error(f"Draw text error: {e}\n{traceback.format_exc()}")
+            return self._result(False, f"Error: {e}", SwErrors.swSketchError)
+
+    def draw_closed_profile(
+        self,
+        points: List[List[float]],
+        unit: Optional[str] = None,
+    ) -> Dict:
+        """
+        Draw a closed polygon/profile loop from a list of [x, y] points in a single call.
+        Matches lminventor's draw_closed_profile tool.
+        """
+        try:
+            doc, err = self.get_active_doc()
+            if err:
+                return err
+
+            sk_err = self._require_active_sketch_in_3d(doc)
+            if sk_err:
+                return sk_err
+
+            if not points or len(points) < 3:
+                return self._result(
+                    False,
+                    "Need at least 3 [x, y] points for a closed profile.",
+                    SwErrors.swInvalidParameter,
+                )
+
+            unit_str = unit or self._units.default_unit.value
+            pts_m = [
+                (self._units.to_meters(float(pt[0]), unit), self._units.to_meters(float(pt[1]), unit))
+                for pt in points
+            ]
+
+            created_lines = 0
+            n = len(pts_m)
+            for i in range(n):
+                x1_m, y1_m = pts_m[i]
+                x2_m, y2_m = pts_m[(i + 1) % n]
+                if abs(x1_m - x2_m) < 1e-9 and abs(y1_m - y2_m) < 1e-9:
+                    continue
+                seg = doc.SketchManager.CreateLine(x1_m, y1_m, 0.0, x2_m, y2_m, 0.0)
+                if seg is not None:
+                    created_lines += 1
+
+            if created_lines < 3:
+                return self._result(
+                    False,
+                    f"Failed to create closed profile (only {created_lines} line segments created).",
+                    SwErrors.swSketchError,
+                )
+
+            return self._result(
+                True,
+                f"Closed profile with {len(points)} points ({created_lines} lines, unit={unit_str})",
+                SwErrors.swSuccess,
+                {"point_count": len(points), "line_count": created_lines, "unit": unit_str},
+            )
+        except Exception as e:
+            logger.error(f"draw_closed_profile error: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Error: {e}", SwErrors.swSketchError)

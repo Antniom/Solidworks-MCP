@@ -24,6 +24,125 @@ class PreMutationState:
     component_count: int = 0
     mate_count: int = 0
     rebuild_errors: List[Dict[str, Any]] = field(default_factory=list)
+    vol_state: Optional[Tuple[float, int, int, int]] = None
+
+
+def capture_vol_state(doc: Any) -> Optional[Tuple[float, int, int, int]]:
+    """
+    Capture (volume_mm3, faces_count, edges_count, body_count) of solid bodies
+    in the active Part document, or None if not a Part or no solid bodies exist.
+    Matches lminventor's _vol_state() for immediate inline agent verification.
+    """
+    if doc is None:
+        return None
+    try:
+        doc_type = get_attr_or_call(doc, "GetType")
+        if doc_type != 1:  # swDocPART = 1
+            return None
+
+        bodies = None
+        try:
+            bodies = doc.GetBodies2(0, False)  # swSolidBody = 0, VisibleOnly = False
+        except Exception:
+            pass
+        if not bodies or len(bodies) == 0:
+            return None
+
+        body_count = len(bodies)
+        faces_count = 0
+        edges_count = 0
+        for b in bodies:
+            try:
+                fc = getattr(b, "GetFaceCount", None)
+                if fc is not None:
+                    faces_count += int(fc() if callable(fc) else fc)
+            except Exception:
+                pass
+            try:
+                ec = getattr(b, "GetEdgeCount", None)
+                if ec is not None:
+                    edges_count += int(ec() if callable(ec) else ec)
+            except Exception:
+                pass
+
+        volume_mm3 = 0.0
+        mp_resolved = False
+        try:
+            get_mp = getattr(doc, "GetMassProperties", None)
+            mp_arr = get_mp() if callable(get_mp) else get_mp
+            if mp_arr and len(mp_arr) >= 4:
+                volume_mm3 = float(mp_arr[3]) * 1e9
+                mp_resolved = True
+        except Exception:
+            pass
+
+        if not mp_resolved:
+            try:
+                ext = getattr(doc, "Extension", None)
+                if ext is not None:
+                    for mp_name in ("CreateMassProperty2", "CreateMassProperty"):
+                        mp_fn = getattr(ext, mp_name, None)
+                        if callable(mp_fn):
+                            mp = mp_fn()
+                            if mp is not None:
+                                vol_m3 = get_attr_or_call(mp, "Volume")
+                                if vol_m3 is not None:
+                                    volume_mm3 = float(vol_m3) * 1e9
+                                    mp_resolved = True
+                                    break
+            except Exception:
+                pass
+
+        return (round(volume_mm3, 2), faces_count, edges_count, body_count)
+    except Exception as e:
+        logger.debug(f"capture_vol_state error: {e}")
+        return None
+
+
+def format_vol_delta(
+    before: Optional[Tuple[float, int, int, int]],
+    after: Optional[Tuple[float, int, int, int]],
+) -> Tuple[str, Optional[Dict[str, Any]]]:
+    """
+    Format compact ' | V 35271 (-7854 mm³) | F7 E16' suffix and structured geometry_delta dict,
+    matching lminventor's _fmt_delta(before) convention.
+    """
+    if not after:
+        return "", None
+
+    vol_after, faces_after, edges_after, bodies_after = after
+    body_suffix = f" B{bodies_after}" if bodies_after > 1 else ""
+
+    if not before:
+        suffix = f" | V {vol_after:.0f} mm³ | F{faces_after} E{edges_after}{body_suffix}"
+        delta_dict = {
+            "volume_before_mm3": 0.0,
+            "volume_after_mm3": round(vol_after, 2),
+            "volume_delta_mm3": round(vol_after, 2),
+            "faces_before": 0,
+            "faces_after": faces_after,
+            "edges_before": 0,
+            "edges_after": edges_after,
+            "bodies_before": 0,
+            "bodies_after": bodies_after,
+        }
+        return suffix, delta_dict
+
+    vol_before, faces_before, edges_before, bodies_before = before
+    dv = vol_after - vol_before
+    suffix = f" | V {vol_after:.0f} ({dv:+.0f} mm³) | F{faces_after} E{edges_after}{body_suffix}"
+    delta_dict = {
+        "volume_before_mm3": round(vol_before, 2),
+        "volume_after_mm3": round(vol_after, 2),
+        "volume_delta_mm3": round(dv, 2),
+        "faces_before": faces_before,
+        "faces_after": faces_after,
+        "edges_before": edges_before,
+        "edges_after": edges_after,
+        "bodies_before": bodies_before,
+        "bodies_after": bodies_after,
+    }
+    return suffix, delta_dict
 
 
 def get_assembly_mate_count(doc: Any) -> int:
@@ -122,12 +241,14 @@ def capture_pre_mutation_state(doc: Any) -> PreMutationState:
 
     mate_count = get_assembly_mate_count(doc)
     rebuild_errors = get_model_rebuild_errors(doc)
+    vol_state = capture_vol_state(doc)
 
     return PreMutationState(
         feature_count=feat_count,
         component_count=comp_count,
         mate_count=mate_count,
         rebuild_errors=rebuild_errors,
+        vol_state=vol_state,
     )
 
 
@@ -211,8 +332,16 @@ def verify_mutation_post_condition(
             "pre_existing_errors": pre_state.rebuild_errors,
         }
 
-    return True, "Mutation successfully verified by post-condition check", {
+    post_vol_state = capture_vol_state(doc)
+    vol_suffix, vol_delta_dict = format_vol_delta(pre_state.vol_state, post_vol_state)
+
+    diag_out: Dict[str, Any] = {
         "post_feature_count": post_feat_count,
         "new_rebuild_errors": 0,
         "pre_existing_rebuild_errors": len(pre_state.rebuild_errors),
     }
+    if vol_delta_dict:
+        diag_out["geometry_delta"] = vol_delta_dict
+        diag_out["volume_suffix"] = vol_suffix
+
+    return True, f"Mutation successfully verified by post-condition check{vol_suffix}", diag_out
