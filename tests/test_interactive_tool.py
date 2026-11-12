@@ -27,9 +27,11 @@ def test_resource_is_listed_and_readable_through_the_sdk():
             content = read.contents[0]
             assert content.mime_type == srv.STUDIO_MIME_TYPE
             assert "<div id=\"studio\">" in content.text
-            assert bridge.get_token() in content.text
+            assert bridge.get_token() not in content.text
             tools = await client.list_tools()
-            assert any(t.name == "show_interactive_studio" for t in tools.tools)
+            by_name = {t.name: t for t in tools.tools}
+            assert "show_interactive_studio" in by_name
+            assert by_name["studio_action"].meta["ui"]["visibility"] == ["app"]
 
     anyio.run(go)
 
@@ -61,15 +63,19 @@ def test_show_interactive_studio_handler(monkeypatch):
     data = res["data"]
     assert data["studioUrl"].startswith("http://127.0.0.1:54321/studio?token=")
     assert data["dimensions"][0]["label"] == "Base Thickness"
-    kinds = [next(k for k in m if k != "version") for m in data["a2ui"]["messages"]]
-    assert kinds == ["createSurface", "updateComponents", "updateDataModel"]
+    assert set(data["a2ui"]) == {"messages"}, "no bridge address or token in the tool result"
+    assert data["a2ui"]["messages"][0]["version"] == "1.0" and "createSurface" in data["a2ui"]["messages"][0]
     assert "<agent-embed" not in res["message"]
 
 
-def test_studio_reports_bridge_failure_instead_of_guessing_a_port(monkeypatch):
+def test_studio_still_opens_inline_when_the_bridge_cannot_start(monkeypatch):
     automation = MagicMock()
-    automation.get_active_doc.return_value = (MagicMock(), None)
-    automation._result.side_effect = lambda ok, msg, code, data=None: {"success": ok, "message": msg}
+    doc = MagicMock()
+    doc.GetTitle = "Bracket.SLDPRT"
+    automation.get_active_doc.return_value = (doc, None)
+    automation.get_dimensions.return_value = {"success": True, "data": []}
+    automation.capture_viewport.return_value = {"success": False}
+    automation.inspect_model.return_value = {"success": False}
     monkeypatch.setattr(srv, "sw_automation", automation)
 
     def boom(*a, **k):
@@ -77,4 +83,35 @@ def test_studio_reports_bridge_failure_instead_of_guessing_a_port(monkeypatch):
 
     monkeypatch.setattr(bridge, "start_bridge", boom)
     res = srv._show_interactive_studio_handler({})
-    assert res["success"] is False and "no free port" in res["message"]
+    assert res["success"] is True
+    assert res["data"]["studioUrl"] is None and "54321" not in res["message"]
+    assert "createSurface" in res["data"]["a2ui"]["messages"][0]
+
+
+def test_studio_action_runs_through_the_mcp_server(monkeypatch):
+    """The in-app transport: the view calls the studio_action tool via the host."""
+    from solidworks_mcp.ui import a2ui
+
+    automation = MagicMock()
+    automation.set_dimension.return_value = {"success": True}
+    automation.capture_viewport.return_value = {"success": False}
+    automation.inspect_model.return_value = {"success": False}
+    automation._result.side_effect = lambda ok, msg, code, data=None: {"success": ok, "message": msg}
+    monkeypatch.setattr(srv, "sw_automation", automation)
+    dims = a2ui.build_dimension_model(
+        [{"full_name": "D1@Boss-Extrude1@P.Part", "name": "D1", "owner_feature": "Boss-Extrude1", "value": 20.0, "units": "mm"}]
+    )
+    bridge.set_session("P.SLDPRT", dims)
+
+    message = {"version": "1.0", "action": {"name": "set_dimension", "surfaceId": a2ui.SURFACE_ID,
+                                            "sourceComponentId": "slider_d0", "timestamp": "2026-01-01T00:00:00Z",
+                                            "context": {"key": "d0", "value": 24.5}}}
+    res = srv._dispatch_tool("studio_action", {"message": message})
+
+    assert res["success"] is True
+    automation.set_dimension.assert_called_once_with(name="D1@Boss-Extrude1@P.Part", value=24.5, units="mm")
+    updates = {m["updateDataModel"]["path"]: m["updateDataModel"]["value"] for m in res["data"]["a2ui"]["messages"]}
+    assert updates["/dims/d0/value"] == 24.5
+
+    bad = srv._dispatch_tool("studio_action", {"message": {"version": "1.0"}})
+    assert bad["success"] is False

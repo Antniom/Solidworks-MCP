@@ -49,10 +49,70 @@ def test_single_source_of_skills_and_rules():
     assert "solidworks-modeling" in skills and not any(s.startswith("legacy-") for s in skills)
     assert not Path("solidworks_mcp/skills").exists() and not Path("plugins/solidworks/skills").exists()
 
-    for manifest in (".claude-plugin/plugin.json", ".codex-plugin/plugin.json", ".cursor-plugin/plugin.json"):
+    for manifest in (".codex-plugin/plugin.json", ".cursor-plugin/plugin.json"):
         data = json.loads(Path(manifest).read_text(encoding="utf-8"))
         assert (Path(data["skills"]) / "solidworks-modeling" / "SKILL.md").exists(), manifest
         assert Path(data["mcpServers"]).exists(), manifest
+
+
+# --- Claude plugin directory rules (claude.com/docs/plugins/pre-submission-checklist) ---------------
+
+def _plugin_files():
+    import subprocess
+    out = subprocess.run(["git", "ls-files"], capture_output=True, text=True, check=True).stdout
+    return [Path(p) for p in out.splitlines() if p]
+
+
+def test_claude_manifest_meets_directory_rules():
+    import re
+    data = json.loads(Path(".claude-plugin/plugin.json").read_text(encoding="utf-8"))
+    assert re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?", data["name"])
+    for field in ("displayName", "version", "description", "author", "license"):
+        assert data.get(field), field
+    # Components are found by convention; only the manifest lives in .claude-plugin/.
+    assert "skills" not in data and "mcpServers" not in data
+    assert sorted(p.name for p in Path(".claude-plugin").iterdir()) == ["marketplace.json", "plugin.json"]
+    assert Path("LICENSE").exists()
+
+    readme = re.sub(r"```.*?```", "", Path("README.md").read_text(encoding="utf-8"), flags=re.S)
+    assert len(readme.split()) >= 40
+
+
+def test_local_connector_command_is_reviewable():
+    servers = json.loads(Path(".mcp.json").read_text(encoding="utf-8"))["mcpServers"]
+    sw = servers["solidworks"]
+    # A package launcher must be pinned: uv run needs --locked plus a committed lock file.
+    assert sw["command"] == "uv" and sw["args"][:2] == ["run", "--locked"]
+    assert Path("uv.lock").exists()
+    joined = " ".join(sw["args"])
+    assert "${CLAUDE_PLUGIN_ROOT}" in joined and ".." not in joined
+    assert "$" not in joined.replace("${CLAUDE_PLUGIN_ROOT}", "")
+    assert not any(k.upper().endswith(("KEY", "TOKEN", "SECRET")) for k in sw.get("env", {}))
+
+
+def test_plugin_folder_stays_within_directory_limits():
+    files = _plugin_files()
+    assert len(files) <= 512
+    assert not Path("bin").exists(), "a top-level bin/ stops claude.ai and Cowork from installing the plugin"
+    banned = {".ds_store", "thumbs.db", "desktop.ini"}
+    assert not [f for f in files if f.name.lower() in banned]
+    assert not [str(f) for f in files if f.stat().st_size > 5 * 1024 * 1024], "files over 5 MiB stop validation"
+
+    compiled = {".dll", ".exe", ".pdb", ".pyd", ".so", ".zip", ".mcpb", ".dxt"}
+    assert not [str(f) for f in files if f.suffix.lower() in compiled], "compiled binaries are not shipped"
+
+    # Anything over 256 KiB is held for a human reviewer; keep that list short and deliberate.
+    large = sorted(str(f) for f in files if f.stat().st_size > 256 * 1024 and f.suffix.lower() not in {".png", ".svg"})
+    assert large == ["solidworks_mcp/ui/static/studio.bundle.js"], large
+
+
+def test_skill_frontmatter_is_valid():
+    for skill in Path("skills").glob("*/SKILL.md"):
+        text = skill.read_text(encoding="utf-8")
+        assert text.startswith("---\n"), skill
+        front = text.split("---\n")[1]
+        assert f"name: {skill.parent.name}\n" in front, skill
+        assert "description:" in front, skill
 
 
 def test_versions_agree():

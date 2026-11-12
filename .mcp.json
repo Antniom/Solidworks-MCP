@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "solidworks": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--locked",
+        "--project",
+        "${CLAUDE_PLUGIN_ROOT}",
+        "python",
+        "-m",
+        "solidworks_mcp.server"
+      ],
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      }
+    }
+  }
+}

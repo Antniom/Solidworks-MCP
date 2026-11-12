@@ -3,9 +3,11 @@ SolidWorks MCP - Studio Bridge
 ------------------------------
 Local HTTP server (127.0.0.1 only) that backs the interactive studio.
 
+It is the browser-tab transport for the studio (inside the Claude app the studio
+talks to the server through the MCP host instead, see the studio_action tool).
 It serves the A2UI host page, hands out the A2UI messages that describe the
-studio surface, receives A2UI client actions (slider moves, button presses) and
-pushes A2UI data-model updates to every connected page over Server-Sent Events.
+studio surface, receives A2UI actions (slider moves, button presses) and pushes
+A2UI data-model updates to every connected page over Server-Sent Events.
 
 Security: every /api and /studio request must carry the per-process token that
 is embedded in the generated page, and the Host header must be a loopback name.
@@ -126,13 +128,19 @@ def set_session(
     return _session
 
 
-def render_page(include_messages: bool = False) -> str:
-    """Self-contained studio HTML: shell + A2UI renderer bundle + connection config."""
+def render_page(with_bridge: bool = True) -> str:
+    """
+    Self-contained studio HTML: shell + A2UI renderer bundle.
+
+    with_bridge=True (browser tab) embeds the bridge address and token so the page can
+    fetch its surface. The MCP Apps resource is rendered without them: there the surface
+    arrives in the tool result and actions go back through the host.
+    """
     shell = SHELL_PATH.read_text(encoding="utf-8")
     bundle = BUNDLE_PATH.read_text(encoding="utf-8")
-    config: Dict[str, Any] = {"bridge": get_bridge_url() or "", "token": _TOKEN}
-    if include_messages:
-        config["messages"] = _session.messages()
+    config: Dict[str, Any] = {}
+    if with_bridge and get_bridge_url():
+        config = {"bridge": get_bridge_url(), "token": _TOKEN}
     return (
         shell
         .replace("/*__SW_STUDIO_CONFIG__*/", "window.__SW_STUDIO__ = " + _script_json(config) + ";")

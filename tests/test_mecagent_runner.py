@@ -5,7 +5,11 @@ registered in `solidworks_mcp/server.py`.
 """
 
 import pytest
-from solidworks_mcp.core.mecagent_runner import MecAgentRunnerBridge
+from solidworks_mcp.core.mecagent_runner import MecAgentRunnerBridge, RunnerNotInstalledError
+
+RUNNER_INSTALLED = bool(MecAgentRunnerBridge._resolve_runner_exe())
+needs_runner = pytest.mark.skipif(not RUNNER_INSTALLED, reason="MecAgent .NET runner is not installed")
+
 from solidworks_mcp.server import _tool_definitions, _validate_tool_arguments, _dispatch_tool
 
 
@@ -47,6 +51,7 @@ def runner():
     bridge.shutdown()
 
 
+@needs_runner
 def test_runner_startup_and_ready_handshake(runner: MecAgentRunnerBridge):
     """Verify MecAgent.SolidWorks.Runner.exe starts over anonymous pipes and emits ReadyMessage."""
     ready = runner.ensure_started(timeout=30.0)
@@ -56,6 +61,7 @@ def test_runner_startup_and_ready_handshake(runner: MecAgentRunnerBridge):
     assert "33.5" in str(ready.get("interopVersion", ""))
 
 
+@needs_runner
 def test_stateful_csharp_repl_and_final_answer(runner: MecAgentRunnerBridge):
     """Verify Roslyn CellSession persists variables across cells and supports FinalAnswer / final_answer."""
     c1 = runner.execute_csharp('int persistedDim = 35; Print("dim=" + persistedDim); persistedDim')
@@ -70,6 +76,7 @@ def test_stateful_csharp_repl_and_final_answer(runner: MecAgentRunnerBridge):
     assert c2["finalAnswer"] == "Computed: 70"
 
 
+@needs_runner
 def test_cast_repair_and_static_effect_classifier(runner: MecAgentRunnerBridge):
     """
     Verify CastRepair automatically fixes CS1061 missing COM interface casts
@@ -91,6 +98,7 @@ def test_cast_repair_and_static_effect_classifier(runner: MecAgentRunnerBridge):
     assert any("EditRebuild3" in s for s in symbols)
 
 
+@needs_runner
 def test_execute_macro_and_sdk_bundle(runner: MecAgentRunnerBridge):
     """Verify DynamicClass.Execute macro execution and cached McpSdkBundle invocation."""
     macro_code = """
@@ -113,6 +121,7 @@ def test_execute_macro_and_sdk_bundle(runner: MecAgentRunnerBridge):
     assert "success" in ctx
 
 
+@needs_runner
 def test_server_dispatch_sw_execute_csharp(monkeypatch):
     """Verify _dispatch_tool routes sw_execute_csharp cleanly (code execution enabled)."""
     monkeypatch.setenv("SW_MCP_ALLOW_EXEC", "1")
@@ -122,3 +131,21 @@ def test_server_dispatch_sw_execute_csharp(monkeypatch):
     )
     assert res["success"] is True
     assert res["data"]["returnValue"] == 12.0
+
+
+def test_missing_runner_is_reported_as_optional(monkeypatch):
+    """Without a runner the sw_* tools fail with guidance instead of a traceback."""
+    from solidworks_mcp import server as srv
+    from solidworks_mcp.core import mecagent_runner
+
+    monkeypatch.setenv("SW_MCP_ALLOW_EXEC", "1")
+    monkeypatch.delenv("MECAGENT_RUNNER_PATH", raising=False)
+    monkeypatch.setenv("LOCALAPPDATA", "Z:/definitely/not/here")
+    monkeypatch.setattr(srv, "get_mecagent_runner", lambda: mecagent_runner.MecAgentRunnerBridge())
+    monkeypatch.setattr(srv.sw_automation, "_result",
+                        lambda ok, msg, code, data=None: {"success": ok, "message": msg}, raising=False)
+
+    with pytest.raises(RunnerNotInstalledError):
+        mecagent_runner.MecAgentRunnerBridge().ensure_started()
+    res = srv._dispatch_tool("sw_get_feature_tree_json", {})
+    assert res["success"] is False and "optional" in res["message"]

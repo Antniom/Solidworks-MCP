@@ -4,7 +4,7 @@
 
 1. **Interactive Design First**:
    - Whenever the user asks to "tweak dimensions", "adjust size", "change parameters", or requests "sliders" / "interface in chat", call `show_interactive_studio`.
-   - MCP Apps clients show the studio inline. Otherwise give the user the returned `studioUrl` exactly as returned.
+   - The Claude app shows the studio inline where it supports MCP Apps. Otherwise give the user the returned `studioUrl` exactly as returned.
 
 2. **Analytic Primitives Only (Zero Point-by-Point Approximations)**:
    - Never approximate circular arcs, fillets, cylindrical surfaces, or rounds by emitting discrete piecewise line segments (`draw_line` in a loop) or dense point coordinate tables.

@@ -30,6 +30,16 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
+RUNNER_NOT_INSTALLED_MESSAGE = (
+    "The optional MecAgent .NET runner is not installed, so the sw_* tools are unavailable. "
+    "Every other SolidWorks tool works without it. To enable them, install the MecAgent desktop app, "
+    "or set the MECAGENT_RUNNER_PATH environment variable to MecAgent.SolidWorks.Runner.exe."
+)
+
+
+class RunnerNotInstalledError(FileNotFoundError):
+    """Raised when a sw_* tool is used but no MecAgent runner executable can be found."""
+
 
 # ============================================================================
 # Win32 Job Object Helper (auto-terminates child runner if parent exits)
@@ -403,11 +413,7 @@ class MecAgentRunnerBridge:
         if env_path and os.path.exists(env_path):
             return str(Path(env_path).resolve())
 
-        # Check bundled runner inside solidworks_mcp/bin/mecagent_runner
-        bundled = Path(__file__).resolve().parent.parent / "bin" / "mecagent_runner" / "MecAgent.SolidWorks.Runner.exe"
-        if bundled.exists():
-            return str(bundled)
-
+        # The runner is not shipped with this plugin; use the one from an installed MecAgent app.
         # Fallback to installed mecagent-app in LocalAppData
         local_app_data = os.environ.get("LOCALAPPDATA", os.path.expanduser(r"~\AppData\Local"))
         mec_base = Path(local_app_data) / "mecagent-app"
@@ -419,7 +425,7 @@ class MecAgentRunnerBridge:
             if candidates:
                 return str(candidates[0])
 
-        return str(bundled)
+        return ""
 
     @property
     def is_running(self) -> bool:
@@ -434,9 +440,7 @@ class MecAgentRunnerBridge:
             self.shutdown()
 
             if not os.path.exists(self._runner_exe):
-                raise FileNotFoundError(
-                    f"MecAgent runner executable not found at: {self._runner_exe}"
-                )
+                raise RunnerNotInstalledError(RUNNER_NOT_INSTALLED_MESSAGE)
 
             # Create two anonymous pipes:
             # 1) host_to_runner: runner reads r_in, host writes w_in
@@ -455,7 +459,9 @@ class MecAgentRunnerBridge:
                 os.set_handle_inheritable(in_win_handle, True)
                 os.set_handle_inheritable(out_win_handle, True)
 
-                bundle_cache_dir = Path(self._bin_dir) / ".bundle_cache"
+                # The runner lives in another application's install folder, so keep our cache elsewhere.
+                cache_base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+                bundle_cache_dir = Path(cache_base) / "solidworks-mcp" / "runner-bundle-cache"
                 bundle_cache_dir.mkdir(parents=True, exist_ok=True)
 
                 cmd_args = [

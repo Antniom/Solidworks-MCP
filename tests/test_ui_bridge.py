@@ -59,8 +59,8 @@ def _request(url, body=None, headers=None):
 
 
 def _action(name, context):
-    return {"version": "v0.9", "action": {
-        "name": name, "surfaceId": a2ui.SURFACE_ID, "sourceComponentId": "slider-d0",
+    return {"version": "1.0", "action": {
+        "name": name, "surfaceId": a2ui.SURFACE_ID, "sourceComponentId": "slider_d0",
         "timestamp": "2026-01-01T00:00:00Z", "context": context}}
 
 
@@ -90,6 +90,9 @@ def test_page_and_messages_with_token(studio):
     status, body = _request(f"{base}/api/a2ui?token={token}")
     messages = json.loads(body)["messages"]
     assert status == 200 and "createSurface" in messages[0]
+    # The MCP Apps resource is static and must not carry the bridge address or token.
+    resource_page = bridge.render_page(with_bridge=False)
+    assert token not in resource_page and "127.0.0.1" not in resource_page.split("<script>")[1]
 
 
 def test_set_dimension_action_drives_solidworks(studio):

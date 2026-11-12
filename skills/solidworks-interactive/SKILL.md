@@ -12,8 +12,8 @@ description: >-
 `show_interactive_studio` turns the active model's driving dimensions into sliders next to a viewport image.
 Moving a slider rebuilds the model in SolidWorks and refreshes the image.
 
-The studio is described with [A2UI](https://github.com/a2ui-project/a2ui) v0.9 messages (basic catalog) and
-drawn by the stock A2UI Lit renderer, so the same payload works in any A2UI-capable client.
+The studio is described with [A2UI](https://github.com/a2ui-project/a2ui) 1.0 messages (basic catalog) and
+drawn by the stock A2UI web renderer, so the same payload works in any A2UI-capable client.
 
 ## When to use it
 
@@ -45,12 +45,14 @@ from `get_dimensions`.
 
 ## Showing it to the user
 
-- **MCP Apps clients** (Claude Desktop, VS Code and others) display the studio inline automatically.
-- **Everywhere else**, give the user the `studioUrl` from the result. It is a `http://127.0.0.1:...` link
-  that works only on their machine and carries a one-time access token, so pass it on exactly as returned.
-- An A2UI-capable client can render `data.a2ui.messages` itself.
+- Where the Claude app supports MCP Apps, the studio appears inline as soon as the tool returns. Nothing
+  more is needed.
+- If it does not appear, give the user the `studioUrl` from the result. It is a `http://127.0.0.1:...` link
+  that works only on their machine and carries a per-session access token, so pass it on exactly as returned.
+  If `studioUrl` is null, the browser fallback is unavailable; use `set_dimension` for the changes instead.
 
-Do not paste the raw JSON into the chat. Say what the sliders control and let the user drive.
+Do not paste the raw JSON into the chat, and never call `studio_action` yourself: it belongs to the studio
+view. Say what the sliders control and let the user drive.
 
 ## What the user can do
 
@@ -60,7 +62,8 @@ Do not paste the raw JSON into the chat. Say what the sliders control and let th
 - **Reset** restores every dimension to its value when the studio was opened.
 - **Prompt Agent** sends (or copies to the clipboard) a summary of what changed.
 
-Sliders move in whole units (1 mm or 1 degree). For a finer value, use `set_dimension`.
+Sliders step by 0.5 to 5 mm depending on the size of the dimension (1 degree for angles). For an exact
+value in between, use `set_dimension`.
 
 ## After a Prompt Agent message
 

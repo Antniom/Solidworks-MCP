@@ -1,15 +1,20 @@
 /**
  * SolidWorks Interactive Studio - A2UI host.
  *
- * The Python server describes the studio as A2UI v0.9 messages (see ui/a2ui.py).
- * This page only renders them with the stock A2UI Lit renderer and relays
- * A2UI client actions back to the local bridge. It contains no studio-specific
- * layout of its own.
+ * The Python server describes the studio as A2UI 1.0 messages (see ui/a2ui.py).
+ * This page only renders them with the stock A2UI web renderer and relays A2UI
+ * renderer-to-agent actions back to the server. It has no studio layout of its own.
+ *
+ * Two transports carry the actions:
+ *   - inside an MCP Apps host (the Claude app): a tools/call request for the
+ *     server's `studio_action` tool, relayed by the host;
+ *   - in a plain browser tab: the local studio bridge over HTTP.
  */
-import {MessageProcessor} from '@a2ui/web_core/v0_9';
-import {basicCatalog} from '@a2ui/lit/v0_9';
+import {MessageProcessor} from '@a2ui/web_core/v1_0';
+import {basicCatalog} from '@a2ui/web_core/catalogs/basic/v1';
+import '@a2ui/lit'; // registers <a2ui-surface>
 
-const A2UI_VERSION = 'v0.9';
+const A2UI_VERSION = '1.0';
 const DEBOUNCE_MS = 180;
 
 const cfg = Object.assign({bridge: '', token: '', messages: null}, window.__SW_STUDIO__ || {});
@@ -38,20 +43,13 @@ function bridgeUrl(path) {
 /** Remember dimension values the server pushed so they are not echoed back. */
 function noteServerValues(messages) {
   for (const msg of messages) {
+    const dims = msg && msg.createSurface && msg.createSurface.dataModel && msg.createSurface.dataModel.dims;
+    if (dims) {
+      for (const [key, dim] of Object.entries(dims)) serverValues.set(`/dims/${key}/value`, dim.value);
+    }
     const update = msg && msg.updateDataModel;
-    if (!update) continue;
-    const path = update.path || '/';
-    const value = update.value;
-    if (path === '/' && value && value.dims) {
-      for (const [key, dim] of Object.entries(value.dims)) {
-        serverValues.set(`/dims/${key}/value`, dim.value);
-      }
-    } else if (path === '/dims' && value) {
-      for (const [key, dim] of Object.entries(value)) {
-        serverValues.set(`/dims/${key}/value`, dim.value);
-      }
-    } else if (/^\/dims\/[^/]+\/value$/.test(path)) {
-      serverValues.set(path, value);
+    if (update && /^\/dims\/[^/]+\/value$/.test(update.path || '')) {
+      serverValues.set(update.path, update.value);
     }
   }
 }
@@ -63,12 +61,9 @@ function applyMessages(payload) {
   processor.processMessages(messages);
 }
 
+/** Deliver one A2UI renderer-to-agent message and apply the A2UI messages that come back. */
 async function sendAction(name, sourceComponentId, context) {
-  if (!cfg.bridge) {
-    setBanner('Not connected to the SolidWorks bridge.', 'error');
-    return;
-  }
-  const body = {
+  const message = {
     version: A2UI_VERSION,
     action: {
       name,
@@ -79,16 +74,25 @@ async function sendAction(name, sourceComponentId, context) {
     },
   };
   try {
-    const resp = await fetch(bridgeUrl('/api/a2ui/action'), {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(body),
-    });
-    const data = await resp.json();
-    applyMessages(data);
+    let reply;
+    if (hostConnected) {
+      const result = await rpcRequest('tools/call', {name: 'studio_action', arguments: {message}}, 120000);
+      reply = result && result.structuredContent && result.structuredContent.a2ui;
+      if (!reply) throw new Error('the server returned no studio update');
+    } else if (cfg.bridge) {
+      const resp = await fetch(bridgeUrl('/api/a2ui/action'), {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(message),
+      });
+      reply = await resp.json();
+    } else {
+      throw new Error('not connected');
+    }
+    applyMessages(reply);
     setBanner('', '');
   } catch (err) {
-    setBanner(`SolidWorks bridge unreachable: ${err.message || err}`, 'error');
+    setBanner(`Could not reach SolidWorks: ${err.message || err}`, 'error');
   }
 }
 
@@ -118,7 +122,7 @@ function watchDimensions() {
           setTimeout(() => {
             const dim = surface.dataModel.get(`/dims/${key}`) || {};
             serverValues.set(path, value);
-            sendAction('set_dimension', `slider-${key}`, {
+            sendAction('set_dimension', `slider_${key}`, {
               key,
               name: dim.name,
               value,
@@ -141,7 +145,8 @@ processor.onSurfaceCreated(created => {
 });
 
 function connectEvents() {
-  if (!cfg.bridge || eventSource) return;
+  // Only the browser-tab transport needs server push; in a host every update is a tool result.
+  if (hostConnected || !cfg.bridge || eventSource) return;
   eventSource = new EventSource(bridgeUrl('/api/a2ui/events'));
   eventSource.onmessage = ev => {
     try {
@@ -186,6 +191,7 @@ async function loadFromBridge() {
 // ---------------------------------------------------------------------------
 
 const embedded = window.parent && window.parent !== window;
+let hostConnected = false;
 let rpcId = 0;
 const rpcPending = new Map();
 
@@ -193,14 +199,14 @@ function rpcSend(message) {
   if (embedded) window.parent.postMessage(Object.assign({jsonrpc: '2.0'}, message), '*');
 }
 
-function rpcRequest(method, params) {
+function rpcRequest(method, params, timeoutMs = 4000) {
   return new Promise((resolve, reject) => {
     const id = ++rpcId;
     rpcPending.set(id, {resolve, reject});
     rpcSend({id, method, params});
     setTimeout(() => {
       if (rpcPending.delete(id)) reject(new Error(`${method} timed out`));
-    }, 4000);
+    }, timeoutMs);
   });
 }
 
@@ -242,6 +248,14 @@ function reportSize() {
   });
 }
 
+function startStandalone() {
+  if (cfg.messages && cfg.messages.length) {
+    start(cfg);
+  } else if (cfg.bridge && cfg.token) {
+    loadFromBridge();
+  }
+}
+
 if (embedded) {
   rpcRequest('ui/initialize', {
     protocolVersion: '2026-01-26',
@@ -249,14 +263,12 @@ if (embedded) {
     appCapabilities: {},
   })
     .then(() => {
+      hostConnected = true;
       rpcSend({method: 'ui/notifications/initialized'});
       new ResizeObserver(reportSize).observe(document.documentElement);
     })
-    .catch(() => {});
-}
-
-if (cfg.messages && cfg.messages.length) {
-  start(cfg);
-} else if (cfg.bridge && cfg.token) {
-  loadFromBridge();
+    // Framed by something that is not an MCP Apps host: behave like a browser tab.
+    .catch(startStandalone);
+} else {
+  startStandalone();
 }

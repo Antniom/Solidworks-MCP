@@ -1,18 +1,17 @@
 {
-  "name": "solidworks",
+  "name": "solidworks-mcp",
   "owner": {
     "name": "António Coelho"
   },
-  "interface": {
-    "displayName": "SolidWorks CAD"
+  "metadata": {
+    "description": "SolidWorks CAD plugin for Claude",
+    "version": "5.0.0"
   },
-  "description": "Parametric 3D CAD modeling and interactive simulation in SolidWorks",
-  "version": "5.0.0",
   "plugins": [
     {
       "name": "solidworks",
       "source": "./",
-      "description": "Parametric 3D CAD modeling, interactive studio, FEA simulation, and drawing generation in Dassault Systèmes SolidWorks.",
+      "description": "Model parts, build assemblies, make drawings and run stress analysis in SolidWorks from a conversation, with an interactive studio for adjusting dimensions.",
       "version": "5.0.0",
       "author": {
         "name": "António Coelho"

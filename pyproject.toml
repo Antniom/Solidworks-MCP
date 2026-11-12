@@ -39,7 +39,7 @@ classifiers = [
 ]
 dependencies = [
     "mcp>=2.0.0",
-    "pywin32>=306",
+    "pywin32>=306; sys_platform == 'win32'",
     "pydantic>=2.0.0",
     "pillow>=10.0.0",
     "numpy>=1.24.0",
@@ -87,3 +87,7 @@ include = [
     "/LICENSE",
     "/pyproject.toml",
 ]
+
+# The server only runs on Windows; resolving for that platform alone keeps uv.lock small.
+[tool.uv]
+environments = ["sys_platform == 'win32'"]

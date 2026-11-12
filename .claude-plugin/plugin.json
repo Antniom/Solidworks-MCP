@@ -1,11 +1,15 @@
 {
   "name": "solidworks",
+  "displayName": "SolidWorks CAD",
   "version": "5.0.0",
-  "description": "Parametric 3D CAD modeling, interactive in-chat studio, FEA simulation, drawing generation, and automated mechanical design for Dassault Systèmes SolidWorks via Model Context Protocol.",
+  "description": "Model parts, build assemblies, make drawings and run stress analysis in SolidWorks from a conversation, with an interactive studio for adjusting dimensions.",
+  "icon": "./assets/icon.png",
   "author": {
-    "name": "António Coelho"
+    "name": "António Coelho",
+    "url": "https://github.com/Antniom"
   },
   "homepage": "https://github.com/Antniom/Solidworks-MCP",
+  "repository": "https://github.com/Antniom/Solidworks-MCP",
   "license": "MIT",
   "keywords": [
     "solidworks",
@@ -15,8 +19,5 @@
     "mcp",
     "simulation",
     "drafting"
-  ],
-  "skills": "./skills/",
-  "mcpServers": "./claude.mcp.json",
-  "repository": "https://github.com/Antniom/Solidworks-MCP"
+  ]
 }

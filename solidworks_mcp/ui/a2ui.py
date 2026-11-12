@@ -1,14 +1,14 @@
 """
 SolidWorks Interactive Studio - A2UI surface builder
 ----------------------------------------------------
-Describes the studio as A2UI v0.9 messages (https://github.com/a2ui-project/a2ui)
+Describes the studio as A2UI 1.0 messages (https://github.com/a2ui-project/a2ui)
 using only the basic catalog, so any A2UI renderer can draw it. The bundled
-host page (ui/host/studio.js) renders these with the stock Lit renderer.
+host page (ui/host/studio.js) renders these with the stock A2UI web renderer.
 
 Data model layout:
     /model     {title, info}
     /viewport  {image: data-URI, view: [view name]}
-    /dims      {d0: {name, label, feature, value, original, units, min, max}, ...}
+    /dims      {d0: {name, label, feature, value, original, units, min, max, steps}, ...}
     /status    one-line status text
     /summary   ready-made prompt describing what the user changed
 """
@@ -16,9 +16,9 @@ Data model layout:
 import math
 from typing import Any, Dict, List, Optional
 
-A2UI_VERSION = "v0.9"
+A2UI_VERSION = "1.0"
 SURFACE_ID = "solidworks-studio"
-BASIC_CATALOG_ID = "https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json"
+BASIC_CATALOG_ID = "https://a2ui.org/specification/v1_0/catalogs/basic/catalog.json"
 
 VIEW_NAMES = ["*Isometric", "*Front", "*Top", "*Right", "*Back", "*Left", "*Bottom"]
 
@@ -71,30 +71,25 @@ def is_angle_dimension(dim: Dict[str, Any]) -> bool:
 
 def compute_slider_bounds(value: float, is_angle: bool = False) -> Dict[str, float]:
     """
-    Whole-number slider range around a value.
+    Slider range and step for a value: {"min", "max", "step"}.
 
-    The A2UI basic-catalog Slider has no step property (renderers step by 1),
-    so bounds are integers and the range grows with the magnitude of the value.
+    Ranges are clean engineering brackets that grow with the value. Linear minimums stay
+    above zero because SolidWorks rejects non-positive linear dimensions.
     """
     if is_angle:
-        return {"min": 0.0, "max": 360.0 if abs(value) > 180.0 else 180.0}
+        return {"min": 0.0, "max": 360.0 if abs(value) > 180.0 else 180.0, "step": 1.0}
     v = abs(value)
-    if v <= 15.0:
-        top = 30.0
-    elif v <= 30.0:
-        top = 60.0
-    elif v <= 60.0:
-        top = 120.0
-    elif v <= 120.0:
-        top = 250.0
-    elif v <= 250.0:
-        top = 500.0
-    elif v <= 500.0:
-        top = 1000.0
-    else:
-        top = float(math.ceil(v * 2.0 / 50.0) * 50.0)
-    # Linear dimensions must stay strictly positive in SolidWorks.
-    return {"min": 1.0 if v >= 1.0 else round(v, 3) or 0.001, "max": top}
+    for limit, low, high, step in (
+        (15.0, 0.5, 30.0, 0.5),
+        (30.0, 1.0, 60.0, 0.5),
+        (60.0, 2.0, 120.0, 1.0),
+        (120.0, 5.0, 250.0, 1.0),
+        (250.0, 10.0, 500.0, 2.0),
+        (500.0, 20.0, 1000.0, 5.0),
+    ):
+        if v <= limit:
+            return {"min": min(low, v) or low, "max": high, "step": step}
+    return {"min": 50.0, "max": float(math.ceil(v * 2.0 / 50.0) * 50.0), "step": 5.0}
 
 
 def _dimension_entry(
@@ -123,7 +118,9 @@ def _dimension_entry(
         "original": value,
         "units": "deg" if angle else str(dim.get("units") or "mm"),
         "min": bounds["min"],
-        "max": max(bounds["max"], math.ceil(value)),
+        "max": bounds["max"],
+        # A2UI Slider takes a number of divisions rather than a step size.
+        "steps": max(1, round((bounds["max"] - bounds["min"]) / bounds["step"])),
     }
 
 
@@ -194,6 +191,7 @@ def data_update(path: str, value: Any) -> Message:
     }
 
 
+# A2UI 1.0 component ids must be identifiers (letters, digits, underscores).
 def _text(component_id: str, text: Any, variant: str = "body") -> Dict[str, Any]:
     return {"id": component_id, "component": "Text", "text": text, "variant": variant}
 
@@ -203,11 +201,11 @@ def _button(component_id: str, label: str, action: str, context: Dict[str, Any],
         {
             "id": component_id,
             "component": "Button",
-            "child": f"{component_id}-label",
+            "child": f"{component_id}_label",
             "variant": variant,
             "action": {"event": {"name": action, "context": context}},
         },
-        _text(f"{component_id}-label", label),
+        _text(f"{component_id}_label", label),
     ]
 
 
@@ -216,29 +214,29 @@ def build_components(dims: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
     components: List[Dict[str, Any]] = [
         {"id": "root", "component": "Column", "children": ["header", "body", "footer"]},
         {"id": "header", "component": "Row", "children": ["title", "info"], "justify": "spaceBetween", "align": "center"},
-        _text("title", {"path": "/model/title"}, "h3"),
-        _text("info", {"path": "/model/info"}, "caption"),
-        {"id": "body", "component": "Row", "children": ["view-card", "controls"], "align": "start"},
-        {"id": "view-card", "component": "Card", "child": "view-col", "weight": 3},
-        {"id": "view-col", "component": "Column", "children": ["viewport", "view-picker", "refresh"]},
+        _text("title", {"@path": "/model/title"}),
+        _text("info", {"@path": "/model/info"}, "caption"),
+        {"id": "body", "component": "Row", "children": ["view_card", "controls"], "align": "start"},
+        {"id": "view_card", "component": "Card", "child": "view_col", "weight": 3},
+        {"id": "view_col", "component": "Column", "children": ["viewport", "view_picker", "refresh"]},
         {
             "id": "viewport",
             "component": "Image",
-            "url": {"path": "/viewport/image"},
+            "url": {"@path": "/viewport/image"},
             "description": "SolidWorks viewport",
             "fit": "contain",
             "variant": "largeFeature",
         },
         {
-            "id": "view-picker",
+            "id": "view_picker",
             "component": "ChoicePicker",
             "label": "View",
             "variant": "mutuallyExclusive",
             "displayStyle": "chips",
             "options": [{"label": name.lstrip("*"), "value": name} for name in VIEW_NAMES],
-            "value": {"path": "/viewport/view"},
+            "value": {"@path": "/viewport/view"},
         },
-        *_button("refresh", "Refresh view", "capture", {"view": {"path": "/viewport/view"}}),
+        *_button("refresh", "Refresh view", "capture", {"view": {"@path": "/viewport/view"}}),
     ]
 
     groups: Dict[str, List[str]] = {}
@@ -247,34 +245,35 @@ def build_components(dims: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
 
     control_ids: List[str] = []
     if not groups:
-        control_ids.append("no-dims")
-        components.append(_text("no-dims", "No driving dimensions were found in this model."))
+        control_ids.append("no_dims")
+        components.append(_text("no_dims", "No driving dimensions were found in this model."))
     for index, (feature, keys) in enumerate(groups.items()):
-        group_id = f"group-{index}"
+        group_id = f"group_{index}"
         control_ids.append(group_id)
-        children = [f"{group_id}-title"]
-        components.append({"id": group_id, "component": "Card", "child": f"{group_id}-col"})
-        components.append(_text(f"{group_id}-title", feature, "h5"))
+        children = [f"{group_id}_title"]
+        components.append({"id": group_id, "component": "Card", "child": f"{group_id}_col"})
+        components.append(_text(f"{group_id}_title", feature))
         for key in keys:
             dim = dims[key]
-            children += [f"slider-{key}", f"value-{key}"]
+            children += [f"slider_{key}", f"value_{key}"]
             components.append({
-                "id": f"slider-{key}",
+                "id": f"slider_{key}",
                 "component": "Slider",
                 "label": f"{dim['label']} ({dim['units']})",
                 "min": dim["min"],
                 "max": dim["max"],
-                "value": {"path": f"/dims/{key}/value"},
+                "steps": dim["steps"],
+                "value": {"@path": f"/dims/{key}/value"},
             })
-            components.append(_text(f"value-{key}", dim["name"], "caption"))
-        components.append({"id": f"{group_id}-col", "component": "Column", "children": children})
+            components.append(_text(f"value_{key}", dim["name"], "caption"))
+        components.append({"id": f"{group_id}_col", "component": "Column", "children": children})
     components.append({"id": "controls", "component": "Column", "children": control_ids, "weight": 2})
 
     components += [
         {"id": "footer", "component": "Row", "children": ["status", "reset", "prompt"], "justify": "spaceBetween", "align": "center"},
-        _text("status", {"path": "/status"}, "caption"),
+        _text("status", {"@path": "/status"}, "caption"),
         *_button("reset", "Reset", "reset", {}),
-        *_button("prompt", "Prompt Agent", "prompt_agent", {"summary": {"path": "/summary"}}, "primary"),
+        *_button("prompt", "Prompt Agent", "prompt_agent", {"summary": {"@path": "/summary"}}, "primary"),
     ]
     return components
 
@@ -287,21 +286,19 @@ def build_surface_messages(
     view_name: str = "*Isometric",
     status: str = "Drag a slider to rebuild the model in SolidWorks.",
 ) -> List[Message]:
-    """Full message list that creates and populates the studio surface."""
-    return [
-        {
-            "version": A2UI_VERSION,
-            "createSurface": {"surfaceId": SURFACE_ID, "catalogId": BASIC_CATALOG_ID},
+    """The A2UI message that creates and populates the studio surface."""
+    return [{
+        "version": A2UI_VERSION,
+        "createSurface": {
+            "surfaceId": SURFACE_ID,
+            "catalogId": BASIC_CATALOG_ID,
+            "components": build_components(dims),
+            "dataModel": {
+                "model": {"title": model_title or "SolidWorks Model", "info": describe_model(bbox, len(dims))},
+                "viewport": {"image": image_data_uri or "", "view": [view_name]},
+                "dims": dims,
+                "status": status,
+                "summary": build_change_summary(dims),
+            },
         },
-        {
-            "version": A2UI_VERSION,
-            "updateComponents": {"surfaceId": SURFACE_ID, "components": build_components(dims)},
-        },
-        data_update("/", {
-            "model": {"title": model_title or "SolidWorks Model", "info": describe_model(bbox, len(dims))},
-            "viewport": {"image": image_data_uri or "", "view": [view_name]},
-            "dims": dims,
-            "status": status,
-            "summary": build_change_summary(dims),
-        }),
-    ]
+    }]

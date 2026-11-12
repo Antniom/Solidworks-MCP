@@ -748,7 +748,7 @@ def _build_tools() -> List[Tool]:
             name="show_interactive_studio",
             description=(
                 "Open the interactive studio for the active model: dimension sliders plus a live viewport, "
-                "rendered from A2UI v0.9 messages. MCP Apps clients show it inline; otherwise give the user the "
+                "rendered from A2UI 1.0 messages. The Claude app shows it inline; otherwise give the user the "
                 "returned studioUrl to open in a browser. Slider moves rebuild the model in SolidWorks."
             ),
             inputSchema={
@@ -778,6 +778,32 @@ def _build_tools() -> List[Tool]:
             meta={
                 "ui": {
                     "resourceUri": "ui://solidworks/studio.html"
+                }
+            }
+        ),
+
+        Tool(
+            name="studio_action",
+            description=(
+                "Internal to the interactive studio view: applies one user action (slider move, view change, reset) "
+                "sent by the studio UI as an A2UI renderer-to-agent message. Not for direct use; change dimensions "
+                "with set_dimension instead."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "message": {
+                        "type": "object",
+                        "description": "A2UI 1.0 renderer-to-agent message: {version, action: {name, surfaceId, sourceComponentId, timestamp, context}}"
+                    }
+                },
+                "required": ["message"]
+            },
+            meta={
+                "ui": {
+                    "resourceUri": "ui://solidworks/studio.html",
+                    # Callable by the studio view only; hidden from the model.
+                    "visibility": ["app"]
                 }
             }
         ),
