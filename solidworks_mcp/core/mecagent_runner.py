@@ -31,9 +31,9 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 RUNNER_NOT_INSTALLED_MESSAGE = (
-    "The optional MecAgent .NET runner is not installed, so the sw_* tools are unavailable. "
-    "Every other SolidWorks tool works without it. To enable them, install the MecAgent desktop app, "
-    "or set the MECAGENT_RUNNER_PATH environment variable to MecAgent.SolidWorks.Runner.exe."
+    "The .NET runner behind the sw_* tools was not found (expected in solidworks_mcp/bin/mecagent_runner). "
+    "Every other SolidWorks tool works without it. Reinstall the plugin, or set the MECAGENT_RUNNER_PATH "
+    "environment variable to MecAgent.SolidWorks.Runner.exe."
 )
 
 
@@ -413,7 +413,11 @@ class MecAgentRunnerBridge:
         if env_path and os.path.exists(env_path):
             return str(Path(env_path).resolve())
 
-        # The runner is not shipped with this plugin; use the one from an installed MecAgent app.
+        # Runner bundled with this package
+        bundled = Path(__file__).resolve().parent.parent / "bin" / "mecagent_runner" / "MecAgent.SolidWorks.Runner.exe"
+        if bundled.exists():
+            return str(bundled)
+
         # Fallback to installed mecagent-app in LocalAppData
         local_app_data = os.environ.get("LOCALAPPDATA", os.path.expanduser(r"~\AppData\Local"))
         mec_base = Path(local_app_data) / "mecagent-app"
@@ -459,7 +463,7 @@ class MecAgentRunnerBridge:
                 os.set_handle_inheritable(in_win_handle, True)
                 os.set_handle_inheritable(out_win_handle, True)
 
-                # The runner lives in another application's install folder, so keep our cache elsewhere.
+                # Keep the compile cache out of the install/plugin folder, which is replaced on update.
                 cache_base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
                 bundle_cache_dir = Path(cache_base) / "solidworks-mcp" / "runner-bundle-cache"
                 bundle_cache_dir.mkdir(parents=True, exist_ok=True)

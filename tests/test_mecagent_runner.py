@@ -7,8 +7,15 @@ registered in `solidworks_mcp/server.py`.
 import pytest
 from solidworks_mcp.core.mecagent_runner import MecAgentRunnerBridge, RunnerNotInstalledError
 
-RUNNER_INSTALLED = bool(MecAgentRunnerBridge._resolve_runner_exe())
-needs_runner = pytest.mark.skipif(not RUNNER_INSTALLED, reason="MecAgent .NET runner is not installed")
+import os
+
+# The runner is a Windows executable; it ships in solidworks_mcp/bin/mecagent_runner.
+needs_runner = pytest.mark.skipif(os.name != "nt", reason="the .NET runner only runs on Windows")
+
+
+def test_runner_is_bundled():
+    exe = MecAgentRunnerBridge._resolve_runner_exe()
+    assert exe.replace("\\", "/").endswith("solidworks_mcp/bin/mecagent_runner/MecAgent.SolidWorks.Runner.exe")
 
 from solidworks_mcp.server import _tool_definitions, _validate_tool_arguments, _dispatch_tool
 
@@ -133,19 +140,18 @@ def test_server_dispatch_sw_execute_csharp(monkeypatch):
     assert res["data"]["returnValue"] == 12.0
 
 
-def test_missing_runner_is_reported_as_optional(monkeypatch):
-    """Without a runner the sw_* tools fail with guidance instead of a traceback."""
+def test_missing_runner_is_reported_clearly(monkeypatch):
+    """If the runner files are gone, the sw_* tools fail with guidance instead of a traceback."""
     from solidworks_mcp import server as srv
     from solidworks_mcp.core import mecagent_runner
 
-    monkeypatch.setenv("SW_MCP_ALLOW_EXEC", "1")
-    monkeypatch.delenv("MECAGENT_RUNNER_PATH", raising=False)
-    monkeypatch.setenv("LOCALAPPDATA", "Z:/definitely/not/here")
-    monkeypatch.setattr(srv, "get_mecagent_runner", lambda: mecagent_runner.MecAgentRunnerBridge())
+    bridge = mecagent_runner.MecAgentRunnerBridge()
+    bridge._runner_exe = ""
+    monkeypatch.setattr(srv, "get_mecagent_runner", lambda: bridge)
     monkeypatch.setattr(srv.sw_automation, "_result",
                         lambda ok, msg, code, data=None: {"success": ok, "message": msg}, raising=False)
 
     with pytest.raises(RunnerNotInstalledError):
-        mecagent_runner.MecAgentRunnerBridge().ensure_started()
+        bridge.ensure_started()
     res = srv._dispatch_tool("sw_get_feature_tree_json", {})
-    assert res["success"] is False and "optional" in res["message"]
+    assert res["success"] is False and "MECAGENT_RUNNER_PATH" in res["message"]

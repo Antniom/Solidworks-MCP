@@ -31,8 +31,9 @@ mechanical-engineering workflows, plus an interactive studio for adjusting dimen
 
 ## Install
 
-1. In the Claude desktop app open **Customize > Plugins**, find *SolidWorks CAD* (or use
-   **Add > Add marketplace** with `Antniom/Solidworks-MCP`) and select **Add**.
+1. In the Claude desktop app open **Customize > Plugins**, choose **Add > Add marketplace**, enter
+   `Antniom/Solidworks-MCP`, then add *SolidWorks CAD* from the list. (Or download the repository as a zip
+   and use **Add > Upload plugin**.)
 2. Start SolidWorks.
 3. Start a Cowork task and ask for something from the table above. The connector appears on the plugin's
    **Connectors** tab as *Runs in each session*.
@@ -67,7 +68,8 @@ server accepts only requests carrying a per-session token, so other web pages ca
 Everything this plugin does happens on your PC:
 
 - **The connector** is the Python package in `solidworks_mcp/`, started by `uv run --locked` from the plugin
-  folder. On first start uv downloads the pinned Python packages in `uv.lock` from PyPI. The connector then
+  folder. It also starts the bundled .NET runner (`MecAgent.SolidWorks.Runner.exe`) the first time a `sw_*`
+  tool is used. On first start uv downloads the pinned Python packages in `uv.lock` from PyPI. The connector then
   controls SolidWorks through its COM automation interface.
 - **Files**: it reads and writes CAD files, exports and screenshots only in locations you name, limited to
   your user profile, the working folder and the temp folder. Logs and checkpoint copies go to
@@ -82,12 +84,12 @@ Everything this plugin does happens on your PC:
 - **Stopping stray processes**: `supervisor_clean_processes` can end orphaned SolidWorks processes, and only
   when called with explicit confirmation.
 
-## Optional: fast inspection tools
+## Fast inspection tools (.NET runner)
 
-The `sw_*` tools (fast model context, topology paths, C# execution) use the .NET runner from the separate
-MecAgent desktop app. It is not included here. If MecAgent is installed, or `MECAGENT_RUNNER_PATH` points at
-`MecAgent.SolidWorks.Runner.exe`, those tools work; otherwise they report that they are unavailable and
-everything else works normally.
+The `sw_*` tools (fast model context, feature-tree JSON, topology paths, edge analysis, C# execution) run in
+a separate .NET process that ships with the plugin in `solidworks_mcp/bin/mecagent_runner`. It starts on
+first use and stops with the connector. Because of these bundled binaries the plugin is distributed from
+this repository rather than Anthropic's public directory, which does not accept files of that size.
 
 ## Troubleshooting
 
@@ -113,8 +115,10 @@ To use the same server with other MCP clients, see [docs/other-clients.md](docs/
 
 ## License
 
-MIT, see [LICENSE](LICENSE). The bundled studio renderer includes A2UI (Apache-2.0) and its dependencies;
-their notices are in `solidworks_mcp/ui/static/studio.bundle.js.LEGAL.txt`.
+MIT for this project's own code, see [LICENSE](LICENSE). The bundled studio renderer includes A2UI
+(Apache-2.0) and its dependencies; their notices are in `solidworks_mcp/ui/static/studio.bundle.js.LEGAL.txt`.
+The files in `solidworks_mcp/bin/mecagent_runner` are third-party binaries (the MecAgent runner, Microsoft
+Roslyn, Newtonsoft.Json and SolidWorks interop assemblies) and remain under their owners' licences.
 
 SolidWorks is a trademark of Dassault Systèmes SolidWorks Corporation. This is an independent project and is
 not affiliated with or endorsed by Dassault Systèmes.

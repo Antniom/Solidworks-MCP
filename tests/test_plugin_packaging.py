@@ -55,7 +55,7 @@ def test_single_source_of_skills_and_rules():
         assert Path(data["mcpServers"]).exists(), manifest
 
 
-# --- Claude plugin directory rules (claude.com/docs/plugins/pre-submission-checklist) ---------------
+# --- Claude plugin rules (claude.com/docs/plugins/build and platform-support) ----------------------
 
 def _plugin_files():
     import subprocess
@@ -90,20 +90,19 @@ def test_local_connector_command_is_reviewable():
     assert not any(k.upper().endswith(("KEY", "TOKEN", "SECRET")) for k in sw.get("env", {}))
 
 
-def test_plugin_folder_stays_within_directory_limits():
+def test_plugin_folder_stays_within_marketplace_limits():
+    """
+    Limits for a plugin added by marketplace URL or upload (5,000 files, 200 MB).
+    The bundled .NET runner rules out Anthropic's public directory, which caps files at 5 MiB.
+    """
     files = _plugin_files()
-    assert len(files) <= 512
+    assert len(files) <= 5000
+    assert sum(f.stat().st_size for f in files) < 200 * 1024 * 1024
     assert not Path("bin").exists(), "a top-level bin/ stops claude.ai and Cowork from installing the plugin"
     banned = {".ds_store", "thumbs.db", "desktop.ini"}
     assert not [f for f in files if f.name.lower() in banned]
-    assert not [str(f) for f in files if f.stat().st_size > 5 * 1024 * 1024], "files over 5 MiB stop validation"
-
-    compiled = {".dll", ".exe", ".pdb", ".pyd", ".so", ".zip", ".mcpb", ".dxt"}
-    assert not [str(f) for f in files if f.suffix.lower() in compiled], "compiled binaries are not shipped"
-
-    # Anything over 256 KiB is held for a human reviewer; keep that list short and deliberate.
-    large = sorted(str(f) for f in files if f.stat().st_size > 256 * 1024 and f.suffix.lower() not in {".png", ".svg"})
-    assert large == ["solidworks_mcp/ui/static/studio.bundle.js"], large
+    # Generated compile caches and debug symbols are never committed.
+    assert not [str(f) for f in files if ".bundle_cache" in f.parts or f.suffix.lower() == ".pdb"]
 
 
 def test_skill_frontmatter_is_valid():
