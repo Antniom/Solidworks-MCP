@@ -6,6 +6,7 @@ dynamic add-in management, and non-blocking rebuild error / relation inspection.
 """
 
 import os
+import time
 import sys
 import logging
 from typing import Dict, Any, List, Optional, Tuple
@@ -542,11 +543,12 @@ class DiagnosticOperations:
                         {"active_transaction": active_txn},
                     )
                 vol_before = capture_vol_state(doc)
-                ckpt_name = f"txn_{name}_{int(os.times().elapsed * 1000) if hasattr(os, 'times') else '0'}"
+                ckpt_name = f"txn_{name}_{time.time_ns()}"
                 ckpt_res = get_checkpoint_manager().create_checkpoint(
                     doc=doc,
                     name=ckpt_name,
                     description=f"Undo transaction: {name}",
+                    snapshot=False,
                 )
                 undo_started = False
                 try:
@@ -604,27 +606,54 @@ class DiagnosticOperations:
 
                 txn_name = active_txn.get("name", name)
                 ckpt_name = active_txn.get("checkpoint_name")
-                rolled_back = False
+                vol_start = active_txn.get("vol_before")
+                deleted: List[str] = []
+                undo_used = False
 
+                # 1. Remove features created since 'begin'.
                 if ckpt_name:
                     rb_res = get_checkpoint_manager().rollback_checkpoint(doc=doc, name=ckpt_name)
-                    rolled_back = bool(rb_res.get("success"))
+                    if rb_res.get("success"):
+                        deleted = rb_res.get("deleted_features", [])
 
-                if not rolled_back:
-                    try:
-                        undo_fn = getattr(doc, "EditUndo2", None)
-                        if callable(undo_fn):
-                            undo_fn(1)
-                            rolled_back = True
-                    except Exception:
-                        pass
+                # 2. Anything else (dimension edits, suppression, renames) is only reachable
+                #    through the undo record opened at 'begin'.
+                #    It is used only when geometry is measurably off, so an empty transaction
+                #    never undoes the user's earlier, unrelated work.
+                if capture_vol_state(doc) != vol_start:
+                    if active_txn.get("undo_record_active"):
+                        try:
+                            undo_fn = getattr(doc, "EditUndo2", None)
+                            if callable(undo_fn):
+                                undo_fn(1)
+                                undo_used = True
+                        except Exception:
+                            pass
 
                 self._active_txn = None
+                geometry_restored = capture_vol_state(doc) == vol_start
+                data = {
+                    "transaction": txn_name,
+                    "status": "aborted",
+                    "rolled_back": geometry_restored,
+                    "deleted_features": deleted,
+                    "undo_used": undo_used,
+                }
+                if geometry_restored:
+                    return self._result(
+                        True,
+                        f"Transaction '{txn_name}' aborted - geometry is back to its state at 'begin' "
+                        f"({len(deleted)} feature(s) removed). Non-geometric edits such as renames are not verified.",
+                        SwErrors.swSuccess,
+                        data,
+                    )
                 return self._result(
-                    True,
-                    f"Transaction '{txn_name}' aborted — all changes since 'begin' rolled back",
-                    SwErrors.swSuccess,
-                    {"transaction": txn_name, "status": "aborted", "rolled_back": rolled_back},
+                    False,
+                    f"Transaction '{txn_name}' closed, but the model could NOT be fully restored: geometry still "
+                    f"differs from its state at 'begin'. Inspect the model (list_features, get_dimensions) and "
+                    f"revert the remaining changes manually.",
+                    SwErrors.swGeneralError,
+                    data,
                 )
 
             else:

@@ -2,7 +2,7 @@
 Unit tests for SolidWorks Antigravity Plugin Packaging
 ------------------------------------------------------
 Validates plugin.json manifest schema, vector SVG logo well-formedness,
-rules/AGENTS.md, mcp_config.json, and install.py plugin staging into tmp_path.
+the single skills/rules source, version agreement, and install.py plugin staging into tmp_path.
 """
 
 import json
@@ -21,7 +21,8 @@ def test_plugin_json_schema():
     assert data.get("displayName") == "SolidWorks AI Studio"
     assert "description" in data
     assert len(data.get("description", "")) > 10
-    assert data.get("version") == "4.1.0"
+    from solidworks_mcp import __version__
+    assert data.get("version") == __version__
     assert data.get("logo") == "assets/logo.svg"
 
     prompts = data.get("suggestedPrompts", [])
@@ -40,17 +41,34 @@ def test_logo_svg_validity():
     assert root.attrib.get("viewBox") == "0 0 128 128"
 
 
-def test_plugin_rules_and_config():
-    """Verify rules/AGENTS.md and mcp_config.json exist in plugin bundle."""
-    rules_path = Path("plugins/solidworks/rules/AGENTS.md")
-    assert rules_path.exists()
-    assert "show_interactive_studio" in rules_path.read_text(encoding="utf-8")
+def test_single_source_of_skills_and_rules():
+    """Skills and rules live once at the repo root; every manifest points at them."""
+    assert Path("rules/AGENTS.md").exists()
+    assert "show_interactive_studio" in Path("rules/AGENTS.md").read_text(encoding="utf-8")
+    skills = sorted(p.parent.name for p in Path("skills").glob("*/SKILL.md"))
+    assert "solidworks-modeling" in skills and not any(s.startswith("legacy-") for s in skills)
+    assert not Path("solidworks_mcp/skills").exists() and not Path("plugins/solidworks/skills").exists()
 
-    mcp_config_path = Path("plugins/solidworks/mcp_config.json")
-    assert mcp_config_path.exists()
-    data = json.loads(mcp_config_path.read_text(encoding="utf-8"))
-    assert "mcpServers" in data
-    assert "solidworks" in data["mcpServers"]
+    for manifest in (".claude-plugin/plugin.json", ".codex-plugin/plugin.json", ".cursor-plugin/plugin.json"):
+        data = json.loads(Path(manifest).read_text(encoding="utf-8"))
+        assert (Path(data["skills"]) / "solidworks-modeling" / "SKILL.md").exists(), manifest
+        assert Path(data["mcpServers"]).exists(), manifest
+
+
+def test_versions_agree():
+    from solidworks_mcp import __version__
+    for manifest in (".claude-plugin/plugin.json", ".codex-plugin/plugin.json", ".cursor-plugin/plugin.json",
+                     "plugins/solidworks/plugin.json"):
+        assert json.loads(Path(manifest).read_text(encoding="utf-8"))["version"] == __version__, manifest
+
+
+def test_console_script_targets_a_sync_function():
+    import inspect
+    import tomllib
+    from solidworks_mcp import server
+    target = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))["project"]["scripts"]["solidworks-mcp"]
+    func = getattr(server, target.split(":")[1])
+    assert not inspect.iscoroutinefunction(func)
 
 
 def test_plugin_staging_in_temp_dir(tmp_path: Path):
@@ -87,4 +105,7 @@ def test_plugin_staging_in_temp_dir(tmp_path: Path):
     assert (skills_dir / "solidworks-simulation" / "SKILL.md").exists()
     assert (skills_dir / "solidworks-dfm" / "SKILL.md").exists()
     assert (skills_dir / "solidworks-drawings" / "SKILL.md").exists()
-    assert len(list(skills_dir.glob("*/SKILL.md"))) == 11
+    assert len(list(skills_dir.glob("*/SKILL.md"))) == len(list(Path("skills").glob("*/SKILL.md")))
+
+    # Staging must not write back into the source tree
+    assert not Path("plugins/solidworks/mcp_config.json").exists()

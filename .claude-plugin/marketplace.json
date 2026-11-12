@@ -7,13 +7,13 @@
     "displayName": "SolidWorks CAD"
   },
   "description": "Parametric 3D CAD modeling and interactive simulation in SolidWorks",
-  "version": "1.0.0",
+  "version": "5.0.0",
   "plugins": [
     {
       "name": "solidworks",
       "source": "./",
       "description": "Parametric 3D CAD modeling, interactive studio, FEA simulation, and drawing generation in Dassault Systèmes SolidWorks.",
-      "version": "1.0.0",
+      "version": "5.0.0",
       "author": {
         "name": "António Coelho"
       },

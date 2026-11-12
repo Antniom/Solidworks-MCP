@@ -1,104 +1,80 @@
-"""
-Unit tests for SolidWorks MCP show_interactive_studio Tool & MCP Resources
---------------------------------------------------------------------------
-Tests tool registration, schema, _meta.ui.resourceUri, handler execution,
-<agent-embed> formatting, and resource read with CSP connectDomains.
-"""
+"""show_interactive_studio and the MCP Apps resource, exercised through the MCP SDK itself."""
 
+from unittest.mock import MagicMock
+
+import anyio
 import pytest
-import asyncio
-from unittest.mock import MagicMock, patch
-from mcp.types import ReadResourceRequestParams
-from solidworks_mcp.server import (
-    _tool_definitions,
-    list_resources,
-    read_resource,
-    _show_interactive_studio_handler,
-)
-from solidworks_mcp.ui.bridge import set_automation_instance, stop_bridge
+from mcp.client import Client  # noqa: F401  (skips cleanly if the SDK layout changes)
 
-
-@pytest.fixture(autouse=True)
-def cleanup():
-    stop_bridge()
-    set_automation_instance(None)
-    yield
-    stop_bridge()
-    set_automation_instance(None)
+from solidworks_mcp import server as srv
+from solidworks_mcp.ui import bridge
 
 
 def test_tool_definition_exists_and_valid():
-    """Verify show_interactive_studio is present in tool definitions with meta."""
-    tools = _tool_definitions()
-    studio_tool = next((t for t in tools if t.name == "show_interactive_studio"), None)
-    assert studio_tool is not None, "show_interactive_studio tool missing from definitions"
-
-    schema = getattr(studio_tool, "input_schema", getattr(studio_tool, "inputSchema", {}))
-    props = schema.get("properties", {})
-    assert "view_name" in props
-    assert "feature_filter" in props
-
-    meta = getattr(studio_tool, "meta", None)
-    assert meta is not None, "Tool missing meta object"
-    assert meta.get("ui", {}).get("resourceUri") == "ui://solidworks/app.html"
+    tool = next(t for t in srv._tool_definitions() if t.name == "show_interactive_studio")
+    assert tool.meta["ui"]["resourceUri"] == srv.STUDIO_RESOURCE_URI
+    assert set(tool.input_schema["properties"]) == {"view_name", "feature_labels", "dimension_labels", "feature_filter"}
 
 
-def test_list_resources():
-    """Verify list_resources advertises ui://solidworks/app.html as mcp-app."""
-    res = asyncio.run(list_resources())
-    assert len(res.resources) >= 1
-    studio_res = next((r for r in res.resources if str(r.uri) == "ui://solidworks/app.html"), None)
-    assert studio_res is not None
-    assert studio_res.mime_type == "text/html;profile=mcp-app"
+def test_resource_is_listed_and_readable_through_the_sdk():
+    """Regression: the handlers used to take (params, ctx), so real clients got 'Resource not found'."""
+
+    async def go():
+        async with Client(srv.server) as client:
+            listed = await client.list_resources()
+            assert [str(r.uri) for r in listed.resources] == [srv.STUDIO_RESOURCE_URI]
+            read = await client.read_resource(srv.STUDIO_RESOURCE_URI)
+            content = read.contents[0]
+            assert content.mime_type == srv.STUDIO_MIME_TYPE
+            assert "<div id=\"studio\">" in content.text
+            assert bridge.get_token() in content.text
+            tools = await client.list_tools()
+            assert any(t.name == "show_interactive_studio" for t in tools.tools)
+
+    anyio.run(go)
 
 
-def test_read_resource_csp_headers():
-    """Verify reading ui://solidworks/app.html provides CSP connectDomains for Fast-Bridge."""
-    params = ReadResourceRequestParams(uri="ui://solidworks/app.html")
-    res = asyncio.run(read_resource(params))
-    assert len(res.contents) == 1
-    content = res.contents[0]
-    assert content.mime_type == "text/html;profile=mcp-app"
-    assert "<!DOCTYPE html>" in content.text or "<html" in content.text
-
-    # Verify CSP allows local bridge
-    csp = content.meta.get("ui", {}).get("csp", {})
-    connect_domains = csp.get("connectDomains", [])
-    assert any("127.0.0.1" in d for d in connect_domains)
+def test_unknown_resource_is_an_error():
+    params = MagicMock()
+    params.uri = "ui://solidworks/other.html"
+    with pytest.raises(ValueError):
+        anyio.run(srv.read_resource, None, params)
 
 
-def test_show_interactive_studio_handler(tmp_path):
-    """Verify tool handler executes, generates HTML, and returns embed markup."""
-    mock_automation = MagicMock()
-    mock_doc = MagicMock()
-    mock_doc.GetTitle.return_value = "TestPart.SLDPRT"
-    mock_automation.get_active_doc.return_value = (mock_doc, None)
-    mock_automation.get_dimensions.return_value = {
-        "success": True,
-        "data": [
-            {"full_name": "D1@Sketch1", "name": "Width", "value": 100.0, "units": "mm", "owner_feature": "Sketch1"},
-            {"full_name": "D1@Boss-Extrude1", "name": "Height", "value": 30.0, "units": "mm", "owner_feature": "Boss-Extrude1"}
-        ]
-    }
-    mock_automation.capture_viewport.return_value = {"success": False}
-    mock_automation.inspect_model.return_value = {
-        "success": True,
-        "data": {"dimensions_mm": {"dx": 100.0, "dy": 50.0, "dz": 30.0}}
-    }
-    set_automation_instance(mock_automation)
+def test_show_interactive_studio_handler(monkeypatch):
+    automation = MagicMock()
+    doc = MagicMock()
+    doc.GetTitle = "Bracket.SLDPRT"
+    automation.get_active_doc.return_value = (doc, None)
+    automation.get_dimensions.return_value = {"success": True, "data": [
+        {"full_name": "D1@Boss-Extrude1@Bracket.Part", "name": "D1", "owner_feature": "Boss-Extrude1", "value": 20.0, "units": "mm"},
+    ]}
+    automation.capture_viewport.return_value = {"success": False}
+    automation.inspect_model.return_value = {"success": True, "data": {"dimensions_mm": {"dx": 1.0, "dy": 2.0, "dz": 3.0}}}
+    monkeypatch.setattr(srv, "sw_automation", automation)
+    monkeypatch.setattr(bridge, "start_bridge", lambda *a, **k: 54321)
+    monkeypatch.setattr(bridge, "_bridge_port", 54321)
 
-    with patch("solidworks_mcp.server.sw_automation", mock_automation):
-        res = _show_interactive_studio_handler({"view_name": "*Isometric", "output_dir": str(tmp_path)})
+    res = srv._show_interactive_studio_handler({"dimension_labels": {"D1@Boss-Extrude1@Bracket.Part": "Base Thickness"}})
 
-    assert res.get("success") is True
-    data = res.get("data", {})
-    assert data.get("modelTitle") == "TestPart.SLDPRT"
-    assert data.get("dimensionsCount") == 2
-    assert "artifactUrl" in data
-    assert "bridgeUrl" in data
+    assert res["success"] is True
+    data = res["data"]
+    assert data["studioUrl"].startswith("http://127.0.0.1:54321/studio?token=")
+    assert data["dimensions"][0]["label"] == "Base Thickness"
+    kinds = [next(k for k in m if k != "version") for m in data["a2ui"]["messages"]]
+    assert kinds == ["createSurface", "updateComponents", "updateDataModel"]
+    assert "<agent-embed" not in res["message"]
 
-    # Verify agent embed tag in message
-    msg = res.get("message", "")
-    assert "<agent-embed" in msg
-    assert "TestPart.SLDPRT" in msg
-    assert "D1@Sketch1" in msg
+
+def test_studio_reports_bridge_failure_instead_of_guessing_a_port(monkeypatch):
+    automation = MagicMock()
+    automation.get_active_doc.return_value = (MagicMock(), None)
+    automation._result.side_effect = lambda ok, msg, code, data=None: {"success": ok, "message": msg}
+    monkeypatch.setattr(srv, "sw_automation", automation)
+
+    def boom(*a, **k):
+        raise RuntimeError("no free port")
+
+    monkeypatch.setattr(bridge, "start_bridge", boom)
+    res = srv._show_interactive_studio_handler({})
+    assert res["success"] is False and "no free port" in res["message"]

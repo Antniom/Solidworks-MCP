@@ -3,11 +3,10 @@ SolidWorks MCP Package
 ----------------------
 Model Context Protocol server for SolidWorks automation.
 
-Version: 3.0.0
 Author: António Coelho
 """
 
-__version__ = "3.0.0"
+__version__ = "5.0.0"
 __author__ = "António Coelho"
 
 from .automation import SolidWorksAutomation

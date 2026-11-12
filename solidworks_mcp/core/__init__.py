@@ -14,7 +14,7 @@ from .selection import DeclarativeSelectionResolver, SelectionTarget, SelectionR
 from .verification import ModelVerifier, VerificationReport, DimensionCheck
 from .knowledge import KnowledgeManager, KnowledgeRecord, PromotionState, get_knowledge_manager
 from .checkpoint import CheckpointManager, CheckpointMetadata, get_checkpoint_manager
-from .com_compat import get_attr_or_call, byref_int, byref_bool, byref_double, null_dispatch
+from .com_compat import get_attr_or_call, get_object_member, byref_int, byref_bool, byref_double, null_dispatch
 from .post_conditions import (
     capture_pre_mutation_state,
     verify_mutation_post_condition,
@@ -51,6 +51,7 @@ __all__ = [
     "CheckpointMetadata",
     "get_checkpoint_manager",
     "get_attr_or_call",
+    "get_object_member",
     "byref_int",
     "byref_bool",
     "byref_double",

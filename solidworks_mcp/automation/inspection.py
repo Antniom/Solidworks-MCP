@@ -166,14 +166,12 @@ class InspectionOperations:
 
             # Set orientation and zoom to fit
             try:
-                view_id = 7  # swIsometricView
-                view_lower = view_name.lower()
-                if "front" in view_lower:
-                    view_id = 1
-                elif "top" in view_lower:
-                    view_id = 5
-                elif "right" in view_lower:
-                    view_id = 4
+                # swStandardViews_e. Unknown/custom named views use -1 so the name is honoured.
+                standard_views = {
+                    "front": 1, "back": 2, "left": 3, "right": 4, "top": 5, "bottom": 6,
+                    "isometric": 7, "trimetric": 8, "dimetric": 9,
+                }
+                view_id = standard_views.get(view_name.strip().lstrip("*").lower(), -1)
 
                 doc.ShowNamedView2(view_name, view_id)
                 doc.ViewZoomtofit2()

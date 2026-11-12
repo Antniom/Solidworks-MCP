@@ -22,13 +22,13 @@
 > .venv\Scripts\pip install -e .
 > .venv\Scripts\python -m solidworks_mcp.install
 > ```
-> *The installer automatically configures detected AI applications (Claude Desktop, Claude Code, Antigravity, Cursor, Windsurf, Codex, Copilot) and installs all 11 SolidWorks design skills.*
+> *The installer automatically configures detected AI applications (Claude Desktop, Claude Code, Antigravity, Cursor, Windsurf, Codex, Copilot) and installs the SolidWorks design skills.*
 >
 > ---
 >
 > #### 🛡️ Step 2: Explaining Custom Scripts (`execute_python`) in Plain English
 > When explaining the optional custom script feature to the user, use this friendly explanation:
-> > *"SolidWorks MCP comes with 68 built-in, completely safe design tools for 99% of modeling tasks (sketching, extrusions, holes, assemblies, drawings, interactive sliders, and stress tests).*
+> > *"SolidWorks MCP comes with about 100 built-in design tools for 99% of modeling tasks (sketching, extrusions, holes, assemblies, drawings, interactive sliders, and stress tests).*
 > >
 > > *Occasionally, for very specialized or unusual SolidWorks tasks, I can write a custom macro script. For your security, this is locked by default so no code runs without your knowledge.*
 > >
@@ -42,7 +42,7 @@
 > AI clients (Claude Desktop, Antigravity, Cursor, Windsurf, Codex) load new MCP tools on application startup. Because this current session cannot call the new tools until restarted, **instruct the user clearly without spoiling the surprise**:
 > > *"SolidWorks MCP is now installed and configured across your applications!*
 > >
-> > *To load the 68 new 3D design tools, please restart your app:*
+> > *To load the new 3D design tools, please restart your app:*
 > > - *If using **Claude Desktop**: fully quit Claude from the Windows taskbar system tray (bottom-right near your clock) and reopen it.*
 > > - *If using **Cursor / Antigravity / Windsurf / Codex**: close and reopen the app.*
 > >
@@ -105,8 +105,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![SolidWorks 2023-2025](https://img.shields.io/badge/SolidWorks-2023--2025%20Verified-red.svg)](https://www.solidworks.com/)
-[![MCP Tools: 68](https://img.shields.io/badge/MCP%20Tools-68%20Design%20Tools-green.svg)](https://modelcontextprotocol.io/)
-[![Skills: 11 Bundled](https://img.shields.io/badge/Skills-11%20Specialized%20Skills-purple.svg)](solidworks_mcp/skills/)
+[![MCP Tools](https://img.shields.io/badge/MCP%20Tools-100%2B%20Design%20Tools-green.svg)](https://modelcontextprotocol.io/)
+[![Skills: 9 Bundled](https://img.shields.io/badge/Skills-9%20Specialized%20Skills-purple.svg)](skills/)
 [![Multi-Client](https://img.shields.io/badge/AI%20Clients-Claude%20%7C%20Antigravity%20%7C%20Codex%20%7C%20Cursor-orange.svg)](#-multi-client-compatibility)
 
 **SolidWorks MCP** connects artificial intelligence assistants (like **Claude Desktop**, **Claude Code**, **Google Antigravity**, **OpenAI Codex**, and **Cursor**) directly to **Dassault Systèmes SolidWorks**. 
@@ -130,67 +130,79 @@ Instead of clicking through menus or writing complex macros by hand, you can sim
 
 ---
 
-## 🎛️ Interactive In-Chat CAD Studio
+## 🎛️ Interactive CAD Studio (A2UI)
 
-Modeled after [`earthtojake/text-to-cad`](https://github.com/earthtojake/text-to-cad), SolidWorks MCP includes a real-time **Interactive CAD Studio** embedded directly inside chat.
+`show_interactive_studio` opens a studio for the active model: dimension sliders next to a live viewport.
+The studio is described with [A2UI](https://github.com/a2ui-project/a2ui) v0.9 messages (basic catalog) and
+drawn by the stock A2UI Lit renderer, so there is no hand-written studio layout to maintain and any
+A2UI-capable client can render the same payload.
 
 ```mermaid
 sequenceDiagram
     autonumber
-    actor User as User / Chat
+    actor User as User
     participant Agent as AI Agent
-    participant Bridge as Fast-Bridge HTTP (127.0.0.1:54321)
-    participant SW as SolidWorks COM (STA Thread)
+    participant Page as Studio page (A2UI renderer)
+    participant Bridge as Studio bridge (127.0.0.1, token-protected)
+    participant SW as SolidWorks COM (STA thread)
 
     User->>Agent: "Let me adjust dimensions with sliders"
     Agent->>SW: show_interactive_studio
-    SW->>Bridge: Launch background bridge daemon & read dimensions
-    SW-->>Agent: Generate studio artifact + embed directive
-    Agent-->>User: Render interactive CAD Studio widget in chat
-    User->>Bridge: Drag slider (e.g. Length: 50mm -> 65mm)
-    Bridge->>SW: Dispatch SetSystemValue3 & EditRebuild3 on STA worker
-    SW-->>Bridge: Capture updated viewport PNG & bounding box
-    Bridge-->>User: Live viewport update + Bounding Box HUD refresh
+    SW-->>Agent: A2UI messages + studio URL
+    Agent-->>User: Inline view (MCP Apps) or the studio URL
+    User->>Page: Drag slider (Length: 50 mm -> 65 mm)
+    Page->>Bridge: A2UI client action "set_dimension"
+    Bridge->>SW: set_dimension + rebuild on the STA worker
+    SW-->>Bridge: New viewport image and bounding box
+    Bridge-->>Page: A2UI updateDataModel messages
 ```
 
-### Key Studio Features:
-- **Bi-Directional Parameter Sliders**: Sliders grouped by FeatureManager tree owners (e.g., `Sketch1`, `Boss-Extrude1`), synchronized with exact numerical input steppers and micro-stepping buttons (`-` / `+`).
-- **Self-Healing Viewport Stage**: CAD perspective grid, RGB Coordinate Axes Triad (X-red, Y-green, Z-blue), and 4-way orientation switcher (`Iso`, `Front`, `Top`, `Right`).
-- **Automatic Geometry Rollback**: If a slider drag causes self-intersecting geometry or a rebuild error in SolidWorks, the Fast-Bridge intercepts the failure and rolls back the dimension to its previous valid state instantly.
-- **"Prompt Agent" Quick Edit**: Formats modified parameters into an engineering directive ready to copy or dispatch back to the agent for follow-up drawing or FEA updates.
+- **Sliders grouped by feature**, labelled with the names you or the agent give them.
+- **Live viewport** with the seven standard views.
+- **Automatic revert**: if a value breaks the rebuild, the slider returns to the last good value and the status line says why.
+- **Reset** and **Prompt Agent** buttons; the latter hands a summary of your changes back to the chat.
+- **Where it appears**: inline in MCP Apps clients (for example Claude Desktop and VS Code); in other clients the agent gives you a local link to open in your browser.
+- **Local and private**: the bridge listens on `127.0.0.1` only and every request must carry a per-session token, so other web pages cannot drive SolidWorks.
+
+Sliders move in whole units (the A2UI basic slider has no step size); ask the agent for exact values.
 
 ---
 
-## 🧠 11 Specialized CAD & Engineering Skills
+## 🧠 Specialized CAD & Engineering Skills
 
-SolidWorks MCP packages 11 modular engineering skills that teach your AI assistant standard mechanical engineering workflows:
+The repository ships nine skills (in [`skills/`](skills)) that teach the assistant standard mechanical engineering workflows:
 
-| Skill | Description | Triggers |
-| :--- | :--- | :--- |
-| **`solidworks-interactive`** | Interactive CAD studio with live sliders & real-time viewport rebuilds | "tweak dimensions", "sliders", "interactive cad", "estúdio interativo" |
-| **`solidworks-modeling`** | 3D parametric part design with analytic primitives & canonical feature decomposition | "model part", "extrude", "revolve", "cut hole", "modelar peça" |
-| **`solidworks-dfm`** | Design for Manufacturing (CNC, Sheet Metal, Injection Molding, 3D Printing) | "dfm check", "machinability", "sheet metal rules", "regras de fabrico" |
-| **`solidworks-assemblies`** | Bottom-up assemblies, standard mates, kinematics & interference detection | "create assembly", "add mate", "concentric mate", "montagem" |
-| **`solidworks-drawings`** | 2D technical drawings, orthographic layouts, section views & BOM tables | "create drawing", "technical drawing", "section view", "desenho técnico" |
-| **`solidworks-simulation`** | FEA structural analysis: materials, restraints, loads, meshing & von Mises stress | "fea simulation", "stress analysis", "factor of safety", "simulação fea" |
-| **`solidworks-din-parts`** | Pure-Python standard fasteners (DIN 934, DIN 933, DIN 125, DIN 2573) | "din 934", "hex bolt", "din 125 washer", "porca m16" |
-| **`solidworks-toolbox`** | SolidWorks Toolbox add-in automation & standard hardware libraries | "solidworks toolbox", "toolbox bolt", "biblioteca toolbox" |
-| **`solidworks-diagnostics`** | Modal dialog inspection, FeatureManager error recovery & STA worker resets | "solidworks error", "modal popup", "dismiss dialog", "reset worker" |
-| **`legacy-solidworks-engineering`** | High-level CAD verification doctrine and procedural invariants | Fallback background reference |
-| **`legacy-solidworks-mcp`** | Low-level COM API signatures & win32com error handling | Fallback low-level debugging |
+| Skill | What it covers |
+| :--- | :--- |
+| **`solidworks-modeling`** | Part design: sketches, features, sheet metal, global variables, selection and verification |
+| **`solidworks-interactive`** | The A2UI studio with live dimension sliders |
+| **`solidworks-assemblies`** | Components, mates, kinematics, positional states and interference checks |
+| **`solidworks-drawings`** | Drawings, section views, model dimensions, BOM tables and export |
+| **`solidworks-simulation`** | Static FEA: materials, fixtures, loads, mesh, results |
+| **`solidworks-dfm`** | Design-for-manufacturing rules for CNC, sheet metal, molding and 3D printing |
+| **`solidworks-din-parts`** | DIN/ISO fasteners modeled from dimension tables |
+| **`solidworks-toolbox`** | SolidWorks Toolbox hardware |
+| **`solidworks-diagnostics`** | Dialogs, rebuild errors, checkpoints, transactions and recovery |
 
 ---
 
 ## 🌐 Multi-Client Compatibility
 
-SolidWorks MCP supports all major AI coding environments with dedicated configuration manifests and automated discovery:
+`python -m solidworks_mcp.install` registers the server with every supported client it finds and copies the skills where the client supports them. Existing config files are backed up (`*.solidworks-mcp.bak`) and merged; a file that cannot be parsed is left untouched.
 
-- **Google Antigravity / Gemini**: Packaged as a unified plugin (`plugins/solidworks/`) with vector SVG logo, agent rules, and inline HTML rendering via `<agent-embed>`.
-- **Anthropic Claude Desktop & Claude Code**: Native MCP server configuration via `claude.mcp.json`, `%APPDATA%\Claude\claude_desktop_config.json`, and `~/.claude.json`. Exposes MCP App resources (`ui://solidworks/app.html`) with CSP local network permissions.
-- **OpenAI Codex**: Manifest `codex.mcp.json` and `.codex-plugin/plugin.json`, automatically configured in `~/.codex/mcp.json`.
-- **Cursor IDE**: Manifest `cursor.mcp.json` and `.cursor-plugin/plugin.json`, automatically configured in `~/.cursor/mcp.json`.
-- **Windsurf (Codeium)**: Configured in `~/.codeium/windsurf/mcp_config.json`.
-- **VS Code / GitHub Copilot**: Configured in `%APPDATA%\Code\User\mcp.json`.
+| Client | Config written | Notes |
+| :--- | :--- | :--- |
+| **Claude Desktop** | `%APPDATA%\Claude\claude_desktop_config.json` | Shows the studio inline (MCP Apps) |
+| **Claude Code** | `~/.claude.json`, skills in `~/.claude/skills` | Also installable as a plugin: `.claude-plugin/` |
+| **Google Antigravity / Gemini** | `~/.gemini/config/mcp_config.json` | Plus a plugin bundle in `~/.gemini/config/plugins/solidworks` |
+| **OpenAI Codex** | `~/.codex/config.toml` (`[mcp_servers.solidworks]`) | Manifest in `.codex-plugin/` |
+| **Cursor** | `~/.cursor/mcp.json` | Manifest in `.cursor-plugin/` |
+| **Windsurf** | `~/.codeium/windsurf/mcp_config.json` | |
+| **VS Code / GitHub Copilot** | `%APPDATA%\Code\User\mcp.json` (`servers`) | |
+
+Use `--client <name>` to configure one client, `--dry-run` to preview, and `--no-install-plugin` to skip the Antigravity bundle.
+
+**Plugin installs (Claude Code marketplace):** the plugin starts the server with `python -m solidworks_mcp.server` from the plugin folder, so the `python` on your PATH needs the dependencies: `pip install "mcp>=2" pywin32 pydantic pillow numpy jsonschema`.
 
 ---
 
@@ -240,8 +252,10 @@ Once connected, open SolidWorks and try asking:
 
 ## 🛡️ Safety & Privacy: How Your System Is Protected
 
-- **68 Dedicated, Deterministic CAD Tools:** The server executes dedicated, pre-validated CAD operations. It does not run arbitrary shell or system commands during routine modeling.
-- **Interactive Approval for Custom Scripts (`execute_python`):** If a task ever requires a custom Python macro, the AI is programmed to pause and ask for your clear permission first. You always remain in control.
+- **Dedicated, Deterministic CAD Tools:** The server executes dedicated, pre-validated CAD operations. It does not run arbitrary shell or system commands during routine modeling.
+- **Interactive Approval for Custom Code:** The three tools that run custom code (`execute_python`, `sw_execute_csharp`, `sw_execute_macro`) are locked by default. The AI must ask for your clear permission first. You always remain in control.
+- **No Self-Updating:** The server never downloads or runs new code on its own. Update when you choose with `git pull` (or `pip install -U`), then re-run the installer.
+- **Protected Local Studio:** The interactive studio is served from your own PC only, and other web pages cannot send it commands.
 - **Your Files Stay on Your PC:** All 3D models, geometry calculations, and drawings stay strictly on your local computer. No CAD data is sent to external cloud servers.
 
 ---
@@ -249,16 +263,19 @@ Once connected, open SolidWorks and try asking:
 ## 🔧 Technical Details & Tool Inventory (For Developers)
 
 <details>
-<summary><b>Click to expand the complete 68-tool catalog and architecture details</b></summary>
+<summary><b>Click to expand the tool catalog and architecture details</b></summary>
 
 ### 🏗️ Industrial COM Architecture
 - **100% STA Thread Affinity**: SolidWorks COM API strictly requires Single-Threaded Apartment (STA) execution. Every call is marshaled onto a dedicated worker thread with reentrant lock management (`reset_sta_worker`), preventing RPC errors (`0x8001010E`).
 - **Official Type-Library Parity (`swconst.tlb` & `cosworks.tlb`)**: Enums, mate types, and feature options match official SolidWorks 2025 type libraries with canonical integer values.
 - **Out-of-Band Win32 Modal Dialog Watchdog**: Background thread monitors blocking popup dialogs, allowing automated inspection (`inspect_dialogs`) and dismissal (`dismiss_dialog`).
 - **Declarative Geometry Selection (`select_by_geometry`)**: Replaces blind coordinate guessing by filtering faces/edges by topology (`plane`, `cylinder`), normal vectors, area, radius, and centroids.
-- **Fast-Bridge HTTP Daemon**: Lightweight multithreaded HTTP server on `127.0.0.1:54321` connecting chat webviews to live SolidWorks COM sessions with sub-100ms slider rebuilds.
+- **Studio Bridge**: Loopback-only HTTP server (first free port from `54321`) that serves the A2UI studio page and exchanges A2UI messages with it; every request needs the per-session token.
+- **Table-Driven Dispatch**: `tool_schemas.py` holds every input schema; `server.py` maps each tool to its handler in one table.
 
-### Complete 68 Tool Inventory
+### Tool Inventory
+
+The server exposes about 100 tools; the authoritative list with schemas is `solidworks_mcp/tool_schemas.py`. The groups below cover the core set, and the skills document the rest (sheet metal, global variables, kinematics, topology lookup and the `sw_*` runner tools).
 
 #### 1. Connection & Session (3 tools)
 - `connect_solidworks`: Connects or auto-launches SolidWorks with verified ROT registration.
@@ -348,15 +365,24 @@ Once connected, open SolidWorks and try asking:
 - `rollback_checkpoint`: Reverts document state to a previous snapshot.
 - `get_sketch_status`: Returns sketch activity status, plane, and entity counts.
 
-#### 13. Utilities & Guarded Execution (2 tools)
-- `set_units`: Changes active units (`mm`, `cm`, `inch`, `m`, `ft`).
-- `execute_python`: Interactive consent-gated execution of custom Python macros with full COM access.
+#### 13. Utilities & Guarded Execution
+- `set_units`: Sets the session length unit (`mm`, `cm`, `inch`, `m`). Every length argument follows it unless a call passes its own `unit`.
+- `execute_python`, `sw_execute_csharp`, `sw_execute_macro`: Consent-gated execution of custom Python / C# with full COM access.
 
 ### 🧪 Unit Testing & Verification
 ```powershell
-pytest -v tests/
+pip install -e ".[dev]"
+pytest
 ```
-All 68 tools and UI subsystems are covered by automated unit tests validating STA thread dispatching, AST safety guards, Fast-Bridge HTTP endpoints, dimension sanitization, and parameter schemas.
+The suite covers STA dispatch, schema validation, the installer, the studio bridge (authentication and A2UI actions) and checks the studio output against the official A2UI v0.9 JSON Schemas. Tests that need a running SolidWorks are skipped or opt-in.
+
+### 🎨 Rebuilding the Studio Renderer
+The A2UI renderer is bundled into `solidworks_mcp/ui/static/studio.bundle.js`. To rebuild it after changing `solidworks_mcp/ui/host/studio.js`:
+```powershell
+cd solidworks_mcp/ui/host
+npm install
+npm run build
+```
 
 </details>
 

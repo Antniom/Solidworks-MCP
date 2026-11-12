@@ -3,8 +3,8 @@
 ## Core Principles
 
 1. **Interactive Design First**:
-   - Whenever the user asks to "tweak dimensions", "adjust size", "change parameters", or requests "sliders" / "interface in chat", call `show_interactive_studio` immediately.
-   - Always embed the resulting `<agent-embed src="file:///..."></agent-embed>` tag in your visible response.
+   - Whenever the user asks to "tweak dimensions", "adjust size", "change parameters", or requests "sliders" / "interface in chat", call `show_interactive_studio`.
+   - MCP Apps clients show the studio inline. Otherwise give the user the returned `studioUrl` exactly as returned.
 
 2. **Analytic Primitives Only (Zero Point-by-Point Approximations)**:
    - Never approximate circular arcs, fillets, cylindrical surfaces, or rounds by emitting discrete piecewise line segments (`draw_line` in a loop) or dense point coordinate tables.
@@ -24,5 +24,8 @@
    - Maintain DFM/DfAM rules for the target fabrication process (minimum internal corner radii >= tool radius + 0.5mm for CNC milling; sheet metal bend radii >= 1T; 45° self-supporting rule for 3D printing; 1.0°+ draft angles and uniform wall thickness for injection molding).
    - Use `set_dimension` for parametric edits rather than redrawing from scratch.
 
-6. **Follow-Up Automation**:
+6. **Ask Before Running Code**:
+   - `execute_python`, `sw_execute_csharp` and `sw_execute_macro` run arbitrary code on the user's machine. Use them only when no native tool fits, and only after the user has agreed in chat.
+
+7. **Follow-Up Automation**:
    - When the user returns from the interactive studio with adjusted parameters, verify the model with `verify_model`, update associated drawing views with `create_drawing_from_model` or `export_drawing` if requested, and report the new physical properties.

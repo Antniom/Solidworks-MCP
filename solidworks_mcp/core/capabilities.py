@@ -69,7 +69,7 @@ class CapabilityInspector:
                 # Query revision number
                 try:
                     rev = sw_app.RevisionNumber
-                except:
+                except Exception:
                     rev = sw_app.RevisionNumber()
                 caps["runtime"]["revision"] = str(rev)
 
@@ -78,7 +78,7 @@ class CapabilityInspector:
                     raw_count = getattr(sw_app, "GetDocumentCount", None)
                     count_val = raw_count() if callable(raw_count) else raw_count
                     caps["runtime"]["document_count"] = int(count_val) if count_val is not None else 0
-                except:
+                except Exception:
                     pass
 
                 # Active document info
@@ -88,14 +88,14 @@ class CapabilityInspector:
                         title = doc.GetTitle
                         if callable(title):
                             title = title()
-                    except:
+                    except Exception:
                         title = "Unknown"
 
                     try:
                         path = doc.GetPathName
                         if callable(path):
                             path = path()
-                    except:
+                    except Exception:
                         path = ""
 
                     try:
@@ -103,7 +103,7 @@ class CapabilityInspector:
                         if callable(doc_type):
                             doc_type = doc_type()
                         type_str = {1: "Part", 2: "Assembly", 3: "Drawing"}.get(doc_type, "Unknown")
-                    except:
+                    except Exception:
                         type_str = "Unknown"
 
                     caps["active_document"] = {

@@ -36,8 +36,9 @@ class CheckpointManager:
 
     def __init__(self, checkpoints_dir: Optional[Path] = None):
         if checkpoints_dir is None:
-            project_root = Path(__file__).resolve().parent.parent.parent
-            checkpoints_dir = project_root / ".checkpoints"
+            import tempfile
+            base = os.environ.get("LOCALAPPDATA") or tempfile.gettempdir()
+            checkpoints_dir = Path(base) / "solidworks-mcp" / "checkpoints"
 
         self.checkpoints_dir = Path(checkpoints_dir)
         self.checkpoints_dir.mkdir(parents=True, exist_ok=True)
@@ -47,12 +48,32 @@ class CheckpointManager:
         """Counts features and identifies the latest feature name."""
         count = 0
         last_name = ""
-        feat = getattr(doc, "FirstFeature", None)
-        while feat is not None:
+        for feat in self._iter_features(doc):
             count += 1
             last_name = feat.Name
-            feat = feat.GetNextFeature
         return count, last_name
+
+    @staticmethod
+    def _iter_features(doc: Any):
+        """Walk the top-level feature tree (FirstFeature/GetNextFeature may be properties or methods)."""
+        from ..core.com_compat import get_object_member
+        feat = get_object_member(doc, "FirstFeature")
+        while feat is not None:
+            yield feat
+            feat = get_object_member(feat, "GetNextFeature")
+
+    @staticmethod
+    def _snapshot_extension(doc: Any) -> str:
+        """File extension matching the document type (a part snapshot of an assembly is unusable)."""
+        from ..core.com_compat import get_attr_or_call
+        try:
+            ext = os.path.splitext(str(get_attr_or_call(doc, "GetPathName") or ""))[1].lower()
+            if ext in (".sldprt", ".sldasm", ".slddrw"):
+                return ext
+            doc_type = int(get_attr_or_call(doc, "GetType"))
+            return {1: ".sldprt", 2: ".sldasm", 3: ".slddrw"}.get(doc_type, ".sldprt")
+        except Exception:
+            return ".sldprt"
 
     def _normalize_title(self, doc: Any) -> str:
         """Get and normalize document title, stripping drawing sheet suffix and extensions."""
@@ -66,9 +87,14 @@ class CheckpointManager:
         doc: Any,
         name: str,
         description: str = "",
+        snapshot: bool = True,
     ) -> Dict[str, Any]:
         """
         Record a named modeling checkpoint for the active document.
+
+        With snapshot=True a backup copy of the document is also written to the
+        checkpoints directory (reported as snapshot_path) so the user can recover it by hand;
+        rollback_checkpoint itself only removes features added after the checkpoint.
         
         Args:
             doc: Active IModelDoc2 object
@@ -88,16 +114,17 @@ class CheckpointManager:
 
         # Snapshot file
         clean_title = "".join(c if c.isalnum() or c in "._-" else "_" for c in doc_title)
-        snapshot_filename = f"{clean_title}_{name}_{int(time.time()*1000)}.sldprt"
+        clean_name = "".join(c if c.isalnum() or c in "._-" else "_" for c in name)
+        snapshot_filename = f"{clean_title}_{clean_name}_{int(time.time()*1000)}{self._snapshot_extension(doc)}"
         snapshot_path = str(self.checkpoints_dir / snapshot_filename)
 
         snapshot_saved = False
-        try:
-            # SaveCopyAs or SaveAs3 silent
-            res = doc.SaveCopyAs(snapshot_path)
-            snapshot_saved = bool(res == 0 or os.path.exists(snapshot_path))
-        except Exception as e:
-            logger.debug(f"SaveCopyAs exception: {e}")
+        if snapshot:
+            try:
+                res = doc.SaveCopyAs(snapshot_path)
+                snapshot_saved = bool(res == 0 or os.path.exists(snapshot_path))
+            except Exception as e:
+                logger.debug(f"SaveCopyAs exception: {e}")
 
         meta = CheckpointMetadata(
             name=name,
@@ -155,14 +182,11 @@ class CheckpointManager:
         # Gather features created after checkpoint
         new_features = []
         found_target = False
-        feat = getattr(doc, "FirstFeature", None)
-
-        while feat is not None:
+        for feat in self._iter_features(doc):
             if found_target:
                 new_features.append(feat)
             elif feat.Name == target_feat:
                 found_target = True
-            feat = feat.GetNextFeature
 
         if not found_target and target_feat:
             return {

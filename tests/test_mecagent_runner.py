@@ -113,8 +113,9 @@ def test_execute_macro_and_sdk_bundle(runner: MecAgentRunnerBridge):
     assert "success" in ctx
 
 
-def test_server_dispatch_sw_execute_csharp():
-    """Verify _dispatch_tool routes sw_execute_csharp cleanly."""
+def test_server_dispatch_sw_execute_csharp(monkeypatch):
+    """Verify _dispatch_tool routes sw_execute_csharp cleanly (code execution enabled)."""
+    monkeypatch.setenv("SW_MCP_ALLOW_EXEC", "1")
     res = _dispatch_tool(
         "sw_execute_csharp",
         {"code": "Math.Sqrt(144)", "read_only_only": True},

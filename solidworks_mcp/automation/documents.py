@@ -141,7 +141,7 @@ class DocumentOperations:
             try:
                 doc.ShowNamedView2("*Isometric", 7)
                 doc.ViewZoomtofit2()
-            except:
+            except Exception:
                 pass
             
             title = self._get_doc_title(doc)

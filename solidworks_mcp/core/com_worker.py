@@ -135,17 +135,20 @@ class STAWorker:
 
         self._started.set()
 
+        # Bind to this thread's own queue: after reset() a hung thread that later wakes up
+        # must not start consuming work meant for its replacement.
+        my_queue = self._queue
         try:
-            while self._running:
+            while self._running and self._queue is my_queue:
                 try:
-                    item = self._queue.get(timeout=0.2)
+                    item = my_queue.get(timeout=0.2)
                 except queue.Empty:
                     continue
 
                 if item is None:
                     # Sentinel to terminate
                     try:
-                        self._queue.task_done()
+                        my_queue.task_done()
                     except Exception:
                         pass
                     break
@@ -153,7 +156,7 @@ class STAWorker:
                 func, args, kwargs, future, tool_name = item
                 if future.cancelled():
                     try:
-                        self._queue.task_done()
+                        my_queue.task_done()
                     except Exception:
                         pass
                     continue
@@ -171,14 +174,16 @@ class STAWorker:
                 except BaseException as ex:
                     future.set_exception(ex)
                 finally:
-                    with self._op_lock:
-                        was_abandoned = self._abandoned_call is not None
-                        self._current_op = None
-                        self._abandoned_call = None
+                    was_abandoned = False
+                    if self._queue is my_queue:  # still the live worker (not reset meanwhile)
+                        with self._op_lock:
+                            was_abandoned = self._abandoned_call is not None
+                            self._current_op = None
+                            self._abandoned_call = None
                     if was_abandoned:
                         logger.info(f"STA worker completed previously abandoned call '{tool_name}'.")
                     try:
-                        self._queue.task_done()
+                        my_queue.task_done()
                     except Exception:
                         pass
         finally:
@@ -228,6 +233,18 @@ class STAWorker:
         self._queue.put((func, args, kwargs, fut, tool_name))
         return fut
 
+    def _mark_abandoned(self, fut: concurrent.futures.Future, tool_name: str, start_time: float) -> None:
+        """
+        Record that the caller stopped waiting for a call that is still running.
+        If the call finished in the meantime the worker has already cleared its state,
+        so the flag must not be left behind (it would block every later call).
+        """
+        with self._op_lock:
+            self._abandoned_call = {"tool": tool_name, "start_time": start_time}
+        if fut.done():
+            with self._op_lock:
+                self._abandoned_call = None
+
     def run_sync(
         self,
         func: Callable[..., Any],
@@ -261,8 +278,7 @@ class STAWorker:
             if elapsed >= watchdog_timeout:
                 dlg = find_blocking_modal_dialog()
                 if dlg:
-                    with self._op_lock:
-                        self._abandoned_call = {"tool": tool_name, "start_time": start_time}
+                    self._mark_abandoned(fut, tool_name, start_time)
                     title = dlg.get("title", "Modal Dialog")
                     msgs = dlg.get("messages", [])
                     details = f"{title}: {' '.join(msgs)}" if msgs else title
@@ -272,8 +288,7 @@ class STAWorker:
                     )
 
             if elapsed >= timeout:
-                with self._op_lock:
-                    self._abandoned_call = {"tool": tool_name, "start_time": start_time}
+                self._mark_abandoned(fut, tool_name, start_time)
                 dlg = find_blocking_modal_dialog()
                 if dlg:
                     title = dlg.get("title", "Modal Dialog")
@@ -302,8 +317,7 @@ class STAWorker:
             if elapsed >= watchdog_timeout:
                 dlg = find_blocking_modal_dialog()
                 if dlg:
-                    with self._op_lock:
-                        self._abandoned_call = {"tool": tool_name, "start_time": start_time}
+                    self._mark_abandoned(fut, tool_name, start_time)
                     title = dlg.get("title", "Modal Dialog")
                     msgs = dlg.get("messages", [])
                     details = f"{title}: {' '.join(msgs)}" if msgs else title
@@ -313,8 +327,7 @@ class STAWorker:
                     )
 
             if elapsed >= timeout:
-                with self._op_lock:
-                    self._abandoned_call = {"tool": tool_name, "start_time": start_time}
+                self._mark_abandoned(fut, tool_name, start_time)
                 dlg = find_blocking_modal_dialog()
                 if dlg:
                     title = dlg.get("title", "Modal Dialog")
@@ -361,43 +374,41 @@ class STAWorker:
                 self._thread.join(timeout=timeout)
             self._thread = None
 
-    def reset(self) -> None:
+    def abandon(self) -> None:
         """
-        Forcefully reset the STA worker if an abandoned call is permanently hung in COM.
-        Abandons the hung thread without terminating SolidWorks, drains the queue,
-        clears abandoned call states, and initializes a fresh STA worker thread.
-
-        Operational Notes:
-        (a) Abandoned Mutation Risk: The abandoned call on the orphaned thread may still
-            complete later if SolidWorks unblocks, and may mutate the model. Clients
-            must inspect model/document state before retrying mutating tools.
-        (b) Modal Blocking Propagation: If SolidWorks itself is still blocked by a modal dialog,
-            tool calls dispatched to the newly created STA worker will also detect the modal
-            dialog and block/raise swModalDialogBlocking until the dialog is dismissed via Win32.
+        Give up on this worker without waiting for it: fail everything still queued and let
+        the thread exit on its own if it ever returns from the hung COM call.
         """
         with self._lock:
-            logger.warning("Forcing STA worker reset: abandoning old thread and starting fresh STA apartment.")
             self._running = False
-            while not self._queue.empty():
+            old_queue, self._queue = self._queue, queue.Queue()
+            while True:
                 try:
-                    item = self._queue.get_nowait()
-                    if item:
-                        _, _, _, fut, _ = item
-                        if not fut.done():
-                            fut.set_exception(RuntimeError("STA worker was forcefully reset."))
-                except Exception:
+                    item = old_queue.get_nowait()
+                except queue.Empty:
                     break
-            try:
-                self._queue.put_nowait(None)
-            except Exception:
-                pass
+                if item:
+                    fut = item[3]
+                    if not fut.done():
+                        fut.set_exception(RuntimeError("STA worker was forcefully reset."))
             with self._op_lock:
                 self._current_op = None
                 self._abandoned_call = None
-            self._queue = queue.Queue()
             self._thread = None
             self._thread_id = None
-            self.start()
+
+    def reset(self) -> None:
+        """
+        Forcefully reset the STA worker if an abandoned call is permanently hung in COM:
+        abandon the hung thread (SolidWorks keeps running) and start a fresh STA thread.
+
+        The abandoned call may still complete later and mutate the model, so callers must
+        inspect document state before retrying. If SolidWorks is still showing a modal dialog,
+        calls on the new thread will report swModalDialogBlocking until it is dismissed.
+        """
+        logger.warning("Forcing STA worker reset: abandoning old thread and starting fresh STA apartment.")
+        self.abandon()
+        self.start()
 
 
 # Process-wide singleton
@@ -423,9 +434,9 @@ def reset_sta_worker() -> STAWorker:
     with _GLOBAL_WORKER_LOCK:
         if _GLOBAL_STA_WORKER is not None:
             try:
-                _GLOBAL_STA_WORKER.reset()
+                _GLOBAL_STA_WORKER.abandon()
             except Exception as e:
-                logger.warning(f"Error resetting old STA worker: {e}")
+                logger.warning(f"Error abandoning old STA worker: {e}")
         _GLOBAL_STA_WORKER = STAWorker()
         _GLOBAL_STA_WORKER.start()
         return _GLOBAL_STA_WORKER

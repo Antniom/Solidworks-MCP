@@ -1,530 +1,470 @@
 """
-SolidWorks MCP - Fast-Bridge HTTP Daemon
-----------------------------------------
-Lightweight local HTTP server running on 127.0.0.1 (default port: 54321).
-Provides sub-100ms slider dimension updates, CORS preflight handling for
-sandboxed iframes and Generative UI widgets, single-flight request coalescing,
-and real-time viewport image streaming.
+SolidWorks MCP - Studio Bridge
+------------------------------
+Local HTTP server (127.0.0.1 only) that backs the interactive studio.
+
+It serves the A2UI host page, hands out the A2UI messages that describe the
+studio surface, receives A2UI client actions (slider moves, button presses) and
+pushes A2UI data-model updates to every connected page over Server-Sent Events.
+
+Security: every /api and /studio request must carry the per-process token that
+is embedded in the generated page, and the Host header must be a loopback name.
+Without both, a web page open in the user's browser could drive SolidWorks.
 """
 
-import os
-import json
 import base64
+import json
 import logging
+import os
 import queue
+import secrets
+import tempfile
 import threading
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
 from socketserver import ThreadingMixIn
-from typing import Optional, Dict, Any
+from typing import Any, Dict, List, Optional
+from urllib.parse import parse_qs, urlsplit
 
-logger = logging.getLogger("SolidWorksMCP.FastBridge")
+from . import a2ui
 
-# Global server state
-_server_instance: Optional["FastBridgeServer"] = None
+logger = logging.getLogger("SolidWorksMCP.StudioBridge")
+
+UI_DIR = Path(__file__).parent
+SHELL_PATH = UI_DIR / "shell.html"
+BUNDLE_PATH = UI_DIR / "static" / "studio.bundle.js"
+
+DEFAULT_PORT_START = 54321
+DEFAULT_PORT_MAX = 54330
+MAX_BODY_BYTES = 64 * 1024
+
+_TOKEN = secrets.token_urlsafe(24)
+_server_instance: Optional["StudioBridgeServer"] = None
 _server_thread: Optional[threading.Thread] = None
 _bridge_port: Optional[int] = None
 _automation_instance: Any = None
-_current_app_html: str = "<html><body><h3>SolidWorks Interactive Studio</h3></body></html>"
-_dimension_lock = threading.Lock()
-_model_revision: int = 1
-_last_image_base64: Optional[str] = None
-_last_bbox: Optional[Dict[str, Any]] = None
-_sse_clients = []
+_action_lock = threading.Lock()
+_sse_clients: List["queue.Queue"] = []
 _sse_lock = threading.Lock()
 
 
-def _broadcast_sse(data: Dict[str, Any]) -> None:
-    """Broadcast real-time push update to all connected SSE clients."""
+class StudioSession:
+    """State of the studio surface currently on display."""
+
+    def __init__(self) -> None:
+        self.title = "SolidWorks Model"
+        self.dims: Dict[str, Dict[str, Any]] = {}
+        self.image = ""
+        self.bbox: Optional[Dict[str, Any]] = None
+        self.view = "*Isometric"
+        self.status = "Open a model and call show_interactive_studio."
+
+    def messages(self) -> List[a2ui.Message]:
+        return a2ui.build_surface_messages(
+            model_title=self.title,
+            dims=self.dims,
+            image_data_uri=self.image,
+            bbox=self.bbox,
+            view_name=self.view,
+            status=self.status,
+        )
+
+
+_session = StudioSession()
+
+
+# ============================================================================
+# Public helpers used by the MCP server
+# ============================================================================
+
+def get_token() -> str:
+    """Secret that pages must present to talk to the bridge."""
+    return _TOKEN
+
+
+def get_bridge_port() -> Optional[int]:
+    return _bridge_port
+
+
+def get_bridge_url() -> Optional[str]:
+    return f"http://127.0.0.1:{_bridge_port}" if _bridge_port else None
+
+
+def get_studio_url() -> Optional[str]:
+    base = get_bridge_url()
+    return f"{base}/studio?token={_TOKEN}" if base else None
+
+
+def get_session() -> StudioSession:
+    return _session
+
+
+def set_automation_instance(instance: Any) -> None:
+    """Inject the automation object the bridge should drive."""
+    global _automation_instance
+    _automation_instance = instance
+
+
+def set_session(
+    title: str,
+    dims: Dict[str, Dict[str, Any]],
+    image: str = "",
+    bbox: Optional[Dict[str, Any]] = None,
+    view: str = "*Isometric",
+) -> StudioSession:
+    """Replace the studio state and tell every connected page to redraw."""
+    _session.title = title
+    _session.dims = dims
+    _session.image = image
+    _session.bbox = bbox
+    _session.view = view if view in a2ui.VIEW_NAMES else "*Isometric"
+    _session.status = "Drag a slider to rebuild the model in SolidWorks."
+    _broadcast([
+        {"version": a2ui.A2UI_VERSION, "deleteSurface": {"surfaceId": a2ui.SURFACE_ID}},
+        *_session.messages(),
+    ])
+    return _session
+
+
+def render_page(include_messages: bool = False) -> str:
+    """Self-contained studio HTML: shell + A2UI renderer bundle + connection config."""
+    shell = SHELL_PATH.read_text(encoding="utf-8")
+    bundle = BUNDLE_PATH.read_text(encoding="utf-8")
+    config: Dict[str, Any] = {"bridge": get_bridge_url() or "", "token": _TOKEN}
+    if include_messages:
+        config["messages"] = _session.messages()
+    return (
+        shell
+        .replace("/*__SW_STUDIO_CONFIG__*/", "window.__SW_STUDIO__ = " + _script_json(config) + ";")
+        .replace("/*__SW_STUDIO_BUNDLE__*/", bundle.replace("</script", "<\\/script"))
+    )
+
+
+def _script_json(data: Any) -> str:
+    """JSON that is safe to place inside an inline <script> block."""
+    return (
+        json.dumps(data)
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("&", "\\u0026")
+        .replace(" ", "\\u2028")
+        .replace(" ", "\\u2029")
+    )
+
+
+# ============================================================================
+# SolidWorks access (always through the STA worker)
+# ============================================================================
+
+def _call(func_name: str, **kwargs: Any) -> Any:
+    automation = _automation_instance
+    if automation is None:
+        raise RuntimeError("SolidWorks automation is not available")
+    target = getattr(automation, func_name)
+    run_on_sta = getattr(automation, "run_on_sta", None)
+    if callable(run_on_sta) and not _is_mock(automation):
+        return run_on_sta(target, **kwargs)
+    return target(**kwargs)
+
+
+def _is_mock(obj: Any) -> bool:
+    try:
+        from unittest.mock import Mock
+        return isinstance(obj, Mock)
+    except Exception:
+        return False
+
+
+def capture_viewport_data_uri(view_name: str = "*Isometric") -> str:
+    """Capture the viewport to a temporary file and return it as a data URI."""
+    fd, path = tempfile.mkstemp(prefix="swmcp_studio_", suffix=".png")
+    os.close(fd)
+    try:
+        res = _call("capture_viewport", filepath=path, view_name=view_name)
+        if isinstance(res, dict) and res.get("success"):
+            saved = (res.get("data") or {}).get("filepath") or path
+            if os.path.exists(saved) and os.path.getsize(saved) > 0:
+                with open(saved, "rb") as f:
+                    return "data:image/png;base64," + base64.b64encode(f.read()).decode("ascii")
+    except Exception as e:
+        logger.warning(f"Studio viewport capture failed: {e}")
+    finally:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+    return ""
+
+
+def model_bounds() -> Optional[Dict[str, Any]]:
+    try:
+        res = _call("inspect_model")
+        if isinstance(res, dict) and res.get("success"):
+            return (res.get("data") or {}).get("dimensions_mm")
+    except Exception:
+        pass
+    return None
+
+
+# ============================================================================
+# A2UI action handling
+# ============================================================================
+
+def _status(text: str) -> a2ui.Message:
+    _session.status = text
+    return a2ui.data_update("/status", text)
+
+
+def _refresh_view(messages: List[a2ui.Message]) -> None:
+    image = capture_viewport_data_uri(_session.view)
+    if image:
+        _session.image = image
+        messages.append(a2ui.data_update("/viewport/image", image))
+    bbox = model_bounds()
+    if bbox:
+        _session.bbox = bbox
+        messages.append(a2ui.data_update("/model/info", a2ui.describe_model(bbox, len(_session.dims))))
+
+
+def _selected_view(context: Dict[str, Any]) -> None:
+    view = context.get("view")
+    if isinstance(view, list):
+        view = view[0] if view else None
+    if view in a2ui.VIEW_NAMES:
+        _session.view = view
+
+
+def _apply_dimension(key: str, value: Any) -> List[a2ui.Message]:
+    dim = _session.dims.get(key)
+    if dim is None:
+        return [_status("That dimension is no longer part of this studio. Reopen the studio.")]
+    try:
+        target = float(value)
+    except (TypeError, ValueError):
+        return [a2ui.data_update(f"/dims/{key}/value", dim["value"]), _status("Ignored a non-numeric value.")]
+    target = min(max(target, dim["min"]), dim["max"])
+
+    previous = dim["value"]
+    try:
+        res = _call("set_dimension", name=dim["name"], value=target, units=dim["units"])
+    except Exception as e:
+        res = {"success": False, "message": str(e)}
+    if not isinstance(res, dict) or not res.get("success"):
+        reason = res.get("message", "rebuild failed") if isinstance(res, dict) else "rebuild failed"
+        return [
+            a2ui.data_update(f"/dims/{key}/value", previous),
+            _status(f"{dim['label']} kept at {previous:g} {dim['units']}: {reason}"),
+        ]
+
+    dim["value"] = target
+    messages = [
+        a2ui.data_update(f"/dims/{key}/value", target),
+        a2ui.data_update("/summary", a2ui.build_change_summary(_session.dims)),
+        _status(f"{dim['label']} set to {target:g} {dim['units']}."),
+    ]
+    _refresh_view(messages)
+    return messages
+
+
+def handle_action(action: Dict[str, Any]) -> List[a2ui.Message]:
+    """Run one A2UI client action and return the A2UI messages that reflect its outcome."""
+    name = action.get("name")
+    context = action.get("context") or {}
+    with _action_lock:
+        _selected_view(context)
+        if name == "set_dimension":
+            messages = _apply_dimension(str(context.get("key", "")), context.get("value"))
+        elif name == "capture":
+            messages = [_status(f"Showing {_session.view.lstrip('*')} view.")]
+            _refresh_view(messages)
+        elif name == "reset":
+            messages = []
+            for key, dim in _session.dims.items():
+                if abs(dim["value"] - dim["original"]) > 1e-9:
+                    messages += _apply_dimension(key, dim["original"])
+            messages.append(_status("All dimensions restored to their original values."))
+        else:
+            return [_status(f"Unknown studio action '{name}'.")]
+    _broadcast(messages)
+    return messages
+
+
+# ============================================================================
+# HTTP server
+# ============================================================================
+
+def _broadcast(messages: List[a2ui.Message]) -> None:
+    if not messages:
+        return
     with _sse_lock:
         for q in list(_sse_clients):
             try:
-                q.put_nowait(data)
-            except Exception:
-                pass
-
-
-def _dispatch_automation(automation: Any, func_name: str, *args: Any, **kwargs: Any) -> Any:
-    """
-    Safely invoke an automation method, ensuring COM apartment initialization
-    or dispatching to the dedicated STA COM worker thread if available.
-    """
-    is_mock = False
-    try:
-        from unittest.mock import Mock, MagicMock
-        is_mock = isinstance(automation, (Mock, MagicMock))
-    except Exception:
-        is_mock = False
-
-    if not is_mock and hasattr(automation, "run_on_sta") and callable(getattr(automation, "run_on_sta")):
-        target_fn = getattr(automation, func_name)
-        return automation.run_on_sta(target_fn, *args, **kwargs)
-
-    co_init = False
-    try:
-        import pythoncom
-        pythoncom.CoInitialize()
-        co_init = True
-    except Exception:
-        pass
-
-    try:
-        target_fn = getattr(automation, func_name)
-        return target_fn(*args, **kwargs)
-    finally:
-        if co_init:
-            try:
-                pythoncom.CoUninitialize()
+                q.put_nowait(messages)
             except Exception:
                 pass
 
 
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
-    """Multi-threaded HTTP server allowing concurrent reads while writes are coalesced."""
     daemon_threads = True
-    allow_reuse_address = True
+    # Never share the port with another process (SO_REUSEADDR on Windows allows hijacking).
+    allow_reuse_address = False
 
 
-class FastBridgeHandler(BaseHTTPRequestHandler):
-    """HTTP request handler with CORS, JSON API, and STA thread protection."""
+class StudioBridgeHandler(BaseHTTPRequestHandler):
+    server_version = "SolidWorksStudio"
 
     def log_message(self, format: str, *args: Any) -> None:
-        """Suppress standard HTTP access logging to keep stdout/stderr clean for MCP."""
-        logger.debug("%s - - [%s] %s" % (self.client_address[0], self.log_date_time_string(), format % args))
+        logger.debug("%s %s", self.client_address[0], format % args)
 
-    def _send_cors_headers(self) -> None:
-        """Attach CORS headers to support sandboxed iframes and file:// origins."""
+    # -- helpers ------------------------------------------------------------
+
+    def _cors(self) -> None:
+        # Pages are opened from file://, sandboxed iframes (null origin) and the bridge
+        # itself, so the origin cannot be pinned. The token is what authorises a request.
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
-        self.send_header("Access-Control-Max-Age", "86400")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Studio-Token")
+        self.send_header("Access-Control-Max-Age", "600")
 
-    def _send_json_response(self, status_code: int, data: Dict[str, Any]) -> None:
-        """Helper to send JSON response with CORS headers."""
+    def _send(self, status: int, body: bytes, content_type: str) -> None:
         try:
-            payload = json.dumps(data).encode("utf-8")
-            self.send_response(status_code)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Content-Length", str(len(payload)))
-            self._send_cors_headers()
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self._cors()
             self.end_headers()
-            self.wfile.write(payload)
-        except (BrokenPipeError, ConnectionResetError):
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             pass
 
+    def _json(self, status: int, data: Dict[str, Any]) -> None:
+        self._send(status, json.dumps(data).encode("utf-8"), "application/json; charset=utf-8")
+
+    def _host_is_loopback(self) -> bool:
+        host = (self.headers.get("Host") or "").rsplit(":", 1)[0].strip("[]").lower()
+        return host in ("127.0.0.1", "localhost", "::1")
+
+    def _authorised(self, query: Dict[str, List[str]]) -> bool:
+        supplied = self.headers.get("X-Studio-Token") or (query.get("token") or [""])[0]
+        return self._host_is_loopback() and secrets.compare_digest(str(supplied), _TOKEN)
+
+    # -- verbs --------------------------------------------------------------
+
     def do_OPTIONS(self) -> None:
-        """Handle CORS preflight requests."""
         self.send_response(204)
-        self._send_cors_headers()
+        self._cors()
         self.send_header("Content-Length", "0")
         self.end_headers()
 
     def do_GET(self) -> None:
-        """Handle GET requests: /health, /api/dimensions, /api/app.html."""
-        path = self.path.split("?")[0].rstrip("/")
+        url = urlsplit(self.path)
+        path = url.path.rstrip("/")
+        query = parse_qs(url.query)
 
         if path in ("", "/health"):
-            doc_title = "None (Disconnected)"
-            automation = _get_automation()
-            if automation and getattr(automation, "_connected", False):
-                try:
-                    sw_app = getattr(automation, "_sw_app", None)
-                    if sw_app:
-                        act_doc = getattr(sw_app, "ActiveDoc", None)
-                        if act_doc:
-                            title_val = getattr(act_doc, "GetTitle", lambda: getattr(act_doc, "Title", "Active Document"))
-                            doc_title = title_val() if callable(title_val) else str(title_val)
-                    else:
-                        doc_title = "Connected"
-                except Exception:
-                    doc_title = "Connected"
-
-            self._send_json_response(200, {
-                "status": "ok",
-                "port": _bridge_port,
-                "active_doc": str(doc_title),
-                "revision": _model_revision,
-            })
-
-        elif path == "/api/events":
-            self.send_response(200)
-            self.send_header("Content-Type", "text/event-stream")
-            self.send_header("Cache-Control", "no-cache")
-            self.send_header("Connection", "keep-alive")
-            self._send_cors_headers()
-            self.end_headers()
-
-            client_queue = queue.Queue()
-            with _sse_lock:
-                _sse_clients.append(client_queue)
-
-            try:
-                init_msg = json.dumps({"type": "init", "revision": _model_revision})
-                self.wfile.write(f"data: {init_msg}\n\n".encode("utf-8"))
-                self.wfile.flush()
-
-                while True:
-                    try:
-                        msg = client_queue.get(timeout=2.0)
-                        if msg is None:
-                            break
-                        payload = f"data: {json.dumps(msg)}\n\n".encode("utf-8")
-                        self.wfile.write(payload)
-                        self.wfile.flush()
-                    except queue.Empty:
-                        self.wfile.write(b": keepalive\n\n")
-                        self.wfile.flush()
-            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
-                pass
-            finally:
-                with _sse_lock:
-                    if client_queue in _sse_clients:
-                        _sse_clients.remove(client_queue)
+            self._json(200, {"status": "ok", "port": _bridge_port})
+            return
+        if not self._authorised(query):
+            self._json(403, {"success": False, "error": "Missing or invalid studio token"})
             return
 
-        elif path == "/api/sync":
-            automation = _get_automation()
-            if not automation:
-                self._send_json_response(503, {"success": False, "error": "SolidWorks automation not connected"})
-                return
-
-            try:
-                res = _dispatch_automation(automation, "get_dimensions")
-                dims = []
-                if isinstance(res, dict):
-                    data = res.get("data")
-                    if isinstance(data, list):
-                        dims = data
-                    elif isinstance(data, dict):
-                        dims = data.get("dimensions", [])
-                    elif isinstance(res.get("dimensions"), list):
-                        dims = res.get("dimensions", [])
-
-                from .generator import compute_dimension_bounds
-                processed_dims = [compute_dimension_bounds(d) for d in dims]
-
-                global _last_image_base64, _last_bbox
-                if not _last_image_base64:
-                    _last_image_base64 = _capture_viewport_base64(automation, view_name="*Isometric")
-                if not _last_bbox:
-                    b = _get_model_bounds(automation)
-                    if b:
-                        _last_bbox = b.get("dimensions_mm")
-
-                self._send_json_response(200, {
-                    "success": True,
-                    "revision": _model_revision,
-                    "dimensions": processed_dims,
-                    "image_base64": _last_image_base64,
-                    "bbox": _last_bbox,
-                })
-            except Exception as e:
-                self._send_json_response(500, {"success": False, "error": str(e)})
-
-        elif path == "/api/dimensions":
-            automation = _get_automation()
-            if not automation:
-                self._send_json_response(503, {"success": False, "error": "SolidWorks automation not connected"})
-                return
-
-            try:
-                res = _dispatch_automation(automation, "get_dimensions")
-                if isinstance(res, dict):
-                    data = res.get("data")
-                    if isinstance(data, list):
-                        dims = data
-                    elif isinstance(data, dict):
-                        dims = data.get("dimensions", [])
-                    elif isinstance(res.get("dimensions"), list):
-                        dims = res.get("dimensions", [])
-                    else:
-                        dims = []
-                elif isinstance(res, list):
-                    dims = res
-                else:
-                    dims = []
-
-                from .generator import compute_dimension_bounds
-                processed_dims = [compute_dimension_bounds(d) for d in dims]
-
-                self._send_json_response(200, {
-                    "success": True,
-                    "dimensions": processed_dims,
-                    "count": len(processed_dims),
-                })
-            except Exception as e:
-                logger.error(f"Error fetching dimensions: {e}")
-                self._send_json_response(500, {"success": False, "error": str(e)})
-
-        elif path == "/api/app.html":
-            payload = _current_app_html.encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(payload)))
-            self._send_cors_headers()
-            self.end_headers()
-            self.wfile.write(payload)
-
+        if path == "/studio":
+            self._send(200, render_page().encode("utf-8"), "text/html; charset=utf-8")
+        elif path == "/api/a2ui":
+            self._json(200, {"messages": _session.messages()})
+        elif path == "/api/a2ui/events":
+            self._serve_events()
         else:
-            self._send_json_response(404, {"success": False, "error": f"Path not found: {path}"})
+            self._json(404, {"success": False, "error": f"Path not found: {path}"})
 
     def do_POST(self) -> None:
-        """Handle POST requests: /api/set_dimension, /api/capture."""
-        global _model_revision, _last_image_base64, _last_bbox
-        path = self.path.split("?")[0].rstrip("/")
+        url = urlsplit(self.path)
+        path = url.path.rstrip("/")
+        if not self._authorised(parse_qs(url.query)):
+            self._json(403, {"success": False, "error": "Missing or invalid studio token"})
+            return
+        if path != "/api/a2ui/action":
+            self._json(404, {"success": False, "error": f"Path not found: {path}"})
+            return
 
-        # Read JSON body
-        content_length = int(self.headers.get("Content-Length", 0))
-        if content_length > 0:
-            try:
-                body_bytes = self.rfile.read(content_length)
-                body = json.loads(body_bytes.decode("utf-8"))
-            except Exception as e:
-                self._send_json_response(400, {"success": False, "error": f"Invalid JSON body: {e}"})
-                return
-        else:
-            body = {}
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+        except ValueError:
+            length = -1
+        if length <= 0 or length > MAX_BODY_BYTES:
+            self._json(400, {"success": False, "error": "Request body missing or too large"})
+            return
+        try:
+            body = json.loads(self.rfile.read(length).decode("utf-8"))
+            action = body["action"]
+            if not isinstance(action, dict) or not isinstance(action.get("name"), str):
+                raise ValueError("action.name is required")
+        except Exception as e:
+            self._json(400, {"success": False, "error": f"Not an A2UI client action message: {e}"})
+            return
 
-        if path == "/api/set_dimension":
-            dim_name = body.get("name")
-            target_val = body.get("value")
-            units = body.get("units", "mm")
-            view_name = body.get("view_name", "*Isometric")
+        try:
+            self._json(200, {"messages": handle_action(action)})
+        except Exception as e:
+            logger.error(f"Studio action '{action.get('name')}' failed: {e}")
+            self._json(200, {"messages": [_status(f"SolidWorks error: {e}")]})
 
-            if not dim_name or target_val is None:
-                self._send_json_response(400, {"success": False, "error": "Missing required fields: 'name' and 'value'"})
-                return
+    def _serve_events(self) -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self._cors()
+        self.end_headers()
 
-            automation = _get_automation()
-            if not automation:
-                self._send_json_response(503, {"success": False, "error": "SolidWorks automation not connected"})
-                return
-
-            # Single-flight lock prevents concurrent COM apartment reentrancy
-            with _dimension_lock:
-                prev_val = None
+        client_queue: "queue.Queue" = queue.Queue(maxsize=64)
+        with _sse_lock:
+            _sse_clients.append(client_queue)
+        try:
+            while True:
                 try:
-                    # Retrieve prior dimension value for safe rollback
-                    dim_query = _dispatch_automation(automation, "get_dimensions", dimension_name=dim_name)
-                    if isinstance(dim_query, dict) and dim_query.get("success"):
-                        data = dim_query.get("data")
-                        if isinstance(data, list):
-                            items = data
-                        elif isinstance(data, dict):
-                            items = data.get("dimensions", [])
-                        elif isinstance(dim_query.get("dimensions"), list):
-                            items = dim_query.get("dimensions", [])
-                        else:
-                            items = []
-                        if items and isinstance(items[0], dict):
-                            prev_val = items[0].get("value")
-                except Exception:
-                    pass
-
-                # Execute dimension change on SolidWorks COM
-                try:
-                    set_res = _dispatch_automation(automation, "set_dimension", name=dim_name, value=float(target_val), units=units)
-                except Exception as e:
-                    set_res = {"success": False, "message": str(e)}
-
-                if not isinstance(set_res, dict) or not set_res.get("success"):
-                    err_msg = set_res.get("message", "Rebuild failed for given dimension") if isinstance(set_res, dict) else "Rebuild failed"
-                    # Attempt rollback if prior value is known
-                    if prev_val is not None:
-                        try:
-                            _dispatch_automation(automation, "set_dimension", name=dim_name, value=float(prev_val), units=units)
-                        except Exception:
-                            pass
-                    self._send_json_response(422, {
-                        "success": False,
-                        "error": err_msg,
-                        "revert_value": prev_val,
-                    })
-                    return
-
-                # Capture fresh viewport snapshot
-                image_base64 = _capture_viewport_base64(automation, view_name=view_name)
-                bbox_info = _get_model_bounds(automation)
-
-                _model_revision += 1
-                if image_base64:
-                    _last_image_base64 = image_base64
-                if bbox_info:
-                    _last_bbox = bbox_info.get("dimensions_mm")
-
-                # Broadcast push event to all open browser windows and chat widgets
-                _broadcast_sse({
-                    "type": "update",
-                    "revision": _model_revision,
-                    "name": dim_name,
-                    "value": float(target_val),
-                    "units": units,
-                    "image_base64": image_base64,
-                    "bbox": bbox_info.get("dimensions_mm") if bbox_info else None,
-                })
-
-                self._send_json_response(200, {
-                    "success": True,
-                    "revision": _model_revision,
-                    "name": dim_name,
-                    "value": float(target_val),
-                    "units": units,
-                    "image_base64": image_base64,
-                    "bbox": bbox_info.get("dimensions_mm") if bbox_info else None,
-                    "volume": bbox_info.get("volume") if bbox_info else None,
-                })
-
-        elif path == "/api/capture":
-            view_name = body.get("view_name", "*Isometric")
-            automation = _get_automation()
-            if not automation:
-                self._send_json_response(503, {"success": False, "error": "SolidWorks automation not connected"})
-                return
-
-            with _dimension_lock:
-                image_base64 = _capture_viewport_base64(automation, view_name=view_name)
-                if image_base64:
-                    self._send_json_response(200, {
-                        "success": True,
-                        "view_name": view_name,
-                        "image_base64": image_base64,
-                    })
-                else:
-                    self._send_json_response(500, {
-                        "success": False,
-                        "error": "Failed to capture viewport snapshot",
-                    })
-
-        elif path == "/api/rename_feature":
-            feature_name = body.get("feature_name") or body.get("old_name")
-            new_name = body.get("new_name")
-            if not feature_name or not new_name:
-                self._send_json_response(400, {"success": False, "error": "Missing required fields: 'feature_name' and 'new_name'"})
-                return
-
-            automation = _get_automation()
-            if not automation:
-                self._send_json_response(503, {"success": False, "error": "SolidWorks automation not connected"})
-                return
-
-            with _dimension_lock:
-                try:
-                    res = _dispatch_automation(automation, "manage_feature", action="rename", feature_name=str(feature_name).strip(), new_name=str(new_name).strip())
-                    is_ok = isinstance(res, dict) and res.get("success", False)
-                    status_code = 200 if is_ok else 422
-                    if is_ok:
-                        _model_revision += 1
-                        _broadcast_sse({
-                            "type": "rename",
-                            "revision": _model_revision,
-                            "old_name": feature_name,
-                            "new_name": new_name,
-                        })
-                    self._send_json_response(status_code, {
-                        "success": is_ok,
-                        "revision": _model_revision,
-                        "old_name": feature_name,
-                        "new_name": new_name,
-                        "message": res.get("message") if isinstance(res, dict) else str(res)
-                    })
-                except Exception as e:
-                    logger.error(f"Error renaming feature {feature_name} -> {new_name}: {e}")
-                    self._send_json_response(500, {"success": False, "error": str(e)})
-
-        else:
-            self._send_json_response(404, {"success": False, "error": f"Path not found: {path}"})
+                    messages = client_queue.get(timeout=15.0)
+                    if messages is None:
+                        break
+                    self.wfile.write(f"data: {json.dumps({'messages': messages})}\n\n".encode("utf-8"))
+                except queue.Empty:
+                    self.wfile.write(b": keepalive\n\n")
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
+            pass
+        finally:
+            with _sse_lock:
+                if client_queue in _sse_clients:
+                    _sse_clients.remove(client_queue)
 
 
-def _get_automation() -> Any:
-    """Retrieve the active SolidWorks automation instance."""
-    global _automation_instance
-    if _automation_instance is not None:
-        return _automation_instance
-    try:
-        from solidworks_mcp.server import sw_automation
-        if sw_automation is not None:
-            return sw_automation
-    except Exception:
-        pass
-    try:
-        from solidworks_mcp.automation import SolidWorksAutomation
-        _automation_instance = SolidWorksAutomation()
-        _automation_instance.connect()
-        return _automation_instance
-    except Exception:
-        return None
+class StudioBridgeServer:
+    """Owns the listening socket and its serving thread."""
 
-
-def set_automation_instance(instance: Any) -> None:
-    """Inject or override the automation instance (used by tests or server)."""
-    global _automation_instance
-    _automation_instance = instance
-
-
-def set_current_app_html(html_content: str) -> None:
-    """Update the HTML page served at /api/app.html."""
-    global _current_app_html
-    _current_app_html = html_content
-
-
-def _capture_viewport_base64(automation: Any, view_name: str = "*Isometric") -> Optional[str]:
-    """Capture viewport snapshot and convert to base64 data URI."""
-    try:
-        cap_res = _dispatch_automation(automation, "capture_viewport", view_name=view_name)
-        if isinstance(cap_res, dict) and cap_res.get("success"):
-            data = cap_res.get("data", {})
-            filepath = data.get("filepath")
-            if filepath and os.path.exists(filepath):
-                with open(filepath, "rb") as f:
-                    encoded = base64.b64encode(f.read()).decode("ascii")
-                return f"data:image/png;base64,{encoded}"
-    except Exception as e:
-        logger.warning(f"FastBridge viewport capture failed: {e}")
-    return None
-
-
-def _get_model_bounds(automation: Any) -> Optional[Dict[str, Any]]:
-    """Get active model bounding box and volume info."""
-    try:
-        insp_res = _dispatch_automation(automation, "inspect_model")
-        if isinstance(insp_res, dict) and insp_res.get("success"):
-            return insp_res.get("data", {})
-    except Exception:
-        pass
-    return None
-
-
-class FastBridgeServer:
-    """Wrapper managing the background ThreadedHTTPServer lifecycle."""
-
-    def __init__(self, host: str = "127.0.0.1", port_start: int = 54321, port_max: int = 54330):
+    def __init__(self, host: str = "127.0.0.1", port_start: int = DEFAULT_PORT_START, port_max: int = DEFAULT_PORT_MAX):
         self.host = host
         self.port_start = port_start
         self.port_max = port_max
         self.port: Optional[int] = None
         self.httpd: Optional[ThreadedHTTPServer] = None
-        self._is_running = False
         self._serving = False
 
     def start(self) -> int:
-        """Bind to the first available port in [port_start, port_max] and start listening."""
-        global _bridge_port
-        last_error = None
+        last_error: Optional[Exception] = None
         for port in range(self.port_start, self.port_max + 1):
             try:
-                self.httpd = ThreadedHTTPServer((self.host, port), FastBridgeHandler)
+                self.httpd = ThreadedHTTPServer((self.host, port), StudioBridgeHandler)
                 self.port = port
-                _bridge_port = port
-                self._is_running = True
-                logger.info(f"FastBridge HTTP server listening on http://{self.host}:{self.port}")
-                return self.port
+                logger.info(f"Studio bridge listening on http://{self.host}:{port}")
+                return port
             except OSError as e:
                 last_error = e
-                logger.debug(f"Port {port} busy, trying next port...")
-
-        raise RuntimeError(f"Could not bind FastBridge server on ports {self.port_start}-{self.port_max}: {last_error}")
+        raise RuntimeError(
+            f"Could not bind the studio bridge on ports {self.port_start}-{self.port_max}: {last_error}"
+        )
 
     def serve_forever(self) -> None:
-        """Run the server loop (intended for background thread)."""
         if self.httpd:
             self._serving = True
             try:
@@ -533,10 +473,8 @@ class FastBridgeServer:
                 self._serving = False
 
     def stop(self) -> None:
-        """Shut down the server and close the listening socket."""
-        global _bridge_port
         if self.httpd:
-            self._is_running = False
+            # shutdown() blocks forever unless serve_forever() is actually running.
             if self._serving:
                 try:
                     self.httpd.shutdown()
@@ -547,29 +485,23 @@ class FastBridgeServer:
             except Exception:
                 pass
             self.httpd = None
-            _bridge_port = None
-            logger.info("FastBridge HTTP server stopped")
 
 
-def start_bridge(port_start: int = 54321, port_max: int = 54330) -> int:
-    """Start the FastBridge server in a background daemon thread if not already running."""
+def start_bridge(port_start: int = DEFAULT_PORT_START, port_max: int = DEFAULT_PORT_MAX) -> int:
+    """Start the bridge in a daemon thread (no-op if it is already running). Raises if no port is free."""
     global _server_instance, _server_thread, _bridge_port
-
-    if _server_instance and _server_instance._is_running and _bridge_port:
+    if _server_instance is not None and _bridge_port:
         return _bridge_port
-
-    _server_instance = FastBridgeServer(port_start=port_start, port_max=port_max)
-    bound_port = _server_instance.start()
-
-    _server_thread = threading.Thread(target=_server_instance.serve_forever, daemon=True, name="FastBridgeDaemon")
-    _server_thread.start()
-
-    return bound_port
+    server = StudioBridgeServer(port_start=port_start, port_max=port_max)
+    port = server.start()
+    thread = threading.Thread(target=server.serve_forever, daemon=True, name="StudioBridge")
+    thread.start()
+    _server_instance, _server_thread, _bridge_port = server, thread, port
+    return port
 
 
 def stop_bridge() -> None:
-    """Stop the running FastBridge server."""
-    global _server_instance, _server_thread
+    global _server_instance, _server_thread, _bridge_port
     with _sse_lock:
         for q in list(_sse_clients):
             try:
@@ -579,17 +511,12 @@ def stop_bridge() -> None:
         _sse_clients.clear()
     if _server_instance:
         _server_instance.stop()
-        _server_instance = None
     if _server_thread and _server_thread.is_alive():
-        _server_thread.join(timeout=1.0)
-        _server_thread = None
-
-
-def get_bridge_port() -> Optional[int]:
-    """Get the currently active bridge port, or None if not running."""
-    return _bridge_port
+        _server_thread.join(timeout=2.0)
+    _server_instance = None
+    _server_thread = None
+    _bridge_port = None
 
 
 def is_bridge_running() -> bool:
-    """Check if the FastBridge server is currently active."""
-    return _server_instance is not None and _server_instance._is_running
+    return _server_instance is not None and _bridge_port is not None

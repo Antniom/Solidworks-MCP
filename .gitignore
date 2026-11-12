@@ -19,3 +19,7 @@ test_artifacts_phase3/
 screenshots/
 .checkpoints/
 knowledge/discovered/
+node_modules/
+.bundle_cache/
+.pytest_cache/
+*.solidworks-mcp.bak

@@ -1,11 +1,11 @@
 {
   "name": "solidworks",
-  "version": "1.0.0",
+  "version": "5.0.0",
   "description": "Parametric 3D CAD modeling, interactive in-chat studio, FEA simulation, drawing generation, and automated mechanical design for Dassault Systèmes SolidWorks via Model Context Protocol.",
   "author": {
     "name": "António Coelho"
   },
-  "homepage": "https://github.com/solidworks-mcp",
+  "homepage": "https://github.com/Antniom/Solidworks-MCP",
   "license": "MIT",
   "keywords": [
     "solidworks",
@@ -17,5 +17,6 @@
     "drafting"
   ],
   "skills": "./skills/",
-  "mcpServers": "./claude.mcp.json"
+  "mcpServers": "./claude.mcp.json",
+  "repository": "https://github.com/Antniom/Solidworks-MCP"
 }

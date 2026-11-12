@@ -1,0 +1,16 @@
+{
+  "name": "solidworks-studio-host",
+  "private": true,
+  "type": "module",
+  "description": "A2UI (v0.9, Lit renderer) host page for the SolidWorks interactive studio.",
+  "scripts": {
+    "build": "esbuild studio.js --bundle --format=iife --minify --target=es2022 --legal-comments=linked --outfile=../static/studio.bundle.js"
+  },
+  "dependencies": {
+    "@a2ui/lit": "0.15.0",
+    "@a2ui/web_core": "0.15.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  }
+}
