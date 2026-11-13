@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "solidworks-mcp"
-version = "4.0.0"
-description = "Production-grade Model Context Protocol (MCP) server for Dassault Systèmes SolidWorks with 67 verified CAD, assembly, drawing, FEA, and diagnostic tools."
+dynamic = ["version"]
+description = "Model Context Protocol (MCP) server for Dassault Systèmes SolidWorks: part modeling, assemblies, drawings, FEA, diagnostics and an A2UI interactive studio."
 readme = "README.md"
 license = { text = "MIT" }
 authors = [
@@ -38,8 +38,8 @@ classifiers = [
     "Topic :: Scientific/Engineering",
 ]
 dependencies = [
-    "mcp>=1.0.0",
-    "pywin32>=306",
+    "mcp>=2.0.0",
+    "pywin32>=306; sys_platform == 'win32'",
     "pydantic>=2.0.0",
     "pillow>=10.0.0",
     "numpy>=1.24.0",
@@ -54,7 +54,7 @@ dev = [
 ]
 
 [project.scripts]
-solidworks-mcp = "solidworks_mcp.server:main"
+solidworks-mcp = "solidworks_mcp.server:run"
 solidworks-mcp-install = "solidworks_mcp.install:main"
 
 [project.urls]
@@ -62,17 +62,32 @@ Homepage = "https://github.com/Antniom/Solidworks-MCP"
 Repository = "https://github.com/Antniom/Solidworks-MCP.git"
 Issues = "https://github.com/Antniom/Solidworks-MCP/issues"
 
+[tool.hatch.version]
+path = "solidworks_mcp/__init__.py"
+
 [tool.hatch.build.targets.wheel]
 packages = ["solidworks_mcp"]
+exclude = ["solidworks_mcp/ui/host", "**/.bundle_cache", "*.log"]
+
+# Skills, agent rules and the Antigravity plugin template have one home at the
+# repo root; the wheel carries copies so `solidworks-mcp-install` can stage them.
+[tool.hatch.build.targets.wheel.force-include]
+"skills" = "solidworks_mcp/_bundle/skills"
+"rules" = "solidworks_mcp/_bundle/rules"
+"plugins/solidworks" = "solidworks_mcp/_bundle/plugin"
 
 [tool.hatch.build.targets.sdist]
 include = [
     "/solidworks_mcp",
+    "/skills",
+    "/rules",
+    "/plugins",
+    "/tests",
     "/README.md",
     "/LICENSE",
     "/pyproject.toml",
 ]
 
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-python_files = ["test_*.py"]
+# The server only runs on Windows; resolving for that platform alone keeps uv.lock small.
+[tool.uv]
+environments = ["sys_platform == 'win32'"]

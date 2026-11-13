@@ -8,7 +8,7 @@ import os
 import json
 import logging
 from pathlib import Path
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, fields, asdict
 from typing import Optional, Dict, Any
 
 logger = logging.getLogger(__name__)
@@ -140,7 +140,12 @@ class SolidWorksConfig:
                 with open(config_path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                 logger.info(f"Loaded config from: {config_path}")
-                return cls(**data)
+                known = {f.name for f in fields(cls)}
+                unknown = sorted(set(data) - known)
+                if unknown:
+                    # One stray key must not silently discard the rest of the user's settings.
+                    logger.warning(f"Ignoring unknown config keys: {', '.join(unknown)}")
+                return cls(**{k: v for k, v in data.items() if k in known})
             except json.JSONDecodeError as e:
                 logger.error(f"Invalid JSON in config file: {e}")
             except TypeError as e:

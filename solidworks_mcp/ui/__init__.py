@@ -1,26 +1,23 @@
-"""
-SolidWorks MCP - Interactive UI & Fast-Bridge Package
-----------------------------------------------------
-Provides fast-bridge HTTP daemon, responsive CAD studio template,
-and parametric dimension slider generator.
-"""
+"""Interactive studio: A2UI surface builder and the local bridge that serves it."""
 
 from .bridge import (
     start_bridge,
     stop_bridge,
     get_bridge_port,
+    get_studio_url,
     is_bridge_running,
     set_automation_instance,
-    set_current_app_html,
-    FastBridgeServer,
+    set_session,
+    render_page,
 )
 
 __all__ = [
     "start_bridge",
     "stop_bridge",
     "get_bridge_port",
+    "get_studio_url",
     "is_bridge_running",
     "set_automation_instance",
-    "set_current_app_html",
-    "FastBridgeServer",
+    "set_session",
+    "render_page",
 ]

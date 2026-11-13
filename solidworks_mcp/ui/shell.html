@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SolidWorks Interactive Studio</title>
+<style>
+  :root { color-scheme: light dark; --a2ui-color-primary: #c8102e; }
+  html, body { margin: 0; }
+  body {
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+    background: Canvas; color: CanvasText;
+    padding: 12px; box-sizing: border-box;
+  }
+  #banner { margin: 0 0 8px; padding: 6px 10px; border-radius: 6px; font-size: 13px; background: color-mix(in srgb, CanvasText 8%, Canvas); }
+  #banner[data-kind="error"] { background: #fde8e8; color: #8a1c1c; }
+  #studio:empty::before { content: "Waiting for SolidWorks\2026"; opacity: .6; font-size: 14px; }
+</style>
+</head>
+<body>
+<!-- The layout below is not hand-written: it is rendered from A2UI 1.0 messages
+     (https://github.com/a2ui-project/a2ui) produced by solidworks_mcp/ui/a2ui.py. -->
+<div id="banner" role="status" hidden></div>
+<div id="studio"></div>
+<script>/*__SW_STUDIO_CONFIG__*/</script>
+<script>/*__SW_STUDIO_BUNDLE__*/</script>
+</body>
+</html>

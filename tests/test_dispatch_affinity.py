@@ -5,7 +5,7 @@ Asserts that in `solidworks_mcp/server.py`:
 2. All COM tool invocations are delegated via `sta.run_async` to `_execute_tool_on_sta` / `_dispatch_tool`.
 3. The only non-STA tools in `call_tool` are pure Win32 dialog tools (`inspect_dialogs`, `dismiss_dialog`)
    and administrative recovery (`reset_sta_worker`).
-4. All 51 COM tools defined in `_tool_definitions()` are mapped within `_dispatch_tool`.
+4. Every COM tool defined in `_tool_definitions()` has a handler in `_TOOL_HANDLERS`.
 """
 
 import ast
@@ -46,14 +46,9 @@ def test_sta_dispatcher_affinity_ast():
 
     assert forbidden_calls == [], f"Found forbidden direct COM calls on sw_automation inside call_tool:\n" + "\n".join(forbidden_calls)
 
-    # 3. Assert all tools handled in _dispatch_tool
-    dispatched_names = set()
-    for node in ast.walk(dispatch_tool_func):
-        if isinstance(node, ast.Compare):
-            if isinstance(node.left, ast.Name) and node.left.id == "name":
-                for comparator in node.comparators:
-                    if isinstance(comparator, ast.Constant) and isinstance(comparator.value, str):
-                        dispatched_names.add(comparator.value)
+    # 3. Every COM tool has an entry in the dispatch table used by _dispatch_tool
+    from solidworks_mcp.server import _TOOL_HANDLERS
+    dispatched_names = set(_TOOL_HANDLERS)
 
     # From tool definitions, verify COM tools are handled
     from solidworks_mcp.server import _tool_definitions

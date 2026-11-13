@@ -679,13 +679,13 @@ class FeatureOperations:
                             subfeat = next_sub() if callable(next_sub) else next_sub
                     except Exception:
                         pass
-                except:
+                except Exception:
                     pass
                 
                 # FIXED: GetNextFeature is a property in SW 2025
                 try:
                     feat = feat.GetNextFeature
-                except:
+                except Exception:
                     break
             
             return self._result(True, f"{len(features)} features found",

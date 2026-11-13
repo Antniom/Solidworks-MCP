@@ -23,3 +23,7 @@ knowledge/discovered/
 # Local runtime output
 solidworks_mcp/artifacts/
 backup_*/
+node_modules/
+.bundle_cache/
+.pytest_cache/
+*.solidworks-mcp.bak

@@ -29,6 +29,24 @@ except ImportError:
 logger = logging.getLogger("SolidWorksMCP.COMCompat")
 
 
+def get_object_member(obj: Any, name: str) -> Any:
+    """
+    Read a member that returns another COM object (FirstFeature, GetNextFeature, ...).
+
+    pywin32 exposes such members as a property on some builds and as a method on others.
+    The returned COM object is itself callable, so `callable()` cannot tell the two apart;
+    only a genuine bound method is invoked here.
+    """
+    import inspect
+    try:
+        value = getattr(obj, name)
+    except Exception:
+        return None
+    if inspect.ismethod(value) or inspect.isfunction(value) or inspect.isbuiltin(value):
+        return value()
+    return value
+
+
 def get_attr_or_call(obj: Any, name: str, *args, **kwargs) -> Any:
     """
     Safely access an attribute or invoke a method on a COM object.

@@ -36,11 +36,7 @@ from .dialog_manager import (
     DialogWatchdog,
 )
 
-from .auto_updater import check_and_apply_updates
-
 __all__ = [
-    # Auto-Updater
-    "check_and_apply_updates",
     # Units
     "Unit",
     "UnitConverter", 

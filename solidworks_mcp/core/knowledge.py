@@ -63,9 +63,10 @@ class KnowledgeManager:
 
     def __init__(self, base_dir: Optional[Path] = None):
         if base_dir is None:
-            # Default to repo root / knowledge
-            project_root = Path(__file__).resolve().parent.parent.parent
-            base_dir = project_root / "knowledge"
+            # User data lives outside the install/plugin folder, which is replaced on update.
+            import os
+            import tempfile
+            base_dir = Path(os.environ.get("LOCALAPPDATA") or tempfile.gettempdir()) / "solidworks-mcp" / "knowledge"
 
         self.base_dir = Path(base_dir)
         self._ensure_directories()

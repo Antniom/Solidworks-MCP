@@ -30,6 +30,16 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
+RUNNER_NOT_INSTALLED_MESSAGE = (
+    "The .NET runner was not found (expected in solidworks_mcp/bin/mecagent_runner), so runner-backed modes are unavailable. "
+    "Every other SolidWorks tool works without it. Reinstall the plugin, or set the MECAGENT_RUNNER_PATH "
+    "environment variable to MecAgent.SolidWorks.Runner.exe."
+)
+
+
+class RunnerNotInstalledError(FileNotFoundError):
+    """Raised when a runner-backed tool is used but no runner executable can be found."""
+
 
 # ============================================================================
 # Win32 Job Object Helper (auto-terminates child runner if parent exits)
@@ -587,7 +597,7 @@ class MecAgentRunnerBridge:
         if env_path and os.path.exists(env_path):
             return str(Path(env_path).resolve())
 
-        # Check bundled runner inside solidworks_mcp/bin/mecagent_runner
+        # Runner bundled with this package
         bundled = Path(__file__).resolve().parent.parent / "bin" / "mecagent_runner" / "MecAgent.SolidWorks.Runner.exe"
         if bundled.exists():
             return str(bundled)
@@ -603,7 +613,7 @@ class MecAgentRunnerBridge:
             if candidates:
                 return str(candidates[0])
 
-        return str(bundled)
+        return ""
 
     @property
     def is_running(self) -> bool:
@@ -618,9 +628,7 @@ class MecAgentRunnerBridge:
             self.shutdown()
 
             if not os.path.exists(self._runner_exe):
-                raise FileNotFoundError(
-                    f"MecAgent runner executable not found at: {self._runner_exe}"
-                )
+                raise RunnerNotInstalledError(RUNNER_NOT_INSTALLED_MESSAGE)
 
             # Create two anonymous pipes:
             # 1) host_to_runner: runner reads r_in, host writes w_in
@@ -639,7 +647,9 @@ class MecAgentRunnerBridge:
                 os.set_handle_inheritable(in_win_handle, True)
                 os.set_handle_inheritable(out_win_handle, True)
 
-                bundle_cache_dir = Path(self._bin_dir) / ".bundle_cache"
+                # Keep the compile cache out of the install/plugin folder, which is replaced on update.
+                cache_base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+                bundle_cache_dir = Path(cache_base) / "solidworks-mcp" / "runner-bundle-cache"
                 bundle_cache_dir.mkdir(parents=True, exist_ok=True)
 
                 cmd_args = [

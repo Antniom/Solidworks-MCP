@@ -1,6 +1,6 @@
 {
-  "name": "solidworks",
-  "version": "1.0.0",
+  "name": "solidcadworks",
+  "version": "5.0.0",
   "description": "Parametric 3D CAD modeling, interactive in-chat studio, FEA simulation, and drawing generation in Dassault Systèmes SolidWorks.",
   "author": {
     "name": "António Coelho"
@@ -16,7 +16,7 @@
   "skills": "./skills/",
   "mcpServers": "./codex.mcp.json",
   "interface": {
-    "displayName": "SolidWorks CAD",
+    "displayName": "SolidCADWorks",
     "shortDescription": "Parametric 3D CAD in SolidWorks",
     "longDescription": "Control Dassault Systèmes SolidWorks live in chat. Create parametric parts, adjust dimensions with interactive sliders, generate 2D engineering drawings, and run FEA stress simulations.",
     "developerName": "António Coelho",
