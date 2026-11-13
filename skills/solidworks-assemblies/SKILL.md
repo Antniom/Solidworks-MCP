@@ -54,8 +54,9 @@ For dialog and rebuild recovery, see `solidworks-diagnostics`.
 
 ### 2. Mating & Constraints (`add_mate`)
 - `mate_type`: `"coincident"`, `"concentric"`, `"perpendicular"`, `"parallel"`, `"tangent"`, `"distance"`, `"angle"`
-- `entity1`, `entity2`: Names or references of the two mating entities.
+- `entity1`, `entity2`: Names of the two mating entities: planes or features (e.g. `"Top Plane"`). Faces have no names, so for faces use `use_selection` instead.
 - `comp1`, `comp2`: Component instance names (e.g. `"bracket-1"`, `"shaft-1"`).
+- `use_selection`: `true` mates the two entities that are currently selected (see section 3). Omit `entity1`/`entity2` then. Clients with an older cached schema can pass `"entity1": "@selected", "entity2": "@selected"` instead.
 - `align`: `0` aligned (normals in the same direction), `1` anti-aligned (normals opposite), `2` closest
 - `distance`: Float value in `mm` (for `"distance"` mate type).
 - `angle`: Float value in degrees (for `"angle"` mate type).
@@ -63,7 +64,8 @@ For dialog and rebuild recovery, see `solidworks-diagnostics`.
 - `unit`: `"mm"`
 
 ### 3. Precision Selection for Mates (`select` by geometry)
-Never rely on guessed entity coordinates or broken face names. Use `select` (`"by": "geometry"`) to find exact mating features:
+Never rely on guessed entity coordinates or broken face names. Use `select` (`"by": "geometry"`) to find exact mating features.
+In an assembly it searches the component bodies and reports centroids and normals in **assembly** coordinates; add `"component": "pin-1"` to search one component only. Select the first face, select the second with `"append": true`, then call `add_mate` with `"use_selection": true`:
 - **Cylindrical Shafts & Bores (for Concentric Mates)**:
   ```json
   {
@@ -103,6 +105,7 @@ Never rely on guessed entity coordinates or broken face names. Use `select` (`"b
 1. **Document Pre-Loading is Mandatory for Components**:
    - In SolidWorks COM, calling `AddComponent4` fails if the referenced part document is not currently loaded into memory.
    - The MCP tool `add_component` automatically handles `sw.OpenDoc6` pre-loading and verified insertion.
+   - `x`, `y`, `z` place the component's **origin** (not its bounding-box centre); the tool checks the result and reports an error if the origin did not land there.
 2. **Concentric Mates Require Cylindrical Faces, Never Solid Features**:
    - When constraining pins, shafts, or holes, never attempt to select the whole feature (e.g. "Boss-Extrude1").
    - Select the specific cylindrical face using `select {"by": "geometry", "surface_type": "cylinder", "radius": ...}`.
@@ -139,25 +142,19 @@ add_component {
   "unit": "mm"
 }
 
-// 4. Concentric Mate: Housing Bore to Shaft Journal
-add_mate {
-  "mate_type": "concentric",
-  "comp1": "Gearbox_Housing-1",
-  "comp2": "Drive_Shaft-1",
-  "entity1": "Cylinder_Bore_Face",
-  "entity2": "Shaft_Journal_Face",
-  "align": 0
-}
+// 4. Concentric Mate: Housing Bore to Shaft Journal (select both faces, then mate the selection)
+select {"by": "geometry", "target_type": "face", "surface_type": "cylinder", "radius": 12.0, "component": "Gearbox_Housing-1"}
+select {"by": "geometry", "target_type": "face", "surface_type": "cylinder", "radius": 12.0, "component": "Drive_Shaft-1", "append": true}
+add_mate {"mate_type": "concentric", "use_selection": true, "align": 0}
 
-// 5. Coincident Mate: Housing Shoulder to Shaft Bearing Retainer Face
-add_mate {
-  "mate_type": "coincident",
-  "comp1": "Gearbox_Housing-1",
-  "comp2": "Drive_Shaft-1",
-  "entity1": "Shoulder_Flat_Face",
-  "entity2": "Shaft_Thrust_Face",
-  "align": 1
-}
+// 5. Coincident Mate: Housing Shoulder to Shaft Thrust Face
+//    (planar faces picked by a point that lies on them, in assembly coordinates)
+select {"by": "geometry", "target_type": "face", "surface_type": "plane", "point_on_surface": [0, 0, 40], "component": "Gearbox_Housing-1"}
+select {"by": "geometry", "target_type": "face", "surface_type": "plane", "point_on_surface": [0, 50, 40], "component": "Drive_Shaft-1", "append": true}
+add_mate {"mate_type": "coincident", "use_selection": true, "align": 1}
+
+// Named planes still work directly, without selecting first:
+add_mate {"mate_type": "coincident", "entity1": "Top Plane", "comp1": "Gearbox_Housing-1", "entity2": "Top Plane", "comp2": "Drive_Shaft-1"}
 
 // 6. Collision & Interference Verification
 check_interference {"treat_coincidence_as_interference": false}
