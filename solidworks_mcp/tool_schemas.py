@@ -31,26 +31,23 @@ def _build_tools() -> List[Tool]:
             }
         ),
         Tool(
-            name="get_solidworks_info",
-            description="Get SolidWorks installation information.",
-            inputSchema={"type": "object", "properties": {}, "required": []}
-        ),
-        Tool(
             name="get_capabilities",
-            description="Get comprehensive SolidWorks system capabilities, add-in status, and STA runtime diagnostics.",
+            description="SolidWorks installation details (path, version, templates), system capabilities, add-in status and STA runtime diagnostics. Works before connecting.",
             inputSchema={"type": "object", "properties": {}, "required": []}
         ),
         
         # Document Tools
         Tool(
-            name="create_new_part",
-            description="Create a new part document.",
-            inputSchema={"type": "object", "properties": {}, "required": []}
-        ),
-        Tool(
-            name="create_new_assembly",
-            description="Create a new assembly document.",
-            inputSchema={"type": "object", "properties": {}, "required": []}
+            name="create_document",
+            description="Create a new part, assembly or drawing document.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "type": {"type": "string", "enum": ["part", "assembly", "drawing"], "default": "part", "description": "Document type"},
+                    "paper_size": {"type": "string", "enum": ["A4", "A3", "A2", "A1", "Letter"], "default": "A4", "description": "Sheet size (drawings only)"}
+                },
+                "required": []
+            }
         ),
         Tool(
             name="open_document",
@@ -146,7 +143,10 @@ def _build_tools() -> List[Tool]:
         # Sketch Tools
         Tool(
             name="create_sketch",
-            description="Create a new sketch on a plane, an offset reference plane, or a body face by 1-based face_index.",
+            description=(
+                "Create a new sketch on a reference plane (optionally offset), on a body face by 1-based face_index, "
+                "or on the body face found at face_point. Sketch on faces rather than planes for cuts into existing geometry."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -164,27 +164,14 @@ def _build_tools() -> List[Tool]:
                     "face_index": {
                         "type": "integer",
                         "minimum": 1,
-                        "description": "Optional 1-based face index on body 1 to sketch on instead of a reference plane"
+                        "description": "1-based face index on body 1 to sketch on instead of a reference plane (see list_topology)"
                     },
+                    "face_point": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3, "description": "Point [x, y, z] lying on an existing body face to sketch on instead of a reference plane"},
                     "unit": {
                         "type": "string",
                         "enum": ["mm", "inch", "m", "cm"],
-                        "description": "Unit for offset distance"
+                        "description": "Unit for offset distance and face_point"
                     }
-                },
-                "required": []
-            }
-        ),
-        Tool(
-            name="create_sketch_on_face",
-            description="Create a new sketch on an existing body face (by 3D coordinates). Use for cut-extrude on faces instead of reference planes.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "x": {"type": "number", "default": 0, "description": "X coordinate on the face"},
-                    "y": {"type": "number", "default": 0, "description": "Y coordinate on the face"},
-                    "z": {"type": "number", "default": 0, "description": "Z coordinate on the face"},
-                    "unit": {"type": "string", "description": "Unit (mm, inch, m)"}
                 },
                 "required": []
             }
@@ -341,9 +328,24 @@ def _build_tools() -> List[Tool]:
             }
         ),
         Tool(
-            name="list_features",
-            description="List all features in the model.",
-            inputSchema={"type": "object", "properties": {}, "required": []}
+            name="get_feature_tree",
+            description=(
+                "Read the model's feature tree. detail='list': every feature and sub-feature with type and suppression "
+                "state. detail='parametric' (.NET runner, parts only): full JSON description with typed feature "
+                "parameters, global equations and sketches with closed profile loops and dimensions. detail='context' "
+                "(.NET runner, fast): open documents, active document info, custom properties, current selections and a "
+                "depth-limited feature/assembly/mate tree; a good first call on an unfamiliar model."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "detail": {"type": "string", "enum": ["list", "parametric", "context"], "default": "list", "description": "How much to return"},
+                    "depth": {"type": "integer", "default": 2, "minimum": 0, "maximum": 5, "description": "context only: tree expansion depth (0 = summary)"},
+                    "target_path": {"type": "string", "description": "context only: slash-delimited feature/component path to expand"},
+                    "document_name": {"type": "string", "description": "context only: open document title to inspect without activating it"}
+                },
+                "required": []
+            }
         ),
         Tool(
             name="get_dimensions",
@@ -540,43 +542,38 @@ def _build_tools() -> List[Tool]:
             }
         ),
         Tool(
-            name="execute_python",
+            name="execute_code",
             description=(
-                "Execute custom Python code in a persistent stateful namespace ('sw', 'doc', 'automation', 'FinalAnswer') "
-                "with stdout capture, optional read_only fingerprint guard, and auto_transaction rollback on error. "
-                "SECURITY GATE: Disabled by default. If invoked without prior confirmation, it refuses execution and returns a "
-                "structured prompt instructing the calling AI agent to ask the human user for explicit consent. "
-                "To unlock: set environment variable SW_MCP_ALLOW_EXEC=1, enable in config, or re-invoke with user_confirmed_risks=true "
-                "after user explicitly agrees in chat."
+                "Run custom code against the live SolidWorks session when no dedicated tool fits. "
+                "language='python': persistent namespace with `sw`, `doc`, `automation`, `FinalAnswer(value)`; stdout is captured. "
+                "language='csharp' (.NET runner): stateful Roslyn cell with pre-bound `ISldWorks swApp`, `FinalAnswer(string)`, "
+                "`Print(object)`, `SharedPath(string)`, `WorkPath(string)` and automatic COM interface cast repair. "
+                "language='csharp_macro' (.NET runner): a full `public class DynamicClass { public static object Execute(...) }` source. "
+                "SECURITY GATE: disabled by default. Without prior consent it refuses and tells you to ask the human user. "
+                "To unlock: re-invoke with user_confirmed_risks=true after the user explicitly agrees in chat, or start the "
+                "server with SW_MCP_ALLOW_EXEC=1."
             ),
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "code": {"type": "string", "description": "Python code to execute"},
+                    "language": {"type": "string", "enum": ["python", "csharp", "csharp_macro"], "description": "Language / execution mode"},
+                    "code": {"type": "string", "description": "Source code to execute"},
                     "user_confirmed_risks": {
                         "type": "boolean",
-                        "description": (
-                            "Explicit affirmative confirmation from the human user in chat acknowledging arbitrary Python execution risks and benefits."
-                        ),
-                        "default": False
-                    },
-                    "reset_session": {
-                        "type": "boolean",
                         "default": False,
-                        "description": "Clear persistent Python session variables before running this snippet"
+                        "description": "Set true only after the human user has explicitly agreed in chat to arbitrary code execution."
                     },
+                    "reset_session": {"type": "boolean", "default": False, "description": "python, csharp: clear the persistent session before running"},
                     "read_only": {
                         "type": "boolean",
                         "default": False,
-                        "description": "Enforce read-only execution: rolls back and errors if volume or feature count changes"
+                        "description": "python: roll back and fail if volume or feature count changed. C#: refuse to run code that static analysis classifies as mutating."
                     },
-                    "auto_transaction": {
-                        "type": "boolean",
-                        "default": True,
-                        "description": "Wrap execution in an Undo checkpoint and auto-rollback if an unhandled exception occurs"
-                    }
+                    "auto_transaction": {"type": "boolean", "default": True, "description": "python: undo the script's changes if it raises"},
+                    "parameters": {"type": "array", "items": {}, "description": "csharp_macro: arguments passed to DynamicClass.Execute"},
+                    "timeout_ms": {"type": "integer", "default": 120000, "description": "C#: maximum execution time in milliseconds"}
                 },
-                "required": ["code"]
+                "required": ["language", "code"]
             }
         ),
         
@@ -602,144 +599,83 @@ def _build_tools() -> List[Tool]:
             }
         ),
         Tool(
-            name="select_entity",
-            description="Declarative entity selection by name, 3D coordinate point, or geometric direction/normal.",
+            name="select",
+            description=(
+                "Select model entities. Choose the method with `by`: "
+                "'name' - a named plane, feature or body (name), or planar faces by `direction`; "
+                "'point' - the entity under a 3D `point`; "
+                "'geometry' - faces/edges/vertices matching filters (surface_type, normal, radius, curve_type, length, midpoint, point, bbox); "
+                "'centroid' - the face whose centroid, or edge whose midpoint, is at x/y/z in mm (indices come from list_topology); "
+                "'path' - a topology path such as 'Boss-Extrude1/Face[0]/Edge[2]' (.NET runner). "
+                "Prefer 'geometry' when you can describe the entity and 'centroid' when you have coordinates from list_topology."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
+                    "by": {"type": "string", "enum": ["name", "point", "geometry", "centroid", "path"], "description": "Selection method"},
                     "target_type": {
                         "type": "string",
                         "enum": ["plane", "feature", "face", "edge", "vertex", "body"],
                         "default": "face",
-                        "description": "Entity category"
+                        "description": "Entity category (geometry: face/edge/vertex; centroid: face/edge)"
                     },
-                    "name": {"type": "string", "description": "Entity name (e.g. 'Front Plane', 'Boss-Extrude1')"},
-                    "x": {"type": "number", "description": "Target X coordinate"},
-                    "y": {"type": "number", "description": "Target Y coordinate"},
-                    "z": {"type": "number", "description": "Target Z coordinate"},
-                    "unit": {"type": "string", "default": "mm", "enum": ["mm", "inch", "m", "cm"], "description": "Coordinate unit"},
-                    "direction": {"type": "string", "enum": ["top", "bottom", "front", "back", "left", "right"], "description": "Planar face normal direction"},
-                    "mark": {"type": "integer", "default": 0, "description": "Selection mark"},
-                    "append": {"type": "boolean", "default": False, "description": "Append to current selection"}
-                },
-                "required": ["target_type"]
-            }
-        ),
-        Tool(
-            name="select_by_geometry",
-            description="Select model entities (faces, edges, vertices) using geometric filters such as surface type, face normal, radius, edge curve type, edge length, midpoint, point, and bounding box.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "target_type": {
-                        "type": "string",
-                        "enum": ["face", "edge", "vertex"],
-                        "default": "face",
-                        "description": "Target entity category"
-                    },
+                    "name": {"type": "string", "description": "name: entity name (e.g. 'Front Plane', 'Boss-Extrude1')"},
+                    "direction": {"type": "string", "enum": ["top", "bottom", "front", "back", "left", "right"], "description": "name/point: planar face normal direction"},
+                    "point": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3, "description": "point: a point on the entity. geometry: the vertex location [x, y, z]"},
+                    "path": {"type": "string", "description": "path: slash-delimited topology path"},
+                    "x": {"type": "number", "description": "centroid: expected X in mm (omit to ignore)"},
+                    "y": {"type": "number", "description": "centroid: expected Y in mm (omit to ignore)"},
+                    "z": {"type": "number", "description": "centroid: expected Z in mm (omit to ignore)"},
+                    "tolerance": {"type": "number", "default": 0.5, "description": "centroid: coordinate tolerance in mm"},
+                    "body_index": {"type": "integer", "default": 1, "minimum": 1, "description": "centroid: 1-based solid body index"},
+                    "min_area": {"type": "number", "default": 10.0, "description": "centroid: minimum face area in mm^2"},
+                    "locate_only": {"type": "boolean", "default": False, "description": "centroid: return the 1-based index without selecting"},
                     "surface_type": {
                         "type": "string",
                         "enum": ["plane", "cylinder", "cone", "sphere", "torus", "bspline"],
-                        "description": "Surface geometry filter (for faces)"
+                        "description": "geometry/centroid: surface type of the face (centroid defaults to plane)"
                     },
-                    "normal": {
-                        "type": "array",
-                        "items": {"type": "number"},
-                        "minItems": 3,
-                        "maxItems": 3,
-                        "description": "Target face normal unit vector [nx, ny, nz] (for planar faces)"
-                    },
-                    "normal_tolerance": {
-                        "type": "number",
-                        "default": 0.05,
-                        "description": "Tolerance for normal matching"
-                    },
-                    "radius": {
-                        "type": "number",
-                        "description": "Radius for cylindrical/spherical faces or circular edges"
-                    },
-                    "radius_tolerance": {
-                        "type": "number",
-                        "default": 0.05,
-                        "description": "Tolerance for radius matching"
-                    },
-                    "point_on_surface": {
-                        "type": "array",
-                        "items": {"type": "number"},
-                        "minItems": 3,
-                        "maxItems": 3,
-                        "description": "3D coordinate that must lie on target face [x, y, z]"
-                    },
-                    "curve_type": {
-                        "type": "string",
-                        "enum": ["line", "circle", "arc", "bspline"],
-                        "description": "Curve type filter (for edges)"
-                    },
-                    "length": {
-                        "type": "number",
-                        "description": "Edge length filter"
-                    },
-                    "length_tolerance": {
-                        "type": "number",
-                        "default": 0.1,
-                        "description": "Tolerance for edge length matching"
-                    },
-                    "midpoint": {
-                        "type": "array",
-                        "items": {"type": "number"},
-                        "minItems": 3,
-                        "maxItems": 3,
-                        "description": "Target edge midpoint [x, y, z]"
-                    },
-                    "point": {
-                        "type": "array",
-                        "items": {"type": "number"},
-                        "minItems": 3,
-                        "maxItems": 3,
-                        "description": "Target vertex point [x, y, z]"
-                    },
-                    "bbox_min": {
-                        "type": "array",
-                        "items": {"type": "number"},
-                        "minItems": 3,
-                        "maxItems": 3,
-                        "description": "Bounding box minimum [xmin, ymin, zmin]"
-                    },
-                    "bbox_max": {
-                        "type": "array",
-                        "items": {"type": "number"},
-                        "minItems": 3,
-                        "maxItems": 3,
-                        "description": "Bounding box maximum [xmax, ymax, zmax]"
-                    },
-                    "mark": {
-                        "type": "integer",
-                        "default": 0,
-                        "description": "Selection mark"
-                    },
-                    "append": {
-                        "type": "boolean",
-                        "default": False,
-                        "description": "Append to current selection (False clears previous selection)"
-                    },
-                    "unit": {
-                        "type": "string",
-                        "default": "mm",
-                        "enum": ["mm", "inch", "m", "cm"],
-                        "description": "Coordinate/length/radius unit"
-                    }
+                    "normal": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3, "description": "geometry: face normal unit vector [nx, ny, nz]"},
+                    "normal_tolerance": {"type": "number", "default": 0.05, "description": "geometry: tolerance for normal matching"},
+                    "radius": {"type": "number", "description": "geometry: radius of cylindrical/spherical faces or circular edges"},
+                    "radius_tolerance": {"type": "number", "default": 0.05, "description": "geometry: tolerance for radius matching"},
+                    "point_on_surface": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3, "description": "geometry: a point that must lie on the face [x, y, z]"},
+                    "curve_type": {"type": "string", "enum": ["line", "circle", "arc", "bspline"], "description": "geometry: edge curve type"},
+                    "length": {"type": "number", "description": "geometry: edge length"},
+                    "length_tolerance": {"type": "number", "default": 0.1, "description": "geometry: tolerance for edge length matching"},
+                    "midpoint": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3, "description": "geometry: edge midpoint [x, y, z]"},
+                    "bbox_min": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3, "description": "geometry: bounding box minimum [xmin, ymin, zmin]"},
+                    "bbox_max": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3, "description": "geometry: bounding box maximum [xmax, ymax, zmax]"},
+                    "mark": {"type": "integer", "default": 0, "description": "Selection mark"},
+                    "append": {"type": "boolean", "default": False, "description": "Add to the current selection instead of replacing it"},
+                    "unit": {"type": "string", "enum": ["mm", "inch", "m", "cm"], "description": "Unit for name/point/geometry coordinates"}
                 },
-                "required": []
+                "required": ["by"]
             }
         ),
         Tool(
             name="capture_viewport",
-            description="Capture high-resolution image of the 3D viewport to a PNG or JPG file.",
+            description=(
+                "Save an image of the model. mode='view': one named view (*Isometric, *Front, *Top, *Right, *Back, *Left, "
+                "*Bottom or a custom view) to PNG/JPG. mode='overview' (.NET runner): a stitched seven-view sheet plus up to "
+                "four zoomed detail crops. mode='showcase': set display style and an explicit camera, then capture."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "filepath": {"type": "string", "description": "Output image path (optional)"},
-                    "view_name": {"type": "string", "default": "*Isometric", "description": "Named view orientation"}
+                    "mode": {"type": "string", "enum": ["view", "overview", "showcase"], "default": "view", "description": "Capture mode"},
+                    "filepath": {"type": "string", "description": "view/showcase: output image path (optional)"},
+                    "view_name": {"type": "string", "default": "*Isometric", "description": "view: named view orientation"},
+                    "save_dir": {"type": "string", "description": "overview: directory for overview_<ts>.png and detail_<ts>.png"},
+                    "eye_mm": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3, "description": "showcase: camera eye position [x, y, z] in mm"},
+                    "target_mm": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3, "description": "showcase: camera target point [x, y, z] in mm"},
+                    "up_vec": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3, "description": "showcase: camera up vector [ux, uy, uz]"},
+                    "display_style": {
+                        "type": "string",
+                        "enum": ["shaded_with_edges", "realistic", "shaded", "wireframe", "hidden_lines_removed"],
+                        "default": "shaded_with_edges",
+                        "description": "showcase: viewport rendering style"
+                    }
                 },
                 "required": []
             }
@@ -872,22 +808,6 @@ def _build_tools() -> List[Tool]:
         ),
 
         # Drawing Tools (Phase 3)
-        Tool(
-            name="create_new_drawing",
-            description="Create a new 2D drawing document with specified sheet size.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "paper_size": {
-                        "type": "string",
-                        "default": "A4",
-                        "enum": ["A4", "A3", "A2", "A1", "Letter"],
-                        "description": "Paper sheet size"
-                    }
-                },
-                "required": []
-            }
-        ),
         Tool(
             name="create_drawing_from_model",
             description="Create a new drawing and insert an initial model view.",
@@ -1169,29 +1089,6 @@ def _build_tools() -> List[Tool]:
                 "required": ["id", "title", "problem", "successful_approach"]
             }
         ),
-        Tool(
-            name="create_checkpoint",
-            description="Create a named modeling checkpoint (feature tree watermark & file snapshot) to protect against failures.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string", "description": "Unique identifier for this checkpoint"},
-                    "description": {"type": "string", "description": "Optional notes on modeling progress"}
-                },
-                "required": ["name"]
-            }
-        ),
-        Tool(
-            name="rollback_checkpoint",
-            description="Roll back the model to a previous checkpoint, deleting failed features and restoring clean geometry.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string", "description": "Name of the checkpoint to restore"}
-                },
-                "required": ["name"]
-            }
-        ),
 
         # Diagnostics & Recovery Tools
         Tool(
@@ -1236,195 +1133,25 @@ def _build_tools() -> List[Tool]:
 
         # MecAgent .NET 10 Runner & C# CAD SDK Tools
         Tool(
-            name="sw_execute_csharp",
+            name="inspect_topology",
             description=(
-                "Execute a C# cell in MecAgent's stateful out-of-process .NET 10 Roslyn REPL (CellSession) "
-                "with pre-bound `ISldWorks swApp`, `FinalAnswer(string)` / `final_answer(string)`, `Print(object)`, "
-                "`SharedPath(string)`, `WorkPath(string)`, automatic `CS1061` COM interface cast repair (`CastRepair`), "
-                "static 12,780-member SolidWorks API effect classification (`sw-api-effects.json`), and runtime "
-                "`DocumentFingerprint` verification."
+                "Inspect the model's B-Rep and feature hierarchy at a slash-delimited path (.NET runner). '' or '/' gives "
+                "the root overview, 'FeatureName' its faces/edges/parameters, 'FeatureName/Face[0]' the face area, normal, "
+                "UV bounds and adjacent edges with dihedral angles. With edges=true, returns every edge of the face at "
+                "`path` (or of the selected face if path is empty) with type, start/end/mid coordinates in mm and length."
             ),
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "user_confirmed_risks": {
-                        "type": "boolean",
-                        "default": False,
-                        "description": "Set true only after the human user has explicitly agreed in chat to arbitrary code execution. Same gate as execute_python."
-                    },
-                    "code": {
-                        "type": "string",
-                        "description": "C# code cell (statements and optional trailing return expression) to compile and execute in the stateful Roslyn session"
-                    },
-                    "read_only_only": {
-                        "type": "boolean",
-                        "default": False,
-                        "description": "If true, statically block execution when CellEffectAnalyzer classifies the cell as mutating"
-                    },
-                    "timeout_ms": {
-                        "type": "integer",
-                        "default": 120000,
-                        "description": "Maximum execution time in milliseconds (default: 120000)"
-                    },
-                    "reset_session": {
-                        "type": "boolean",
-                        "default": False,
-                        "description": "If true, reset the stateful Roslyn C# REPL session before running this cell"
-                    }
-                },
-                "required": ["code"]
-            }
-        ),
-        Tool(
-            name="sw_execute_macro",
-            description=(
-                "Compile and execute a full C# `DynamicClass.Execute` macro via MecAgent's `ProgramRunner` "
-                "in a collectible `AssemblyLoadContext`, with automatic `CodeTransformer` COM timeout wrappers "
-                "(`GetErrorCode2`, `Feature.Name`) and static 12,780-member API effect classification."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "user_confirmed_risks": {
-                        "type": "boolean",
-                        "default": False,
-                        "description": "Set true only after the human user has explicitly agreed in chat to arbitrary code execution. Same gate as execute_python."
-                    },
-                    "code": {
-                        "type": "string",
-                        "description": "Full C# source defining `public class DynamicClass { public static object Execute(...) { ... } }`"
-                    },
-                    "parameters": {
-                        "type": "array",
-                        "items": {},
-                        "description": "Optional parameter array passed to `DynamicClass.Execute`"
-                    },
-                    "read_only_only": {
-                        "type": "boolean",
-                        "default": False,
-                        "description": "If true, statically block execution when CellEffectAnalyzer classifies the macro as mutating"
-                    },
-                    "timeout_ms": {
-                        "type": "integer",
-                        "default": 120000,
-                        "description": "Maximum execution time in milliseconds (default: 120000)"
-                    }
-                },
-                "required": ["code"]
-            }
-        ),
-        Tool(
-            name="sw_capture_views",
-            description=(
-                "Capture MecAgent's stitched 7-view overview sheet (`1920x720` PNG: Front, Back, Left, Right, "
-                "Top, Bottom + Isometric) and up to 4 zoomed 3D feature-detail crops (`detail.png`) via `ViewCapture` and `ViewStitcher`."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "save_dir": {
-                        "type": "string",
-                        "description": "Optional directory path to save `overview_<ts>.png` and `detail_<ts>.png`"
-                    }
+                    "path": {"type": "string", "default": "", "description": "Slash-delimited path to inspect"},
+                    "show_equations": {"type": "boolean", "default": False, "description": "Include equation details for the root or a feature"},
+                    "edges": {"type": "boolean", "default": False, "description": "Analyze the edges of the face at `path`"}
                 },
                 "required": []
             }
         ),
         Tool(
-            name="sw_get_context_fast",
-            description=(
-                "High-speed (<50ms) SolidWorks context snapshot via MecAgent's `MCPMethods.getContextFast`: "
-                "open documents, active document info, resolved custom & cut-list properties, active viewport "
-                "selections with owning feature resolution (`SelectionOwnership`), and depth-controlled ASCII "
-                "feature/assembly/mate tree with UI updates frozen."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "depth": {
-                        "type": "integer",
-                        "default": 2,
-                        "minimum": 0,
-                        "maximum": 5,
-                        "description": "Feature/assembly tree expansion depth (0 = summary, 1-5 = tree depth)"
-                    },
-                    "target_path": {
-                        "type": "string",
-                        "description": "Optional slash-delimited feature/component path to expand specifically"
-                    },
-                    "document_name": {
-                        "type": "string",
-                        "description": "Optional open document title to inspect without switching active document"
-                    }
-                },
-                "required": []
-            }
-        ),
-        Tool(
-            name="sw_get_feature_tree_json",
-            description=(
-                "Build a complete parametric JSON Intermediate Representation (IR) of the active Part document "
-                "via `PartFeatureTreeJsonBuilder.Build`, including global equations, typed feature parameter "
-                "definitions (`GetDefinition`/`AccessSelections`), and 2D sketches with reconstructed closed "
-                "profile loops (`BuildSketchLoops`) and matched dimensions/constraints (`EntitySig`)."
-            ),
-            inputSchema={"type": "object", "properties": {}, "required": []}
-        ),
-        Tool(
-            name="sw_select_by_path",
-            description=(
-                "Select any SolidWorks feature, sketch, body, face, edge, or component using MecAgent's "
-                "deterministic slash-delimited topological path syntax (e.g., `'Boss-Extrude1'`, "
-                "`'Boss-Extrude1/Face[0]'`, `'Boss-Extrude1/Face[0]/Edge[2]'`, `'Component1/SubComp/Feature'`)."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Slash-delimited topological path to select"
-                    },
-                    "multi_select": {
-                        "type": "boolean",
-                        "default": False,
-                        "description": "Append to current selection instead of clearing"
-                    },
-                    "mark": {
-                        "type": "integer",
-                        "default": 0,
-                        "description": "Selection mark integer for `SelectByID2` / feature operations"
-                    }
-                },
-                "required": ["path"]
-            }
-        ),
-        Tool(
-            name="sw_navigate_topology",
-            description=(
-                "Inspect and navigate the active model's B-Rep & feature hierarchy at a given slash-delimited path "
-                "via `SolidworksSelectionController.Navigate` (use `''` or `'/'` for root overview, `'FeatureName'` "
-                "for faces/edges/parameters, `'FeatureName/Face[0]'` for face area, normal, UV bounds, sketch origin "
-                "offset `(centerU, centerV)`, and adjacent edges with dihedral angles)."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "default": "",
-                        "description": "Slash-delimited path to inspect (`''` or `'/'` for root)"
-                    },
-                    "show_equations": {
-                        "type": "boolean",
-                        "default": False,
-                        "description": "Include equation details when inspecting root or features"
-                    }
-                },
-                "required": []
-            }
-        ),
-        Tool(
-            name="sw_find_related_files",
+            name="find_related_files",
             description=(
                 "Discover all related CAD files (parts, sub-assemblies, parent assemblies, and referencing `.SLDDRW` "
                 "drawings) for the active document via `CadDataDiscoveryController.FindRelatedFiles`, including "
@@ -1444,26 +1171,7 @@ def _build_tools() -> List[Tool]:
             }
         ),
         Tool(
-            name="sw_get_edge_analysis",
-            description=(
-                "Analyze all edges on a selected face path via `SolidworksConnexionController.GetEdgeAnalysis` "
-                "(e.g. `'Boss-Extrude1/Face[0]'`), returning edge index, type, start/end/mid 3D coordinates (mm), "
-                "length (mm), and selection syntax."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "face_path": {
-                        "type": "string",
-                        "default": "",
-                        "description": "Slash-delimited face path (e.g. 'Boss-Extrude1/Face[0]') or empty for currently selected face"
-                    }
-                },
-                "required": []
-            }
-        ),
-        Tool(
-            name="sw_modify_feature_parameter_by_path",
+            name="modify_feature_by_path",
             description=(
                 "Modify feature parameters directly by feature path via `SolidworksModificationController.ModifyFeatureParameterByPath` "
                 "(e.g. extrusion depth_mm, reverse_direction, draft_enabled, draft_angle_deg, or fillet_radius_mm) with automatic rebuild."
@@ -1535,94 +1243,39 @@ def _build_tools() -> List[Tool]:
             }
         ),
         Tool(
-            name="get_parameters",
-            description="Get all SolidWorks Global Variables, Equations (IEquationMgr), and Model Dimensions.",
-            inputSchema={"type": "object", "properties": {}, "required": []}
-        ),
-        Tool(
-            name="add_parameter",
-            description="Add a new Global Variable or Equation to SolidWorks IEquationMgr (e.g. name='Width', expression='100mm').",
+            name="manage_parameters",
+            description=(
+                "Global variables and equations. 'list': all global variables, equations and model dimensions. "
+                "'add': a new global variable or equation (name='Width', expression='100mm'). "
+                "'set': change an existing variable, equation or dimension expression and rebuild."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "name": {"type": "string", "description": "Parameter or dimension name (e.g. 'Width' or 'D1@Sketch1')"},
-                    "expression": {"type": "string", "description": "Value or formula expression (e.g. '100mm' or '\"Width\" * 2')"},
+                    "action": {"type": "string", "enum": ["list", "add", "set"], "default": "list", "description": "Parameter action"},
+                    "name": {"type": "string", "description": "add/set: parameter or dimension name (e.g. 'Width' or 'D1@Sketch1')"},
+                    "expression": {"type": "string", "description": "add/set: value or formula (e.g. '100mm' or '\"Width\" * 2')"},
                     "units": {"type": "string", "default": "mm", "description": "Units (default: mm)"}
                 },
-                "required": ["name", "expression"]
-            }
-        ),
-        Tool(
-            name="set_parameter",
-            description="Update an existing Global Variable, Equation, or Model Dimension expression and rebuild.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string", "description": "Parameter or dimension name"},
-                    "expression": {"type": "string", "description": "New value or formula expression"},
-                    "units": {"type": "string", "default": "mm", "description": "Units (default: mm)"}
-                },
-                "required": ["name", "expression"]
-            }
-        ),
-        Tool(
-            name="list_faces",
-            description="Compact 1-line-per-face topology table: '[i] Plane A=90000 c=(0.0,225.0,12.5) n=(0,0,1)'.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "body_index": {"type": "integer", "default": 1, "minimum": 1, "description": "1-based solid body index"},
-                    "min_area": {"type": "number", "default": 0.0, "description": "Minimum face area filter in mm²"},
-                    "max_count": {"type": "integer", "default": 60, "minimum": 1, "description": "Max faces to list"}
-                },
                 "required": []
             }
         ),
         Tool(
-            name="list_edges",
-            description="Compact 1-line-per-edge topology table: '[i] L=200.0 mid=(0.0,-225.0,0.8)'.",
+            name="list_topology",
+            description=(
+                "Compact one-line-per-entity table of a body's faces or edges with 1-based indices. "
+                "Faces: '[i] Plane A=90000 c=(0.0,225.0,12.5) n=(0,0,1)'. Edges: '[i] L=200.0 mid=(0.0,-225.0,0.8)'. "
+                "Use the indices for create_sketch face_index and flange edge_indices, and the coordinates for select by='centroid'."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
+                    "kind": {"type": "string", "enum": ["faces", "edges"], "description": "What to list"},
                     "body_index": {"type": "integer", "default": 1, "minimum": 1, "description": "1-based solid body index"},
-                    "min_length": {"type": "number", "default": 0.0, "description": "Minimum edge length filter in mm"},
-                    "max_count": {"type": "integer", "default": 60, "minimum": 1, "description": "Max edges to list"}
+                    "min_size": {"type": "number", "default": 0.0, "description": "Minimum face area in mm^2, or minimum edge length in mm"},
+                    "max_count": {"type": "integer", "default": 60, "minimum": 1, "description": "Maximum entities to list"}
                 },
-                "required": []
-            }
-        ),
-        Tool(
-            name="find_face",
-            description="Locate a body face by its centroid coordinates (mm) and optionally select it. Returns 1-based face index.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "body_index": {"type": "integer", "default": 1, "minimum": 1, "description": "1-based solid body index"},
-                    "x": {"type": "number", "description": "Expected centroid X in mm (omit to ignore)"},
-                    "y": {"type": "number", "description": "Expected centroid Y in mm (omit to ignore)"},
-                    "z": {"type": "number", "description": "Expected centroid Z in mm (omit to ignore)"},
-                    "min_area": {"type": "number", "default": 10.0, "description": "Minimum face area in mm²"},
-                    "surface_type": {"type": "string", "default": "plane", "description": "Surface type ('plane', 'cylinder', or '')"},
-                    "tolerance": {"type": "number", "default": 0.5, "description": "Centroid coordinate tolerance in mm"},
-                    "select": {"type": "boolean", "default": True, "description": "Select the matched face in SolidWorks"}
-                },
-                "required": []
-            }
-        ),
-        Tool(
-            name="find_edge",
-            description="Locate a body edge by its midpoint coordinates (mm) and optionally select it. Returns 1-based edge index.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "body_index": {"type": "integer", "default": 1, "minimum": 1, "description": "1-based solid body index"},
-                    "x": {"type": "number", "description": "Expected midpoint X in mm (omit to ignore)"},
-                    "y": {"type": "number", "description": "Expected midpoint Y in mm (omit to ignore)"},
-                    "z": {"type": "number", "description": "Expected midpoint Z in mm (omit to ignore)"},
-                    "tolerance": {"type": "number", "default": 0.5, "description": "Midpoint coordinate tolerance in mm"},
-                    "select": {"type": "boolean", "default": True, "description": "Select the matched edge in SolidWorks"}
-                },
-                "required": []
+                "required": ["kind"]
             }
         ),
         Tool(
@@ -1782,44 +1435,6 @@ def _build_tools() -> List[Tool]:
             }
         ),
         Tool(
-            name="render_showcase_viewport",
-            description="Configure viewport display style ('shaded_with_edges', 'realistic', 'shaded', 'wireframe') and 3D camera eye/target/up vectors, then capture showcase PNG.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "eye_mm": {
-                        "type": "array",
-                        "items": {"type": "number"},
-                        "minItems": 3,
-                        "maxItems": 3,
-                        "description": "Optional camera eye position [x, y, z] in mm"
-                    },
-                    "target_mm": {
-                        "type": "array",
-                        "items": {"type": "number"},
-                        "minItems": 3,
-                        "maxItems": 3,
-                        "description": "Optional camera target point [x, y, z] in mm"
-                    },
-                    "up_vec": {
-                        "type": "array",
-                        "items": {"type": "number"},
-                        "minItems": 3,
-                        "maxItems": 3,
-                        "description": "Optional camera up vector [ux, uy, uz]"
-                    },
-                    "display_style": {
-                        "type": "string",
-                        "enum": ["shaded_with_edges", "realistic", "shaded", "wireframe", "hidden_lines_removed"],
-                        "default": "shaded_with_edges",
-                        "description": "Viewport rendering style"
-                    },
-                    "filepath": {"type": "string", "description": "Optional output image path"}
-                },
-                "required": []
-            }
-        ),
-        Tool(
             name="supervisor_clean_processes",
             description="Audit all running SolidWorks processes, identify orphaned headless zombies (not in ROT or no window), and optionally terminate them when confirm=True.",
             inputSchema={
@@ -1838,20 +1453,23 @@ def _build_tools() -> List[Tool]:
         Tool(
             name="transaction",
             description=(
-                "Wrap multi-step CAD operations in a transaction ('begin', 'commit', 'abort') with volume delta tracking. "
-                "'abort' deletes features added since 'begin' and undoes other geometry changes; it reports failure "
-                "if the geometry could not be restored. Renames and other non-geometric edits are not rolled back."
+                "Protect multi-step edits. 'begin' / 'commit' / 'abort' bracket a batch with volume-delta tracking: abort "
+                "deletes features added since begin and undoes other geometry changes, and reports failure if the "
+                "geometry could not be restored (renames and other non-geometric edits are not rolled back). "
+                "'checkpoint' records a named point in the feature tree and saves a backup copy of the document; "
+                "'rollback' deletes every feature added after that checkpoint."
             ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["begin", "commit", "abort"],
+                        "enum": ["begin", "commit", "abort", "checkpoint", "rollback"],
                         "default": "begin",
                         "description": "Transaction action"
                     },
-                    "name": {"type": "string", "default": "MCP batch", "description": "Transaction label"}
+                    "name": {"type": "string", "description": "Transaction label, or the checkpoint name (required for checkpoint/rollback)"},
+                    "description": {"type": "string", "description": "checkpoint: optional note"}
                 },
                 "required": []
             }
@@ -1865,11 +1483,6 @@ def _build_tools() -> List[Tool]:
 
     for t in tools:
         schema = t.input_schema
-        if t.name in ("sw_execute_csharp", "sw_execute_macro"):
-            t.description = (t.description or "") + (
-                " SECURITY GATE: locked by default, exactly like execute_python (ask the user, then pass "
-                "user_confirmed_risks=true, or set SW_MCP_ALLOW_EXEC=1)."
-            )
         schema["additionalProperties"] = False
         for p_name, p_spec in schema.get("properties", {}).items():
             if p_name in ("radius", "depth", "distance", "thickness") and p_spec.get("type") == "number":

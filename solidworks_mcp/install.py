@@ -261,10 +261,10 @@ def export_antigravity_schemas(mcp_dir: Path, dry_run: bool = False) -> int:
         instructions_content = (
             "MCP server for parametric 3D modeling, assemblies, drawings, and FEA simulation in Dassault Systèmes SolidWorks.\n"
             "Lengths use the session unit (mm unless changed with set_units). Typical workflow: connect_solidworks -> "
-            "create_new_part / open_document -> create_sketch -> draw geometry -> extrude_sketch / cut_extrude / "
+            "create_document / open_document -> create_sketch -> draw geometry -> extrude_sketch / cut_extrude / "
             "revolve_sketch -> save_document.\n"
-            "Use select_by_geometry for declarative face/edge selection. Code-execution tools (execute_python, "
-            "sw_execute_csharp, sw_execute_macro) require user consent or SW_MCP_ALLOW_EXEC=1.\n"
+            "Use select with by=\"geometry\" for declarative face/edge selection. execute_code requires user "
+            "consent or SW_MCP_ALLOW_EXEC=1.\n"
         )
         with open(mcp_dir / "instructions.md", "w", encoding="utf-8") as f:
             f.write(instructions_content)
@@ -403,10 +403,10 @@ def install_antigravity_plugin(
 def prompt_execute_python_consent() -> bool:
     """Interactive CLI prompt explaining benefits and security risks of execute_python."""
     print("\n" + "=" * 76)
-    print(" [!] SECURITY GATING CONFIGURATION: `execute_python`")
+    print(" [!] SECURITY GATING CONFIGURATION: `execute_code`")
     print("=" * 76)
     print(
-        "The `execute_python` tool allows the AI assistant to run arbitrary Python code\n"
+        "The `execute_code` tool allows the AI assistant to run arbitrary Python or C# code\n"
         "directly on your Windows system with access to the SolidWorks COM API.\n\n"
         "BENEFITS:\n"
         "- Full access to `sw_app`, `model`, and `SelectionMgr` for custom macros.\n"

@@ -31,21 +31,21 @@ For dialog and rebuild recovery, see `solidworks-diagnostics`.
 > [!IMPORTANT]
 > **STRICT TOOL EXECUTION HIERARCHY**:
 > 1. **Priority 1 — Native MCP Tools (Always use first)**:
->    Always use dedicated SolidWorks MCP tools (`create_new_drawing`, `create_drawing_from_model`, `create_section_view`, `import_model_items`, `add_drawing_dimension`, `insert_bom_table`, `export_drawing`, `capture_viewport`).
+>    Always use dedicated SolidWorks MCP tools (`create_document`, `create_drawing_from_model`, `create_section_view`, `import_model_items`, `add_drawing_dimension`, `insert_bom_table`, `export_drawing`, `capture_viewport`).
 >    - All tools execute safely on the dedicated STA dispatcher thread.
 >    - `create_drawing_from_model` automatically maps model references and computes safe layout scales.
 >    - `insert_bom_table` dynamically resolves `.sldbomtbt` templates without hardcoded paths.
 >    - `create_section_view` handles section line selection and view generation robustly.
-> 2. **Priority 2 — `execute_python` (Security-Gated Fallback ONLY)**:
->    Do **NOT** use `execute_python` for routine drawing creation, view placement, or exports.
->    `execute_python` is locked by default and requires explicit user consent in chat.
+> 2. **Priority 2 — `execute_code` (Security-Gated Fallback ONLY)**:
+>    Do **NOT** use `execute_code` for routine drawing creation, view placement, or exports.
+>    `execute_code` is locked by default and requires explicit user consent in chat.
 
 ---
 
 ## Complete Drawing Tool Inventory & Schemas
 
 ### 1. Document & View Setup
-- `create_new_drawing {"paper_size": "A4" | "A3" | "A2" | "A1" | "Letter"}`: Creates an empty drawing sheet.
+- `create_document {"type": "drawing", "paper_size": "A4" | "A3" | "A2" | "A1" | "Letter"}`: Creates an empty drawing sheet.
 - `create_drawing_from_model`:
   - `"model_path"`: Full path to `.sldprt` or `.sldasm` on disk (must be saved).
   - `"view_name"`: Target view to insert (default: `"*Isometric"`, or `"*Front"`, `"*Top"`, `"*Right"`).

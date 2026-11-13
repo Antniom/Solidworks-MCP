@@ -15,7 +15,7 @@ Use this skill whenever creating, modifying, inspecting, or verifying individual
 - Creating base and secondary solid features: boss/cut extrusions, revolves, shells, linear and circular patterns.
 - Creating standard engineering holes using the Hole Wizard (counterbore, countersink, tapped, clearance).
 - Applying mechanical blends: fillets and chamfers.
-- Precise, deterministic CAD selection using `select_by_geometry` (plane, cylinder, normal vector, area, radius, centroid) without coordinate guessing.
+- Precise, deterministic CAD selection using `select` (`"by": "geometry"`) (plane, cylinder, normal vector, area, radius, centroid) without coordinate guessing.
 - FeatureManager tree operations via `manage_feature`: suppress, unsuppress, rename, delete (with absorbed sketches), and reorder.
 - Part configuration management via `manage_configuration`: list, add, activate, rename, and delete configurations.
 - Metadata and custom properties management via `manage_custom_properties`: get, set, delete, and list (including `$PRP:` linked metadata).
@@ -36,16 +36,16 @@ For dialog recovery and rebuild diagnostics, see `solidworks-diagnostics`.
 > **STRICT TOOL EXECUTION HIERARCHY**:
 > 1. **Priority 1 — Native MCP Tools (Always use first)**:
 >    Always use dedicated SolidWorks MCP tools. Native tools execute on a dedicated Single-Threaded Apartment (STA) COM dispatcher thread, enforce strict pre- and post-condition checks, and handle automatic unit conversion (`mm`/`degrees` to meters/radians).
-> 2. **Priority 2 — `execute_python` (Security-Gated Fallback ONLY)**:
->    Do **NOT** use `execute_python` for operations covered by native tools.
->    `execute_python` is locked by default. If invoked without consent, it returns an explicit directive for the AI agent to ask the human user for affirmative permission in chat, explaining benefits and host-execution security risks.
+> 2. **Priority 2 — `execute_code` (Security-Gated Fallback ONLY)**:
+>    Do **NOT** use `execute_code` for operations covered by native tools.
+>    `execute_code` is locked by default. If invoked without consent, it returns an explicit directive for the AI agent to ask the human user for affirmative permission in chat, explaining benefits and host-execution security risks.
 
 ---
 
 ## Complete Modeling Tool Inventory & Parameter Schemas
 
 ### 1. Document & Configuration Management
-- `create_new_part {}`: Creates a new part from default part template.
+- `create_document {"type": "part"}`: Creates a new part from default part template.
 - `save_document {"filepath": str}`: Saves active document.
 - `manage_configuration`:
   - `"action"`: `"list"`, `"add"`, `"activate"`, `"rename"`, `"delete"`
@@ -61,7 +61,7 @@ For dialog recovery and rebuild diagnostics, see `solidworks-diagnostics`.
 
 ### 2. Sketch Creation & Sketch Entities
 - `create_sketch {"plane": "Front" | "Top" | "Right"}`: Creates a 2D sketch on a standard reference plane.
-- `create_sketch_on_face {"x": float, "y": float, "z": float, "unit": "mm"}`: Selects planar face and opens a sketch.
+- `create_sketch {"face_point": [float, float, float], "unit": "mm"}`: Selects planar face and opens a sketch.
 - `close_sketch {}`: Explicitly exits sketch mode.
 - `get_sketch_status {}`: Returns whether sketch mode is active and entity counts.
 - `draw_rectangle {"x1": float, "y1": float, "x2": float, "y2": float, "unit": "mm"}`
@@ -94,8 +94,8 @@ For dialog recovery and rebuild diagnostics, see `solidworks-diagnostics`.
   - `"config_scope"`: Suppression scope: `1` = ThisConfiguration, `2` = AllConfigurations
   - `"color_rgb"`: (For set_color) RGB integer array `[R, G, B]` with values 0-255
 
-### 4. Declarative Geometric Selection (`select_by_geometry`)
-Never guess blind coordinates or trial-and-error click points. Use `select_by_geometry` to query and select entities programmatically:
+### 4. Declarative Geometric Selection (`select` by geometry)
+Never guess blind coordinates or trial-and-error click points. Use `select` (`"by": "geometry"`) to query and select entities programmatically:
 ```json
 {
   "target_type": "face",
@@ -128,41 +128,53 @@ Supported schema parameters:
 ---
 
 ### 6. Units
-Every length argument uses the session unit: `mm` unless changed with `set_units {"unit": "inch"}`, or overridden per call with `"unit"`. Three tools are always millimetres regardless: `hole_linear`, `verify_model`, and the `*_mm` arguments of the sheet-metal and `sw_*` tools.
+Every length argument uses the session unit: `mm` unless changed with `set_units {"unit": "inch"}`, or overridden per call with `"unit"`. Always millimetres regardless: `hole_linear`, `verify_model`, `select` by centroid, and every argument named `*_mm`.
 
 ### 7. Profiles, Positioned Holes & Topology Lookup
 - `draw_closed_profile {"points": [[x, y], ...]}`: One closed polygon from a point list. Use it for straight-edged outlines only (arcs still need `draw_arc`).
 - `hole_linear {"face_axis": "z", "face_value": 20, "ref1_axis": "x", "ref1_value": 0, "dist1": 10, "ref2_axis": "y", "ref2_value": 0, "dist2": 10, "diameter": 5.5, "depth": 0}`: A hole on the planar face at `face_axis == face_value`, located `dist1`/`dist2` from two reference faces. `depth: 0` cuts through all; `tapped`, `cbore_diameter`, `cbore_depth` are optional. Prefer `create_hole_wizard` when a standard fastener size is wanted.
-- `list_faces {"min_area": float, "max_count": int}` / `list_edges {"min_length": float}`: Compact one-line-per-entity tables with 1-based indices, centroids/midpoints and normals. Use them to find the `face_index` for `create_sketch` or the `edge_indices` for `flange`.
-- `find_face {"x": float, "y": float, "z": float, "surface_type": "plane"}` / `find_edge {"x": float, "y": float, "z": float}`: Locate (and by default select) a face by centroid or an edge by midpoint.
+- `list_topology {"kind": "faces" | "edges", "min_size": float, "max_count": int}`: Compact one-line-per-entity table with 1-based indices, centroids/midpoints and normals. Use it to find the `face_index` for `create_sketch` or the `edge_indices` for `flange`.
 
-Choosing a selection tool: `select_by_geometry` when you can describe the entity (normal, radius, type); `find_face`/`find_edge` when you know a point from `list_faces`/`list_edges`; `select_entity` for named planes and features; `sw_select_by_path` when you already hold a topology path such as `Boss-Extrude1/Face[0]/Edge[2]`.
+All selection goes through one tool, `select`, with the method chosen by `"by"`:
+
+| `by` | Use when | Example |
+| :--- | :--- | :--- |
+| `"geometry"` | You can describe the entity (normal, radius, type). The default choice. | `select {"by": "geometry", "surface_type": "cylinder", "radius": 5}` |
+| `"centroid"` | You have coordinates from `list_topology` (mm). `"locate_only": true` returns the index without selecting. | `select {"by": "centroid", "x": 0, "y": 0, "z": 20}` or `{"by": "centroid", "target_type": "edge", "x": 25, "y": 0, "z": 20}` |
+| `"name"` | Named planes, features and bodies, or planar faces by `direction`. | `select {"by": "name", "target_type": "plane", "name": "Front Plane"}` |
+| `"point"` | The entity under a known 3D point. | `select {"by": "point", "point": [0, 0, 20]}` |
+| `"path"` | You hold a topology path from `inspect_topology`. | `select {"by": "path", "path": "Boss-Extrude1/Face[0]/Edge[2]"}` |
+
+`"append": true` adds to the current selection and `"mark"` sets the selection mark, for every method.
 
 ### 8. Global Variables & Equations
-- `get_parameters {}`: All global variables, equations and model dimensions.
-- `add_parameter {"name": "Width", "expression": "100mm"}`: New global variable or equation.
-- `set_parameter {"name": "Width", "expression": "120mm"}`: Change one and rebuild. Use `set_dimension` for a single dimension and parameters when several features should follow one value.
+- `manage_parameters {}`: All global variables, equations and model dimensions.
+- `manage_parameters {"action": "add", "name": "Width", "expression": "100mm"}`: New global variable or equation.
+- `manage_parameters {"action": "set", "name": "Width", "expression": "120mm"}`: Change one and rebuild. Use `set_dimension` for a single dimension and parameters when several features should follow one value.
 
 ### 9. Sheet Metal
 1. `set_sheet_metal_thickness {"thickness_mm": 1.5, "bend_radius_mm": 1.5, "k_factor": 0.5}`
 2. Sketch the blank, then `sheet_metal_face {}` to create the base flange.
-3. `list_edges {}` to get edge indices, then `flange {"edge_indices": [3], "distance": 25, "angle": 90}`.
+3. `list_topology {"kind": "edges"}` to get edge indices, then `flange {"edge_indices": [3], "distance": 25, "angle": 90}`.
 4. Sketch cut-outs on a face and `sheet_metal_cut {"through_all": true}`.
 Check bend radii and hole-to-bend distances against `solidworks-dfm`.
 
-### 10. Appearance & Presentation
+### 10. Appearance & Images
 - `apply_material_appearance {"appearance_name": "Aluminum - Polished", "target_type": "part" | "feature" | "component", "target_name": str}` or a custom `color_rgb` / `reflectivity` / `transparency`.
-- `render_showcase_viewport {"display_style": "shaded_with_edges" | "realistic" | "wireframe", "eye_mm": [x, y, z], "target_mm": [x, y, z], "filepath": str}`: Positions the camera and saves a PNG. Use `capture_viewport` for a plain standard view and `sw_capture_views` for a seven-view overview sheet.
+- `capture_viewport {"view_name": "*Isometric"}`: One standard or named view to a PNG.
+- `capture_viewport {"mode": "overview"}`: A stitched seven-view sheet plus detail crops (.NET runner). Best for checking a finished part from all sides.
+- `capture_viewport {"mode": "showcase", "display_style": "shaded_with_edges" | "realistic" | "wireframe", "eye_mm": [x, y, z], "target_mm": [x, y, z]}`: Explicit camera and display style.
 
-### 11. Fast Inspection Through the .NET Runner (`sw_*`)
-These read the model out of process and are quicker than walking the tree tool by tool. They need the bundled runner (`MecAgent.SolidWorks.Runner.exe`); if they fail, fall back to the tools above.
-- `sw_get_context_fast {"depth": 2}`: Open documents, active document, selections and a feature overview in one call. A good first call on an unfamiliar model.
-- `sw_get_feature_tree_json {}`: Full parametric description of a part (features, parameters, equations).
-- `sw_navigate_topology {"path": "Boss-Extrude1"}`: Faces, edges and parameters under a path (`""` for the root).
-- `sw_get_edge_analysis {"face_path": "Boss-Extrude1/Face[0]"}`: Every edge of a face with coordinates and lengths.
-- `sw_select_by_path {"path": "Boss-Extrude1/Face[0]"}`: Select by path.
-- `sw_modify_feature_parameter_by_path {"feature_path": "Boss-Extrude1", "depth_mm": 25}`: Change extrusion depth, direction, draft or fillet radius directly.
-- `sw_find_related_files {}`: Parts, parent assemblies and drawings that reference the active document.
+### 11. Reading the Model
+- `get_feature_tree {}`: Every feature and sub-feature with type and suppression state.
+- `get_feature_tree {"detail": "context", "depth": 2}`: Open documents, active document, selections and a feature overview in one fast call. A good first call on an unfamiliar model.
+- `get_feature_tree {"detail": "parametric"}`: Full parametric description of a part (typed feature parameters, equations, sketch loops and dimensions).
+- `inspect_topology {"path": "Boss-Extrude1"}`: Faces, edges and parameters under a topology path (`""` for the root).
+- `inspect_topology {"path": "Boss-Extrude1/Face[0]", "edges": true}`: Every edge of a face with coordinates and lengths.
+- `modify_feature_by_path {"feature_path": "Boss-Extrude1", "depth_mm": 25}`: Change extrusion depth, direction, draft or fillet radius directly.
+- `find_related_files {}`: Parts, parent assemblies and drawings that reference the active document.
+
+The `context` and `parametric` details, `inspect_topology`, `modify_feature_by_path`, `find_related_files`, `select` by path and the `overview` capture run in the bundled .NET runner. If one reports that the runner is unavailable, use the other modes.
 
 ### 12. Grouping Risky Edits
 Wrap a multi-step change in `transaction {"action": "begin"}` ... `transaction {"action": "commit"}`. On failure call `transaction {"action": "abort"}` and read its result: `success: false` means the model could not be fully restored and must be inspected. See `solidworks-diagnostics`.
@@ -178,7 +190,7 @@ Wrap a multi-step change in `transaction {"action": "begin"}` ... `transaction {
 ### Why Piecewise Linear Approximations Break CAD Models:
 1. **Loss of G1 / G2 Tangent Continuity**: SolidWorks recognizes analytical circles and arcs with true mathematical curvature. Piecewise lines form faceted polygonal chains that cannot maintain tangent continuity.
 2. **B-Rep Topology Fragmentation**: Instead of a single cylindrical or toroidal boundary representation (B-Rep) face, the solid body becomes fractured into dozens of micro-facets, severely bloating file size and degrading graphics performance.
-3. **Broken Downstream Features**: Geometric filters like `select_by_geometry` (filtering for `surface_type: "cylinder"` or circular edges) will fail completely because the faces are flat polygons. Edge fillets (`fillet_edges`) and Hole Wizard placements will fail or self-intersect.
+3. **Broken Downstream Features**: Geometric filters like `select` (`"by": "geometry"`) (filtering for `surface_type: "cylinder"` or circular edges) will fail completely because the faces are flat polygons. Edge fillets (`fillet_edges`) and Hole Wizard placements will fail or self-intersect.
 4. **CAM Toolpath Corruption**: CNC post-processors translate native arcs into circular G-code (`G02`/`G03`), yielding glassy surface finishes. Polygonal faceted approximations force thousands of micro-linear segments (`G01`), causing machine chatter, vibration, and ruined surface tolerances.
 
 ### Enforced Geometry Standards:
@@ -236,7 +248,7 @@ flowchart TD
 
 1. **Face Anchoring**:
    - When building secondary features, do not guess global coordinates or create floating disconnected sketches.
-   - Use `create_sketch_on_face {"x": px, "y": py, "z": pz, "unit": "mm"}` by targeting a known surface coordinate from the prior feature, or query the face using `select_by_geometry`.
+   - Use `create_sketch {"face_point": [px, py, pz], "unit": "mm"}` by targeting a known surface coordinate from the prior feature, or query the face using `select` (`"by": "geometry"`).
 2. **Single Solid Body Integrity**:
    - SolidWorks features should merge with the primary body by default (`merge_result=True`).
    - Multiple disconnected solid bodies in a part are prone to mating confusion, mass calculation errors, and simulation meshing failures unless multi-body design is explicitly intentional.
@@ -267,7 +279,7 @@ Triggered when the user says "I restarted", "ready", "welcome demo", "demo plaqu
 Prompt the user: *"Welcome back! Running a quick one-time permission verification across SolidWorks tools. Please click 'Always allow' on the prompt(s) so future design requests run without interruption!"*
 Execute probe calls to prompt "Always allow":
 ```json
-get_solidworks_info {}
+get_capabilities {}
 get_capabilities {}
 list_open_documents {}
 inspect_dialogs {}
@@ -284,7 +296,7 @@ Once authorized, execute this exact sequence live in SolidWorks:
 connect_solidworks {}
 
 // 2. Initialize fresh part
-create_new_part {}
+create_document {"type": "part"}
 
 // 3. Create sketch on standard Front plane
 create_sketch {"plane": "Front"}
@@ -306,7 +318,7 @@ capture_viewport {"view_name": "*Isometric"}
 ```json
 // 1. Initialize Part & Set Units
 connect_solidworks {}
-create_new_part {}
+create_document {"type": "part"}
 set_units {"unit": "mm"}
 
 // 2. Base Mounting Flange
@@ -315,12 +327,12 @@ draw_circle {"x": 0, "y": 0, "radius": 60, "unit": "mm"}
 extrude_sketch {"depth": 15, "unit": "mm"}
 
 // 3. Central Bearing Boss
-create_sketch_on_face {"x": 0, "y": 0, "z": 15, "unit": "mm"}
+create_sketch {"face_point": [0, 0, 15], "unit": "mm"}
 draw_circle {"x": 0, "y": 0, "radius": 35, "unit": "mm"}
 extrude_sketch {"depth": 40, "unit": "mm"}
 
 // 4. Central Precision Bore
-create_sketch_on_face {"x": 0, "y": 0, "z": 55, "unit": "mm"}
+create_sketch {"face_point": [0, 0, 55], "unit": "mm"}
 draw_circle {"x": 0, "y": 0, "radius": 25, "unit": "mm"}
 cut_extrude {"depth": 55, "through_all": true, "unit": "mm"}
 
@@ -347,7 +359,8 @@ create_pattern {
 }
 
 // 7. Select Outer Cylindrical Edge and Apply Chamfer
-select_by_geometry {
+select {
+  "by": "geometry",
   "target_type": "edge",
   "curve_type": "circle",
   "radius": 35.0,

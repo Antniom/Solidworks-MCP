@@ -81,7 +81,7 @@ class TestPhase2Tools(unittest.TestCase):
         self.assertGreaterEqual(len(tools), 30)
 
         tool_names = {t.name for t in tools}
-        phase2_tools = {"inspect_model", "verify_model", "select_entity", "capture_viewport"}
+        phase2_tools = {"inspect_model", "verify_model", "select", "capture_viewport"}
         self.assertTrue(phase2_tools.issubset(tool_names))
 
     def test_phase2_schemas_validity(self):
@@ -90,12 +90,12 @@ class TestPhase2Tools(unittest.TestCase):
             Draft202012Validator.check_schema(tool.input_schema)
 
     def test_phase2_argument_validation(self):
-        # Valid select_entity
-        err = _validate_tool_arguments("select_entity", {"target_type": "face", "direction": "top"})
+        # Valid selection by name/direction
+        err = _validate_tool_arguments("select", {"by": "name", "target_type": "face", "direction": "top"})
         self.assertIsNone(err)
 
         # Invalid target_type
-        err_bad = _validate_tool_arguments("select_entity", {"target_type": "invalid_entity_type"})
+        err_bad = _validate_tool_arguments("select", {"by": "name", "target_type": "invalid_entity_type"})
         self.assertIsNotNone(err_bad)
 
         # Valid verify_model

@@ -1,9 +1,9 @@
-# SolidWorks CAD for Claude
+# SolidCADWorks
 
-Design in SolidWorks by talking to Claude. This plugin connects Claude to the SolidWorks running on your
+Design in SolidWorks by talking to Claude. SolidCADWorks connects Claude to the SolidWorks running on your
 Windows PC, so you can ask for a part, an assembly, a drawing or a stress check and watch it being built.
 
-It bundles a local MCP connector (about 100 SolidWorks tools) with nine skills that teach Claude standard
+It bundles a local MCP connector (about 80 SolidWorks tools) with nine skills that teach Claude standard
 mechanical-engineering workflows, plus an interactive studio for adjusting dimensions with sliders.
 
 ## What you can ask for
@@ -32,7 +32,7 @@ mechanical-engineering workflows, plus an interactive studio for adjusting dimen
 ## Install
 
 1. In the Claude desktop app open **Customize > Plugins**, choose **Add > Add marketplace**, enter
-   `Antniom/Solidworks-MCP`, then add *SolidWorks CAD* from the list. (Or download the repository as a zip
+   `Antniom/Solidworks-MCP`, then add *SolidCADWorks* from the list. (Or download the repository as a zip
    and use **Add > Upload plugin**.)
 2. Start SolidWorks.
 3. Start a Cowork task and ask for something from the table above. The connector appears on the plugin's
@@ -68,8 +68,8 @@ server accepts only requests carrying a per-session token, so other web pages ca
 Everything this plugin does happens on your PC:
 
 - **The connector** is the Python package in `solidworks_mcp/`, started by `uv run --locked` from the plugin
-  folder. It also starts the bundled .NET runner (`MecAgent.SolidWorks.Runner.exe`) the first time a `sw_*`
-  tool is used. On first start uv downloads the pinned Python packages in `uv.lock` from PyPI. The connector then
+  folder. It also starts the bundled .NET runner (`MecAgent.SolidWorks.Runner.exe`) the first time a
+  runner-backed tool is used. On first start uv downloads the pinned Python packages in `uv.lock` from PyPI. The connector then
   controls SolidWorks through its COM automation interface.
 - **Files**: it reads and writes CAD files, exports and screenshots only in locations you name, limited to
   your user profile, the working folder and the temp folder. Logs and checkpoint copies go to
@@ -77,19 +77,21 @@ Everything this plugin does happens on your PC:
 - **Network**: the connector sends nothing to any server. It makes no network requests of its own and has
   no telemetry or self-update. Model geometry, images and tool results go only to Claude, as part of your
   conversation.
-- **Running code**: three tools can run custom code with your Windows permissions (`execute_python`,
-  `sw_execute_csharp`, `sw_execute_macro`). They are locked by default. Claude must ask you first and can
-  only unlock them for the current session after you agree. Setting the environment variable
-  `SW_MCP_ALLOW_EXEC=1` unlocks them permanently; leave it unset unless you want that.
+- **Running code**: one tool, `execute_code`, can run custom Python or C# with your Windows permissions. It
+  is locked by default. Claude must ask you first and can only unlock it for the current session after you
+  agree. Setting the environment variable
+  `SW_MCP_ALLOW_EXEC=1` unlocks it permanently; leave it unset unless you want that.
 - **Stopping stray processes**: `supervisor_clean_processes` can end orphaned SolidWorks processes, and only
   when called with explicit confirmation.
 
-## Fast inspection tools (.NET runner)
+## The .NET runner
 
-The `sw_*` tools (fast model context, feature-tree JSON, topology paths, edge analysis, C# execution) run in
-a separate .NET process that ships with the plugin in `solidworks_mcp/bin/mecagent_runner`. It starts on
-first use and stops with the connector. Because of these bundled binaries the plugin is distributed from
-this repository rather than Anthropic's public directory, which does not accept files of that size.
+Some tool modes run in a separate .NET process that ships with the plugin in
+`solidworks_mcp/bin/mecagent_runner`: fast model context and parametric feature trees (`get_feature_tree`),
+topology paths (`inspect_topology`, `select` by path), the seven-view overview capture, and C# in
+`execute_code`. It starts on first use and stops with the connector. Because of these bundled binaries the
+plugin is distributed from this repository rather than Anthropic's public directory, which does not accept
+files of that size.
 
 ## Troubleshooting
 

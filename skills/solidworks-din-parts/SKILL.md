@@ -36,12 +36,12 @@ For dialogs, rebuild errors or a stuck session, see `solidworks-diagnostics`.
 > [!IMPORTANT]
 > **STRICT TOOL EXECUTION HIERARCHY**:
 > 1. **Priority 1 — Native MCP Tools (Always use first)**:
->    Build DIN/ISO hardware using the dedicated native MCP tools (`create_new_part`, `set_units`, `create_sketch`, `draw_polygon`, `draw_circle`, `extrude_sketch`, `create_sketch_on_face`, `cut_extrude`, `verify_model`, `capture_viewport`).
+>    Build DIN/ISO hardware using the dedicated native MCP tools (`create_document`, `set_units`, `create_sketch`, `draw_polygon`, `draw_circle`, `extrude_sketch`, `create_sketch` with `face_point`, `cut_extrude`, `verify_model`, `capture_viewport`).
 >    - Native tools provide robust transactional modeling with zero COM boilerplate.
-> 2. **Priority 2 — `execute_python` (Security-Gated Fallback ONLY)**:
+> 2. **Priority 2 — `execute_code` (Security-Gated Fallback ONLY)**:
 >    Do **NOT** write raw Python COM scripts when standard MCP sketch/extrude/cut/revolve tools can build the fastener.
->    `execute_python` is locked by default and requires explicit human user consent in chat.
->    Use `execute_python` **ONLY IF**:
+>    `execute_code` is locked by default and requires explicit human user consent in chat.
+>    Use `execute_code` **ONLY IF**:
 >    - High-fidelity physical helical cosmetic threads (via `FeatureManager.InsertHelix` / swept cut) are explicitly requested.
 >    - A native tool encounters an unhandled geometry exception.
 
@@ -114,7 +114,7 @@ For regular 6-sided hex geometry across flats $s$:
 ```json
 // Parameters for M16 nut: s = 24 mm, m = 13 mm, R = 13.856 mm, tap drill = 14 mm
 connect_solidworks {}
-create_new_part {}
+create_document {"type": "part"}
 set_units {"unit": "mm"}
 
 // 1. Hexagon polygon on Front Plane
@@ -123,7 +123,7 @@ draw_polygon {"cx": 0, "cy": 0, "radius": 13.8564, "sides": 6, "unit": "mm"}
 extrude_sketch {"depth": 13.0, "unit": "mm"}
 
 // 2. Center tap bore
-create_sketch_on_face {"x": 0, "y": 0, "z": 13.0, "unit": "mm"}
+create_sketch {"face_point": [0, 0, 13.0], "unit": "mm"}
 draw_circle {"x": 0, "y": 0, "radius": 7.0, "unit": "mm"} // d = 14mm
 cut_extrude {"depth": 13.0, "through_all": true, "unit": "mm"}
 
@@ -136,7 +136,7 @@ capture_viewport {"filepath": "screenshots/hex_nut_m16.png", "view_name": "*Isom
 ```json
 // Parameters for M12 x 50 bolt: s = 18 mm, k = 7.5 mm, R = 10.392 mm, L = 50 mm
 connect_solidworks {}
-create_new_part {}
+create_document {"type": "part"}
 set_units {"unit": "mm"}
 
 // 1. Hexagon head
@@ -157,14 +157,14 @@ capture_viewport {"filepath": "screenshots/hex_bolt_m12x50.png", "view_name": "*
 ```json
 // Parameters for M16 washer: d1 = 17 mm, d2 = 30 mm, t = 3 mm
 connect_solidworks {}
-create_new_part {}
+create_document {"type": "part"}
 set_units {"unit": "mm"}
 
 create_sketch {"plane": "Front"}
 draw_circle {"x": 0, "y": 0, "radius": 15.0, "unit": "mm"} // OD 30mm
 extrude_sketch {"depth": 3.0, "unit": "mm"}
 
-create_sketch_on_face {"x": 0, "y": 0, "z": 3.0, "unit": "mm"}
+create_sketch {"face_point": [0, 0, 3.0], "unit": "mm"}
 draw_circle {"x": 0, "y": 0, "radius": 8.5, "unit": "mm"} // ID 17mm
 cut_extrude {"depth": 3.0, "through_all": true, "unit": "mm"}
 
@@ -175,7 +175,7 @@ capture_viewport {"filepath": "screenshots/washer_din125_m16.png", "view_name": 
 ---
 
 ## Escalation & Diagnostics
-- For high-precision cosmetic threads or thread spirals via helix features, use `execute_python` with COM scripting.
+- For high-precision cosmetic threads or thread spirals via helix features, use `execute_code` with COM scripting.
 - If a tool reports a dialog, timeout or rebuild error, follow `solidworks-diagnostics`.
 
 ---

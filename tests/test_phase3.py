@@ -26,7 +26,7 @@ class TestPhase3Tools(unittest.TestCase):
             "add_mate",
             "check_interference",
             "list_components",
-            "create_new_drawing",
+            "create_document",
             "create_drawing_from_model",
             "export_drawing",
         }
@@ -92,11 +92,11 @@ class TestPhase3Tools(unittest.TestCase):
 
     def test_create_new_drawing_validation(self):
         # Valid
-        err = _validate_tool_arguments("create_new_drawing", {"paper_size": "A3"})
+        err = _validate_tool_arguments("create_document", {"type": "drawing", "paper_size": "A3"})
         self.assertIsNone(err)
 
         # Invalid paper size
-        err_bad = _validate_tool_arguments("create_new_drawing", {"paper_size": "A0"})
+        err_bad = _validate_tool_arguments("create_document", {"type": "drawing", "paper_size": "A0"})
         self.assertIsNotNone(err_bad)
 
 

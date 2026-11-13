@@ -15,7 +15,7 @@ Use this skill whenever SolidWorks encounters modal dialog blocks, rebuild error
 - Clicking dialog buttons programmatically (`dismiss_dialog`) with exact button targeting (`"OK"`, `"Cancel"`, `"Yes"`, `"No"`, `"Rebuild"`, `"Don't Rebuild"`, `"Close"`).
 - Diagnosing FeatureManager rebuild warnings and broken mates (`inspect_rebuild_errors`).
 - Programmatically loading and verifying SolidWorks add-in DLLs without restarting (`load_addin`).
-- Creating and rolling back CAD model recovery checkpoints (`create_checkpoint`, `rollback_checkpoint`).
+- Creating and rolling back CAD model recovery checkpoints (`transaction`).
 - Recovering safely from long-running or hung STA COM thread calls (`reset_sta_worker`).
 
 For 3D part modeling, see `solidworks-modeling`.
@@ -30,11 +30,11 @@ For drawing generation, see `solidworks-drawings`.
 > [!IMPORTANT]
 > **STRICT TOOL EXECUTION HIERARCHY**:
 > 1. **Priority 1 — Native MCP Tools (Always use first)**:
->    Always use dedicated SolidWorks MCP tools (`inspect_dialogs`, `dismiss_dialog`, `inspect_rebuild_errors`, `load_addin`, `create_checkpoint`, `rollback_checkpoint`, `reset_sta_worker`).
+>    Always use dedicated SolidWorks MCP tools (`inspect_dialogs`, `dismiss_dialog`, `inspect_rebuild_errors`, `load_addin`, `transaction`, `reset_sta_worker`).
 >    - `inspect_dialogs` and `dismiss_dialog` execute directly on the Win32 message pump thread outside the STA worker queue, allowing them to dismiss modal dialogs even when SolidWorks is blocked!
 >    - `reset_sta_worker` re-initializes the STA worker thread and cleans up reentrant locks safely.
-> 2. **Priority 2 — `execute_python` (Security-Gated Fallback ONLY)**:
->    Do **NOT** attempt to unblock dialogs using `execute_python` — if SolidWorks is blocked on a modal dialog, `execute_python` will hang waiting on COM!
+> 2. **Priority 2 — `execute_code` (Security-Gated Fallback ONLY)**:
+>    Do **NOT** attempt to unblock dialogs using `execute_code` — if SolidWorks is blocked on a modal dialog, `execute_code` will hang waiting on COM!
 
 ---
 
@@ -67,9 +67,9 @@ Loads SolidWorks add-in DLLs into the running session without UI interaction:
 - Returns `success: true` and confirms whether the COM add-in object is active.
 
 ### 4. Checkpoints & State Rollback
-- `create_checkpoint {"name": str, "description": str}`: Records the current end of the feature tree and saves a backup copy of the document (path returned as `snapshot_path`).
-- `rollback_checkpoint {"name": str}`: Deletes every feature added after the checkpoint. It does **not** revert dimension edits, suppression or renames made to older features; restore those with `set_dimension` / `manage_feature`, or reopen the backup copy.
-- `transaction {"action": "begin" | "commit" | "abort", "name": str}`: Brackets a multi-step edit. `abort` removes features added since `begin` and undoes other geometry changes, then compares the model volume with its value at `begin`. If it returns `success: false`, the model was **not** fully restored: inspect it with `list_features` and `get_dimensions` before continuing. Only one transaction can be open at a time.
+- `transaction {"action": "checkpoint", "name": str, "description": str}`: Records the current end of the feature tree and saves a backup copy of the document (path returned as `snapshot_path`).
+- `transaction {"action": "rollback", "name": str}`: Deletes every feature added after that checkpoint. It does **not** revert dimension edits, suppression or renames made to older features; restore those with `set_dimension` / `manage_feature`, or reopen the backup copy.
+- `transaction {"action": "begin" | "commit" | "abort", "name": str}`: Brackets a multi-step edit. `abort` removes features added since `begin` and undoes other geometry changes, then compares the model volume with its value at `begin`. If it returns `success: false`, the model was **not** fully restored: inspect it with `get_feature_tree` and `get_dimensions` before continuing. Only one transaction can be open at a time.
 
 ### 5. STA Dispatcher Recovery (`reset_sta_worker`)
 If an operation times out or a COM call leaves the dispatcher thread unresponsive:
@@ -81,8 +81,8 @@ If an operation times out or a COM call leaves the dispatcher thread unresponsiv
 - `supervisor_clean_processes {}`: Dry-run audit of every `SLDWORKS.exe` process; lists headless orphans left behind by crashed sessions.
 - `supervisor_clean_processes {"confirm": true, "target_pids": [int]}`: Terminates the listed orphans. Unsaved work in those processes is lost, so show the user the audit and get their agreement first.
 
-### 7. Code-Execution Tools (consent-gated)
-`execute_python`, `sw_execute_csharp` and `sw_execute_macro` run arbitrary code as the Windows user and share one gate: they refuse to run until the user has agreed in chat (then pass `user_confirmed_risks: true`) or the server was started with `SW_MCP_ALLOW_EXEC=1`. Never set `user_confirmed_risks` on your own initiative. `reload_api {}` is a developer tool that hot-reloads the server's Python modules; do not use it in normal work.
+### 7. Code Execution (consent-gated)
+`execute_code` (`"language": "python" | "csharp" | "csharp_macro"`) runs arbitrary code as the Windows user. It refuses to run until the user has agreed in chat (then pass `user_confirmed_risks: true`) or the server was started with `SW_MCP_ALLOW_EXEC=1`. Never set `user_confirmed_risks` on your own initiative. `"read_only": true` makes Python roll back if the geometry changed and makes C# refuse code that static analysis classifies as mutating. `reload_api {}` is a developer tool that hot-reloads the server's Python modules; do not use it in normal work.
 
 ---
 

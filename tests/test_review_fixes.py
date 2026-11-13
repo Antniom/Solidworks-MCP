@@ -53,8 +53,8 @@ def test_schemas_do_not_advertise_a_fixed_mm_default():
 
 # --- code execution gate ----------------------------------------------------
 
-@pytest.mark.parametrize("tool", ["execute_python", "sw_execute_csharp", "sw_execute_macro"])
-def test_all_code_execution_tools_share_the_consent_gate(monkeypatch, tool):
+@pytest.mark.parametrize("language", ["python", "csharp", "csharp_macro"])
+def test_every_language_shares_the_consent_gate(monkeypatch, language):
     monkeypatch.delenv("SW_MCP_ALLOW_EXEC", raising=False)
     monkeypatch.delenv("SWMCP_ENABLE_EXECUTE_PYTHON", raising=False)
     monkeypatch.setattr(srv, "_session_exec_unlocked", False)
@@ -62,7 +62,7 @@ def test_all_code_execution_tools_share_the_consent_gate(monkeypatch, tool):
     runner = MagicMock()
     monkeypatch.setattr(srv, "get_mecagent_runner", lambda: runner)
 
-    res = srv._dispatch_tool(tool, {"code": "1+1"})
+    res = srv._dispatch_tool("execute_code", {"language": language, "code": "1+1"})
 
     assert res["success"] is False and res["security_gate"] == "consent_required"
     assert not runner.method_calls, "locked code must never reach the runner"

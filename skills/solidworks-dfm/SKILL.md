@@ -120,7 +120,7 @@ Before finalizing or releasing any SolidWorks model, execute this DFM inspection
 
 ```mermaid
 flowchart TD
-    Inspect["1. inspect_model\nVerify volume, bbox, 1 body, zero rebuild errors"] --> CheckGeometry["2. select_by_geometry\nCheck cylindrical faces, minimum radii, wall thickness"]
+    Inspect["1. inspect_model\nVerify volume, bbox, 1 body, zero rebuild errors"] --> CheckGeometry["2. select by geometry\nCheck cylindrical faces, minimum radii, wall thickness"]
     CheckGeometry --> CheckHoles["3. inspect Hole Wizard & Patterns\nVerify standard drill/tap diameters & pitch clearances"]
     CheckHoles --> CheckDraft["4. Verify Draft / Reliefs\nEnsure mold draft or sheet metal bend reliefs"]
     CheckDraft --> Finish["5. Final Verification Pass\nverify_model + capture_viewport"]
@@ -132,7 +132,8 @@ flowchart TD
 inspect_model {}
 
 // 2. Verify Internal Radii on Vertical Pockets (e.g. radius >= 3.5mm)
-select_by_geometry {
+select {
+  "by": "geometry",
   "target_type": "face",
   "surface_type": "cylinder",
   "radius": 3.5,

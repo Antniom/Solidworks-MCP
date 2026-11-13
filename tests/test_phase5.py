@@ -38,8 +38,7 @@ class TestPhase5ToolsAndSchemas(unittest.TestCase):
         phase5_tools = {
             "search_knowledge",
             "record_knowledge",
-            "create_checkpoint",
-            "rollback_checkpoint",
+            "transaction",
         }
         self.assertTrue(phase5_tools.issubset(tool_names), f"Missing tools: {phase5_tools - tool_names}")
 
@@ -77,20 +76,19 @@ class TestPhase5ToolsAndSchemas(unittest.TestCase):
         self.assertIsNotNone(err)
 
     def test_create_checkpoint_validation(self):
-        err = _validate_tool_arguments("create_checkpoint", {"name": "before_cut"})
+        err = _validate_tool_arguments("transaction", {"action": "checkpoint", "name": "before_cut"})
         self.assertIsNone(err)
 
-        # Missing name
-        err = _validate_tool_arguments("create_checkpoint", {})
-        self.assertIsNotNone(err)
+        # Missing name is refused by the handler (the schema cannot make it conditional)
+        from solidworks_mcp.server import _dispatch_tool
+        self.assertFalse(_dispatch_tool("transaction", {"action": "checkpoint"})["success"])
 
     def test_rollback_checkpoint_validation(self):
-        err = _validate_tool_arguments("rollback_checkpoint", {"name": "before_cut"})
+        err = _validate_tool_arguments("transaction", {"action": "rollback", "name": "before_cut"})
         self.assertIsNone(err)
 
-        # Missing name
-        err = _validate_tool_arguments("rollback_checkpoint", {})
-        self.assertIsNotNone(err)
+        from solidworks_mcp.server import _dispatch_tool
+        self.assertFalse(_dispatch_tool("transaction", {"action": "rollback"})["success"])
 
 
 class TestKnowledgeManager(unittest.TestCase):

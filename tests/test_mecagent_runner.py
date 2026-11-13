@@ -5,7 +5,7 @@ registered in `solidworks_mcp/server.py`.
 """
 
 import pytest
-from solidworks_mcp.core.mecagent_runner import MecAgentRunnerBridge, RunnerNotInstalledError
+from solidworks_mcp.core.mecagent_runner import MecAgentRunnerBridge
 
 import os
 
@@ -20,34 +20,35 @@ def test_runner_is_bundled():
 from solidworks_mcp.server import _tool_definitions, _validate_tool_arguments, _dispatch_tool
 
 
+# Tools whose runner-backed modes reach the .NET runner.
 EXPECTED_MECAGENT_TOOLS = {
-    "sw_execute_csharp",
-    "sw_execute_macro",
-    "sw_capture_views",
-    "sw_get_context_fast",
-    "sw_get_feature_tree_json",
-    "sw_select_by_path",
-    "sw_navigate_topology",
-    "sw_find_related_files",
+    "execute_code",
+    "capture_viewport",
+    "get_feature_tree",
+    "select",
+    "inspect_topology",
+    "find_related_files",
+    "modify_feature_by_path",
 }
 
 
 def test_mecagent_tools_registered_and_schemas_valid():
-    """Verify all 8 MecAgent tools are registered in _tool_definitions() with valid schemas."""
+    """Verify the runner-backed tools are registered in _tool_definitions() with valid schemas."""
     tools = {t.name: t for t in _tool_definitions()}
     missing = EXPECTED_MECAGENT_TOOLS - set(tools.keys())
     assert not missing, f"Missing MecAgent tools: {missing}"
 
-    assert _validate_tool_arguments("sw_execute_csharp", {"code": "1 + 1"}) is None
-    assert _validate_tool_arguments("sw_execute_csharp", {}) is not None
+    assert _validate_tool_arguments("execute_code", {"language": "csharp", "code": "1 + 1"}) is None
+    assert _validate_tool_arguments("execute_code", {"language": "csharp"}) is not None
+    assert _validate_tool_arguments("execute_code", {"code": "1 + 1"}) is not None
 
-    assert _validate_tool_arguments("sw_get_context_fast", {"depth": 0}) is None
-    assert _validate_tool_arguments("sw_get_context_fast", {"depth": 5}) is None
-    assert _validate_tool_arguments("sw_get_context_fast", {"depth": 99}) is not None
+    assert _validate_tool_arguments("get_feature_tree", {"detail": "context", "depth": 0}) is None
+    assert _validate_tool_arguments("get_feature_tree", {"detail": "context", "depth": 5}) is None
+    assert _validate_tool_arguments("get_feature_tree", {"detail": "context", "depth": 99}) is not None
 
-    assert _validate_tool_arguments("sw_select_by_path", {"path": "Boss-Extrude1/Face[0]"}) is None
-    assert _validate_tool_arguments("sw_navigate_topology", {"path": "/"}) is None
-    assert _validate_tool_arguments("sw_find_related_files", {"max_drawings_probed": 100}) is None
+    assert _validate_tool_arguments("select", {"by": "path", "path": "Boss-Extrude1/Face[0]"}) is None
+    assert _validate_tool_arguments("inspect_topology", {"path": "/"}) is None
+    assert _validate_tool_arguments("find_related_files", {"max_drawings_probed": 100}) is None
 
 
 @pytest.fixture(scope="module")
@@ -130,18 +131,18 @@ def test_execute_macro_and_sdk_bundle(runner: MecAgentRunnerBridge):
 
 @needs_runner
 def test_server_dispatch_sw_execute_csharp(monkeypatch):
-    """Verify _dispatch_tool routes sw_execute_csharp cleanly (code execution enabled)."""
+    """Verify _dispatch_tool routes C# execution cleanly (code execution enabled)."""
     monkeypatch.setenv("SW_MCP_ALLOW_EXEC", "1")
     res = _dispatch_tool(
-        "sw_execute_csharp",
-        {"code": "Math.Sqrt(144)", "read_only_only": True},
+        "execute_code",
+        {"language": "csharp", "code": "Math.Sqrt(144)", "read_only": True},
     )
     assert res["success"] is True
     assert res["data"]["returnValue"] == 12.0
 
 
 def test_missing_runner_is_reported_clearly(monkeypatch):
-    """If the runner files are gone, the sw_* tools fail with guidance instead of a traceback."""
+    """If the runner files are gone, runner-backed tools fail with guidance instead of a traceback."""
     from solidworks_mcp import server as srv
     from solidworks_mcp.core import mecagent_runner
 
@@ -151,7 +152,8 @@ def test_missing_runner_is_reported_clearly(monkeypatch):
     monkeypatch.setattr(srv.sw_automation, "_result",
                         lambda ok, msg, code, data=None: {"success": ok, "message": msg}, raising=False)
 
-    with pytest.raises(RunnerNotInstalledError):
+    # Looked up on the module: an earlier reload_api test may have re-created the class.
+    with pytest.raises(mecagent_runner.RunnerNotInstalledError):
         bridge.ensure_started()
-    res = srv._dispatch_tool("sw_get_feature_tree_json", {})
+    res = srv._dispatch_tool("get_feature_tree", {"detail": "parametric"})
     assert res["success"] is False and "MECAGENT_RUNNER_PATH" in res["message"]

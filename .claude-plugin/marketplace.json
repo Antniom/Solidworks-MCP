@@ -1,15 +1,15 @@
 {
-  "name": "solidworks-mcp",
+  "name": "solidcadworks",
   "owner": {
     "name": "António Coelho"
   },
   "metadata": {
-    "description": "SolidWorks CAD plugin for Claude",
+    "description": "SolidCADWorks: SolidWorks CAD plugin for Claude",
     "version": "5.0.0"
   },
   "plugins": [
     {
-      "name": "solidworks",
+      "name": "solidcadworks",
       "source": "./",
       "description": "Model parts, build assemblies, make drawings and run stress analysis in SolidWorks from a conversation, with an interactive studio for adjusting dimensions.",
       "version": "5.0.0",

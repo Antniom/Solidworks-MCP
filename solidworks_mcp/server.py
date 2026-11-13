@@ -121,7 +121,43 @@ def format_result(r: Dict) -> str:
     return "\n".join(lines)
 
 
+# Tools that were merged: old name -> how to call the replacement.
+_MERGED_TOOLS: Dict[str, str] = {
+    "get_solidworks_info": "get_capabilities (see data.installation)",
+    "create_new_part": 'create_document {"type": "part"}',
+    "create_new_assembly": 'create_document {"type": "assembly"}',
+    "create_new_drawing": 'create_document {"type": "drawing", "paper_size": ...}',
+    "create_sketch_on_face": 'create_sketch {"face_point": [x, y, z]}',
+    "list_features": 'get_feature_tree {"detail": "list"}',
+    "sw_get_feature_tree_json": 'get_feature_tree {"detail": "parametric"}',
+    "sw_get_context_fast": 'get_feature_tree {"detail": "context"}',
+    "select_entity": 'select {"by": "name"} or select {"by": "point", "point": [x, y, z]}',
+    "select_by_geometry": 'select {"by": "geometry", ...}',
+    "find_face": 'select {"by": "centroid", "target_type": "face", ...}',
+    "find_edge": 'select {"by": "centroid", "target_type": "edge", ...}',
+    "sw_select_by_path": 'select {"by": "path", "path": ...}',
+    "list_faces": 'list_topology {"kind": "faces"}',
+    "list_edges": 'list_topology {"kind": "edges"}',
+    "sw_navigate_topology": "inspect_topology",
+    "sw_get_edge_analysis": 'inspect_topology {"path": ..., "edges": true}',
+    "sw_capture_views": 'capture_viewport {"mode": "overview"}',
+    "render_showcase_viewport": 'capture_viewport {"mode": "showcase", ...}',
+    "create_checkpoint": 'transaction {"action": "checkpoint", "name": ...}',
+    "rollback_checkpoint": 'transaction {"action": "rollback", "name": ...}',
+    "execute_python": 'execute_code {"language": "python", ...}',
+    "sw_execute_csharp": 'execute_code {"language": "csharp", ...}',
+    "sw_execute_macro": 'execute_code {"language": "csharp_macro", ...}',
+    "get_parameters": 'manage_parameters {"action": "list"}',
+    "add_parameter": 'manage_parameters {"action": "add", ...}',
+    "set_parameter": 'manage_parameters {"action": "set", ...}',
+    "sw_modify_feature_parameter_by_path": "modify_feature_by_path",
+    "sw_find_related_files": "find_related_files",
+}
+
+
 def _validate_tool_arguments(name: str, arguments: Dict[str, Any]) -> Optional[str]:
+    if name in _MERGED_TOOLS:
+        return f"Tool '{name}' was merged. Use: {_MERGED_TOOLS[name]}"
     return validate_tool_arguments(name, arguments)
 
 
@@ -186,34 +222,101 @@ def _sdk(sdk_method: str, fail_message: str, ok_message: Optional[str] = None,
     return handler
 
 
+def _route(key: str, routes: Dict[str, Callable[[dict], Dict[str, Any]]],
+           default: Optional[str] = None) -> Callable[[dict], Dict[str, Any]]:
+    """Handler for a merged tool: the value of `key` picks which operation runs."""
+    def handler(arguments: dict) -> Dict[str, Any]:
+        target = routes.get(arguments.get(key, default))
+        if target is None:
+            return sw_automation._result(
+                False, f"'{key}' must be one of: {', '.join(routes)}", SwErrors.swInvalidInput)
+        return target(arguments)
+    return handler
+
+
+def _needs(*required: str):
+    """Wrap a handler so it fails cleanly when arguments its mode requires are missing."""
+    def wrap(handler: Callable[[dict], Dict[str, Any]]) -> Callable[[dict], Dict[str, Any]]:
+        def checked(arguments: dict) -> Dict[str, Any]:
+            missing = [k for k in required if arguments.get(k) in (None, "")]
+            if missing:
+                return sw_automation._result(
+                    False, f"Missing required argument(s): {', '.join(missing)}", SwErrors.swInvalidInput)
+            return handler(arguments)
+        return checked
+    return wrap
+
+
 def _get_capabilities(arguments: dict) -> Dict[str, Any]:
-    return _ok("Capabilities discovered successfully", CapabilityInspector.get_system_capabilities(sw_automation.app))
+    caps = CapabilityInspector.get_system_capabilities(sw_automation.app)
+    if not isinstance(caps, dict):
+        caps = {"capabilities": caps}
+    caps["installation"] = get_solidworks_info()
+    return _ok("Capabilities discovered successfully", caps)
 
 
-def _get_solidworks_info(arguments: dict) -> Dict[str, Any]:
-    info = get_solidworks_info()
-    return {
-        "success": info["found"],
-        "message": f"SolidWorks {'found' if info['found'] else 'not found'}",
-        "error_code": 0 if info["found"] else 105,
-        "error_name": "swSuccess" if info["found"] else "swSolidWorksNotFound",
-        "data": info,
-    }
+def _create_sketch(arguments: dict) -> Dict[str, Any]:
+    point = arguments.get("face_point")
+    if point is not None:
+        return sw_automation.create_sketch_on_face(x=point[0], y=point[1], z=point[2], unit=arguments.get("unit"))
+    return sw_automation.create_sketch(
+        plane=arguments.get("plane", "Front"),
+        offset=arguments.get("offset", 0.0),
+        face_index=arguments.get("face_index"),
+        unit=arguments.get("unit"),
+    )
 
 
 def _select_entity(arguments: dict) -> Dict[str, Any]:
-    point = None
-    if all(arguments.get(k) is not None for k in ("x", "y", "z")):
-        point = [arguments["x"], arguments["y"], arguments["z"]]
     return sw_automation.select_entity(
         target_type=arguments.get("target_type", "face"),
         name=arguments.get("name"),
-        point=point,
+        point=arguments.get("point"),
         unit=arguments.get("unit"),
         direction=arguments.get("direction"),
         mark=arguments.get("mark", 0),
         append=arguments.get("append", False),
     )
+
+
+def _select_by_centroid(arguments: dict) -> Dict[str, Any]:
+    """Face by centroid or edge by midpoint (coordinates in mm)."""
+    common = dict(
+        body_index=arguments.get("body_index", 1),
+        x=arguments.get("x"),
+        y=arguments.get("y"),
+        z=arguments.get("z"),
+        tolerance=arguments.get("tolerance", 0.5),
+        select=not arguments.get("locate_only", False),
+    )
+    if arguments.get("target_type") == "edge":
+        return sw_automation.find_edge(**common)
+    return sw_automation.find_face(
+        min_area=arguments.get("min_area", 10.0),
+        surface_type=arguments.get("surface_type", "plane"),
+        **common,
+    )
+
+
+def _inspect_topology(arguments: dict) -> Dict[str, Any]:
+    runner = get_mecagent_runner()
+    if arguments.get("edges"):
+        res = runner.invoke_sdk_method("getEdgeAnalysis", {"facePath": arguments.get("path", "")})
+        return _runner_result(res, None, "Edge analysis failed")
+    res = runner.invoke_sdk_method("navigate", {
+        "path": arguments.get("path", ""),
+        "showEquations": bool(arguments.get("show_equations", False)),
+    })
+    return _runner_result(res, None, "Topology navigation failed")
+
+
+def _transaction(arguments: dict) -> Dict[str, Any]:
+    action = arguments.get("action", "begin")
+    if action in ("checkpoint", "rollback"):
+        if not arguments.get("name"):
+            return sw_automation._result(False, f"'name' is required for action '{action}'", SwErrors.swInvalidInput)
+        return _checkpoint("create" if action == "checkpoint" else "rollback")(arguments)
+    return sw_automation.transaction(action=action, name=arguments.get("name") or "MCP batch")
 
 
 def _search_knowledge(arguments: dict) -> Dict[str, Any]:
@@ -288,44 +391,38 @@ def _checkpoint(action: str) -> Callable[[dict], Dict[str, Any]]:
     return handler
 
 
-def _execute_python(arguments: dict) -> Dict[str, Any]:
+def _execute_code(arguments: dict) -> Dict[str, Any]:
     code = arguments.get("code", "")
     if not code:
         return sw_automation._result(False, "Code is required", SwErrors.swInvalidInput)
-    return _execute_python_fixed(
-        code,
-        user_confirmed_risks=bool(arguments.get("user_confirmed_risks", False)),
-        reset_session=bool(arguments.get("reset_session", False)),
-        read_only=bool(arguments.get("read_only", False)),
-        auto_transaction=bool(arguments.get("auto_transaction", True)),
-    )
+    confirmed = bool(arguments.get("user_confirmed_risks", False))
+    read_only = bool(arguments.get("read_only", False))
+    language = arguments.get("language")
 
+    if language == "python":
+        return _execute_python_fixed(
+            code,
+            user_confirmed_risks=confirmed,
+            reset_session=bool(arguments.get("reset_session", False)),
+            read_only=read_only,
+            auto_transaction=bool(arguments.get("auto_transaction", True)),
+        )
+    if language not in ("csharp", "csharp_macro"):
+        return sw_automation._result(
+            False, "'language' must be one of: python, csharp, csharp_macro", SwErrors.swInvalidInput)
 
-def _execute_csharp(arguments: dict) -> Dict[str, Any]:
-    gate = _code_execution_gate("sw_execute_csharp", bool(arguments.get("user_confirmed_risks", False)))
+    gate = _code_execution_gate("execute_code", confirmed)
     if gate:
         return gate
     runner = get_mecagent_runner()
-    if arguments.get("reset_session"):
-        runner.reset_session()
-    res = runner.execute_csharp(
-        code=arguments.get("code", ""),
-        read_only_only=bool(arguments.get("read_only_only", False)),
-        timeout_ms=int(arguments.get("timeout_ms", 120000)),
-    )
-    return _runner_result(res, "C# cell executed", "C# cell failed")
-
-
-def _execute_macro(arguments: dict) -> Dict[str, Any]:
-    gate = _code_execution_gate("sw_execute_macro", bool(arguments.get("user_confirmed_risks", False)))
-    if gate:
-        return gate
-    res = get_mecagent_runner().execute_macro(
-        code=arguments.get("code", ""),
-        parameters=arguments.get("parameters"),
-        read_only_only=bool(arguments.get("read_only_only", False)),
-        timeout_ms=int(arguments.get("timeout_ms", 120000)),
-    )
+    timeout_ms = int(arguments.get("timeout_ms", 120000))
+    if language == "csharp":
+        if arguments.get("reset_session"):
+            runner.reset_session()
+        res = runner.execute_csharp(code=code, read_only_only=read_only, timeout_ms=timeout_ms)
+        return _runner_result(res, "C# cell executed", "C# cell failed")
+    res = runner.execute_macro(
+        code=code, parameters=arguments.get("parameters"), read_only_only=read_only, timeout_ms=timeout_ms)
     return _runner_result(res, "C# macro executed", "C# macro failed")
 
 
@@ -347,10 +444,7 @@ def _context_fast(arguments: dict) -> Dict[str, Any]:
 _TOOL_HANDLERS: Dict[str, Callable[[dict], Dict[str, Any]]] = {
     # Connection
     'get_capabilities': _get_capabilities,
-    'get_solidworks_info': _get_solidworks_info,
     'connect_solidworks': _auto('connect', 'pid'),
-    'create_new_part': _auto('create_new_part'),
-    'create_new_assembly': _auto('create_new_assembly'),
     'open_document': _auto('open_document', ('filepath', '')),
     'save_document': _auto('save_document', 'filepath'),
     'close_document': _auto('close_document', ('save', False)),
@@ -358,8 +452,6 @@ _TOOL_HANDLERS: Dict[str, Callable[[dict], Dict[str, Any]]] = {
     'list_open_documents': _auto('list_open_documents'),
     'manage_configuration': _auto('manage_configuration', ('action', 'list'), 'name', 'new_name', 'description', 'comment'),
     'manage_custom_properties': _auto('manage_custom_properties', ('action', 'list'), 'name', 'value', ('property_type', 'text'), ('configuration', '')),
-    'create_sketch': _auto('create_sketch', ('plane', 'Front'), ('offset', 0.0), 'face_index', 'unit'),
-    'create_sketch_on_face': _auto('create_sketch_on_face', ('x', 0), ('y', 0), ('z', 0), 'unit'),
     'draw_line': _auto('draw_line', ('x1', 0), ('y1', 0), ('x2', 100), ('y2', 0), 'unit', ('construction', False)),
     'draw_circle': _auto('draw_circle', ('x', 0), ('y', 0), ('radius', 25), 'unit'),
     'draw_rectangle': _auto('draw_rectangle', ('x1', -50), ('y1', -25), ('x2', 50), ('y2', 25), 'unit'),
@@ -379,13 +471,10 @@ _TOOL_HANDLERS: Dict[str, Callable[[dict], Dict[str, Any]]] = {
     'create_hole_wizard': _auto('create_hole_wizard', ('hole_type', 'counterbore'), ('standard', 'ISO'), ('fastener_type', 'Hex Bolt'), ('size', 'M6'), ('end_condition', 'through_all'), 'depth', 'diameter', 'unit'),
     'inspect_model': _auto('inspect_model'),
     'verify_model': _auto('verify_model', 'expected_dx', 'expected_dy', 'expected_dz', ('expected_bodies', 1), ('tolerance_mm', 0.2)),
-    'select_by_geometry': _auto('select_by_geometry', ('target_type', 'face'), 'surface_type', 'normal', ('normal_tolerance', 0.05), 'radius', ('radius_tolerance', 0.05), 'point_on_surface', 'curve_type', 'length', ('length_tolerance', 0.1), 'midpoint', 'point', 'bbox_min', 'bbox_max', ('mark', 0), ('append', False), 'unit'),
-    'capture_viewport': _auto('capture_viewport', 'filepath', ('view_name', '*Isometric')),
     'add_component': _auto('add_component', ('component_path', ''), ('x', 0.0), ('y', 0.0), ('z', 0.0), 'unit'),
     'add_mate': _auto('add_mate', ('mate_type', 'coincident'), ('entity1', ''), ('entity2', ''), 'comp1', 'comp2', ('align', 0), ('flip', False), ('distance', 0.0), ('angle', 0.0), 'min_limit', 'max_limit', 'unit'),
     'check_interference': _auto('check_interference', ('treat_coincidence_as_interference', False)),
     'list_components': _auto('list_components'),
-    'create_new_drawing': _auto('create_new_drawing', ('paper_size', 'A4')),
     'create_drawing_from_model': _auto('create_drawing_from_model', 'model_path', ('view_name', '*Isometric'), ('x', 0.1), ('y', 0.1), ('paper_size', 'A4')),
     'export_drawing': _auto('export_drawing', ('filepath', ''), ('format', 'pdf')),
     'import_model_items': _auto('import_model_items', ('option', 1), ('types', 1), ('all_views', True), ('duplicate_dims', False), ('hidden_feature_dims', False), ('use_placement_in_sketch', True)),
@@ -404,13 +493,6 @@ _TOOL_HANDLERS: Dict[str, Callable[[dict], Dict[str, Any]]] = {
     'inspect_rebuild_errors': _auto('inspect_rebuild_errors'),
     'draw_closed_profile': _auto('draw_closed_profile', ('points', []), 'unit'),
     'hole_linear': _auto('hole_linear', ('face_axis', 'z'), ('face_value', 0.0), ('ref1_axis', 'x'), ('ref1_value', 0.0), ('dist1', 5.0), ('ref2_axis', 'y'), ('ref2_value', 0.0), ('dist2', 5.0), ('diameter', 5.5), ('depth', 0.0), ('tapped', False), ('cbore_diameter', 0.0), ('cbore_depth', 0.0)),
-    'get_parameters': _auto('get_parameters'),
-    'add_parameter': _auto('add_parameter', ('name', ''), ('expression', ''), ('units', 'mm')),
-    'set_parameter': _auto('set_parameter', ('name', ''), ('expression', ''), ('units', 'mm')),
-    'list_faces': _auto('list_faces', ('body_index', 1), ('min_area', 0.0), ('max_count', 60)),
-    'list_edges': _auto('list_edges', ('body_index', 1), ('min_length', 0.0), ('max_count', 60)),
-    'find_face': _auto('find_face', ('body_index', 1), 'x', 'y', 'z', ('min_area', 10.0), ('surface_type', 'plane'), ('tolerance', 0.5), ('select', True)),
-    'find_edge': _auto('find_edge', ('body_index', 1), 'x', 'y', 'z', ('tolerance', 0.5), ('select', True)),
     'set_sheet_metal_thickness': _auto('set_sheet_metal_thickness', ('thickness_mm', 1.5), 'bend_radius_mm', ('k_factor', 0.5)),
     'sheet_metal_face': _auto('sheet_metal_face', 'thickness_mm', 'bend_radius_mm', ('reverse_dir', False)),
     'flange': _auto('flange', 'edge_indices', ('distance', 25.0), ('angle', 90.0), ('body_index', 1)),
@@ -421,41 +503,60 @@ _TOOL_HANDLERS: Dict[str, Callable[[dict], Dict[str, Any]]] = {
     'drive_kinematic_motion': _auto('drive_kinematic_motion', ('constraint_name', ''), ('start_value', 0.0), ('end_value', 90.0), ('steps', 10), ('unit', 'mm'), ('check_interference', False)),
     'manage_positional_representations': _auto('manage_positional_representations', ('action', 'list'), 'name', 'constraint_name', 'value', 'suppress_constraint'),
     'apply_material_appearance': _auto('apply_material_appearance', ('appearance_name', 'Smooth - White'), 'color_rgb', 'reflectivity', 'transparency', ('target_type', 'part'), 'target_name'),
-    'render_showcase_viewport': _auto('render_showcase_viewport', 'eye_mm', 'target_mm', 'up_vec', ('display_style', 'shaded_with_edges'), 'filepath'),
-    'transaction': _auto('transaction', ('action', 'begin'), ('name', 'MCP batch')),
+    # Merged tools: one name, routed by a mode argument to the same underlying operations
+    'create_document': _route('type', {
+        'part': _auto('create_new_part'),
+        'assembly': _auto('create_new_assembly'),
+        'drawing': _auto('create_new_drawing', ('paper_size', 'A4')),
+    }, default='part'),
+    'create_sketch': _create_sketch,
+    'get_feature_tree': _route('detail', {
+        'list': lambda a: _list_features_fixed(),
+        'parametric': _sdk("getFeatureTreeJson", "Failed to build feature tree JSON",
+                           "Built parametric feature tree JSON IR"),
+        'context': _context_fast,
+    }, default='list'),
+    'select': _route('by', {
+        'name': _select_entity,
+        'point': _select_entity,
+        'geometry': _auto('select_by_geometry', ('target_type', 'face'), 'surface_type', 'normal', ('normal_tolerance', 0.05), 'radius', ('radius_tolerance', 0.05), 'point_on_surface', 'curve_type', 'length', ('length_tolerance', 0.1), 'midpoint', 'point', 'bbox_min', 'bbox_max', ('mark', 0), ('append', False), 'unit'),
+        'centroid': _select_by_centroid,
+        'path': _sdk("selectByPath", "Selection by path failed", build=lambda a: {
+            "path": a.get("path", ""), "multiSelect": bool(a.get("append", False)), "mark": int(a.get("mark", 0))}),
+    }),
+    'list_topology': _route('kind', {
+        'faces': _auto('list_faces', ('body_index', 1), ('min_area', 'min_size', 0.0), ('max_count', 60)),
+        'edges': _auto('list_edges', ('body_index', 1), ('min_length', 'min_size', 0.0), ('max_count', 60)),
+    }),
+    'inspect_topology': _inspect_topology,
+    'capture_viewport': _route('mode', {
+        'view': _auto('capture_viewport', 'filepath', ('view_name', '*Isometric')),
+        'overview': _capture_views,
+        'showcase': _auto('render_showcase_viewport', 'eye_mm', 'target_mm', 'up_vec', ('display_style', 'shaded_with_edges'), 'filepath'),
+    }, default='view'),
+    'transaction': _transaction,
+    'manage_parameters': _route('action', {
+        'list': _auto('get_parameters'),
+        'add': _needs('name', 'expression')(_auto('add_parameter', ('name', ''), ('expression', ''), ('units', 'mm'))),
+        'set': _needs('name', 'expression')(_auto('set_parameter', ('name', ''), ('expression', ''), ('units', 'mm'))),
+    }, default='list'),
+    'execute_code': _execute_code,
     # Tools with custom glue
-    'list_features': lambda a: _list_features_fixed(),
     'close_sketch': lambda a: _close_sketch_handler(),
     'get_sketch_status': lambda a: _get_sketch_status_handler(),
     'set_units': _auto('set_units', ('unit', 'mm')),
-    'execute_python': _execute_python,
-    'select_entity': _select_entity,
     'show_interactive_studio': lambda a: _show_interactive_studio_handler(a),
     'studio_action': lambda a: _studio_action_handler(a),
     'search_knowledge': _search_knowledge,
     'record_knowledge': _record_knowledge,
-    'create_checkpoint': _checkpoint("create"),
-    'rollback_checkpoint': _checkpoint("rollback"),
     'supervisor_clean_processes': lambda a: sw_automation.supervisor_clean_processes(
         confirm=bool(a.get("confirm", False)), target_pids=a.get("target_pids")),
     'reload_api': lambda a: _reload_api_handler(),
-    # MecAgent .NET runner
-    'sw_execute_csharp': _execute_csharp,
-    'sw_execute_macro': _execute_macro,
-    'sw_capture_views': _capture_views,
-    'sw_get_context_fast': _context_fast,
-    'sw_get_feature_tree_json': _sdk("getFeatureTreeJson", "Failed to build feature tree JSON",
-                                     "Built parametric feature tree JSON IR"),
-    'sw_select_by_path': _sdk("selectByPath", "Selection by path failed", build=lambda a: {
-        "path": a.get("path", ""), "multiSelect": bool(a.get("multi_select", False)), "mark": int(a.get("mark", 0))}),
-    'sw_navigate_topology': _sdk("navigate", "Topology navigation failed", build=lambda a: {
-        "path": a.get("path", ""), "showEquations": bool(a.get("show_equations", False))}),
-    'sw_find_related_files': _sdk("findRelatedCadFiles", "Related file discovery failed", "Discovered related CAD files",
-                                  build=lambda a: {"maxDrawingsProbed": int(a.get("max_drawings_probed", 200))}),
-    'sw_get_edge_analysis': _sdk("getEdgeAnalysis", "Edge analysis failed",
-                                 build=lambda a: {"facePath": a.get("face_path", "")}),
-    'sw_modify_feature_parameter_by_path': _sdk("modifyFeatureParameterByPath", "Feature parameter modification failed",
-                                                build=lambda a: {
+    # .NET runner
+    'find_related_files': _sdk("findRelatedCadFiles", "Related file discovery failed", "Discovered related CAD files",
+                               build=lambda a: {"maxDrawingsProbed": int(a.get("max_drawings_probed", 200))}),
+    'modify_feature_by_path': _sdk("modifyFeatureParameterByPath", "Feature parameter modification failed",
+                                   build=lambda a: {
         "featurePath": a.get("feature_path", ""),
         "depthMm": a.get("depth_mm"),
         "reverseDirection": a.get("reverse_direction"),
@@ -522,14 +623,12 @@ _PART_MUTATING_TOOLS = {
     "set_dimension",
     "manage_feature",
     "hole_linear",
-    "set_parameter",
     "sheet_metal_face",
     "flange",
     "sheet_metal_cut",
-    "sw_modify_feature_parameter_by_path",
-    "execute_python",
-    "sw_execute_csharp",
-    "sw_execute_macro",
+    "modify_feature_by_path",
+    "manage_parameters",
+    "execute_code",
 }
 
 _SUBTRACTIVE_TOOLS = {
@@ -599,15 +698,12 @@ def get_tool_timeout(tool_name: str, cfg: Any) -> float:
         "open_document",
         "save_document",
         "close_document",
-        "create_new_part",
-        "create_new_assembly",
-        "create_new_drawing",
+        "create_document",
         "create_drawing_from_model",
         "connect_solidworks",
-        "sw_execute_csharp",
-        "sw_execute_macro",
-        "sw_capture_views",
-        "sw_find_related_files",
+        "execute_code",
+        "capture_viewport",
+        "find_related_files",
     ):
         return float(getattr(cfg, "open_save_timeout", 120.0))
     elif tool_name in ("export_drawing",):
@@ -854,8 +950,7 @@ class _PythonFinalAnswerSignal(Exception):
 
 def _code_execution_gate(tool: str, user_confirmed_risks: bool) -> Optional[Dict[str, Any]]:
     """
-    Shared consent gate for every tool that runs caller-supplied code
-    (execute_python, sw_execute_csharp, sw_execute_macro).
+    Consent gate for execute_code, whatever the language.
 
     Returns None when execution may proceed, otherwise the refusal result.
     Unlocked by config/env (SW_MCP_ALLOW_EXEC=1) or, for the rest of the session,
@@ -941,7 +1036,7 @@ def _execute_python_fixed(
     """
     global _python_exec_ns
     cfg = get_config()
-    gate = _code_execution_gate("execute_python", user_confirmed_risks)
+    gate = _code_execution_gate("execute_code", user_confirmed_risks)
     if gate:
         return gate
 

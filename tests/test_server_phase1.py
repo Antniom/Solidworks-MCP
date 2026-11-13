@@ -20,10 +20,8 @@ class TestServerPhase1(unittest.TestCase):
         tool_names = {t.name for t in tools}
         expected_subset = {
             "connect_solidworks",
-            "get_solidworks_info",
             "get_capabilities",
-            "create_new_part",
-            "create_new_assembly",
+            "create_document",
             "open_document",
             "save_document",
             "close_document",
@@ -34,11 +32,11 @@ class TestServerPhase1(unittest.TestCase):
             "cut_extrude",
             "fillet_edges",
             "chamfer_edges",
-            "list_features",
+            "get_feature_tree",
             "get_sketch_status",
             "close_sketch",
             "set_units",
-            "execute_python",
+            "execute_code",
         }
         self.assertTrue(expected_subset.issubset(tool_names))
 

@@ -1,4 +1,4 @@
-# SolidWorks AI Studio — Agent Rules & Guidelines
+# SolidCADWorks — Agent Rules & Guidelines
 
 ## Core Principles
 
@@ -13,7 +13,7 @@
 3. **Canonical Feature Decomposition**:
    - Never attempt a single monolithic sketch containing all outer contours, holes, ribs, and chamfers.
    - Decompose parts into atomic sequential features: Base Prismatic Solid -> Primary Cutouts -> Secondary Bosses -> Ribs -> Auxiliary Planes -> Finishing Hole Wizard & Fillets.
-   - Anchor secondary sketches onto existing planar faces (`create_sketch_on_face`) to guarantee automatic solid body merging (`merge_result=True`).
+   - Anchor secondary sketches onto existing planar faces (`create_sketch` with `face_point`) to guarantee automatic solid body merging (`merge_result=True`).
 
 4. **Meaningful Feature & Parameter Naming (Zero Cryptic Features)**:
    - Never leave CAD features with cryptic default names like `Boss-Extrude1`, `Boss-Extrude2`, `Cut-Extrude1` when their engineering purpose is known.
@@ -25,7 +25,7 @@
    - Use `set_dimension` for parametric edits rather than redrawing from scratch.
 
 6. **Ask Before Running Code**:
-   - `execute_python`, `sw_execute_csharp` and `sw_execute_macro` run arbitrary code on the user's machine. Use them only when no native tool fits, and only after the user has agreed in chat.
+   - `execute_code` runs arbitrary Python or C# on the user's machine. Use it only when no native tool fits, and only after the user has agreed in chat.
 
 7. **Follow-Up Automation**:
    - When the user returns from the interactive studio with adjusted parameters, verify the model with `verify_model`, update associated drawing views with `create_drawing_from_model` or `export_drawing` if requested, and report the new physical properties.

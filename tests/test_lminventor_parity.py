@@ -106,18 +106,14 @@ def test_sta_wrapper_injects_volume_delta_and_air_cut_warning():
 
 
 def test_all_lminventor_parity_tools_registered():
-    """Verify all 25 new lminventor/mecAgent parity tools are present in _tool_definitions."""
+    """Verify the lminventor/mecAgent parity tools are present in _tool_definitions."""
     names = {t.name for t in _tool_definitions()}
     expected = {
         "draw_closed_profile",
         "hole_linear",
-        "get_parameters",
-        "set_parameter",
-        "add_parameter",
-        "list_faces",
-        "list_edges",
-        "find_face",
-        "find_edge",
+        "manage_parameters",
+        "list_topology",
+        "select",
         "set_sheet_metal_thickness",
         "sheet_metal_face",
         "flange",
@@ -128,12 +124,12 @@ def test_all_lminventor_parity_tools_registered():
         "drive_kinematic_motion",
         "manage_positional_representations",
         "apply_material_appearance",
-        "render_showcase_viewport",
+        "capture_viewport",
         "supervisor_clean_processes",
         "transaction",
         "reload_api",
-        "sw_get_edge_analysis",
-        "sw_modify_feature_parameter_by_path",
+        "inspect_topology",
+        "modify_feature_by_path",
     }
     missing = expected - names
     assert not missing, f"Missing tools: {missing}"

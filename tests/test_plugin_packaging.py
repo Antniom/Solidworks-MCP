@@ -17,8 +17,8 @@ def test_plugin_json_schema():
     assert manifest_path.exists(), "plugins/solidworks/plugin.json does not exist"
 
     data = json.loads(manifest_path.read_text(encoding="utf-8"))
-    assert data.get("name") == "solidworks"
-    assert data.get("displayName") == "SolidWorks AI Studio"
+    assert data.get("name") == "solidcadworks"
+    assert data.get("displayName") == "SolidCADWorks"
     assert "description" in data
     assert len(data.get("description", "")) > 10
     from solidworks_mcp import __version__
@@ -67,6 +67,9 @@ def test_claude_manifest_meets_directory_rules():
     import re
     data = json.loads(Path(".claude-plugin/plugin.json").read_text(encoding="utf-8"))
     assert re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?", data["name"])
+    assert data["name"] == "solidcadworks" and data["displayName"] == "SolidCADWorks"
+    marketplace = json.loads(Path(".claude-plugin/marketplace.json").read_text(encoding="utf-8"))
+    assert [p["name"] for p in marketplace["plugins"]] == [data["name"]]
     for field in ("displayName", "version", "description", "author", "license"):
         assert data.get(field), field
     # Components are found by convention; only the manifest lives in .claude-plugin/.

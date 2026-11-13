@@ -15,7 +15,7 @@ Use this skill for conducting engineering FEA simulation studies inside SolidWor
 - Assigning physical engineering materials from standard or custom databases (`set_study_material`).
 - Applying boundary restraints and fixtures: fixed faces, roller/slider, hinge, symmetry (`add_study_fixture`).
 - Applying mechanical loads: uniform pressure, concentrated normal forces, directional transverse loads (`add_study_load`).
-- Declarative selection of load and restraint faces using `select_by_geometry` (e.g. `normal: [-1, 0, 0]` for cantilever fixed end).
+- Declarative selection of load and restraint faces using `select` (`"by": "geometry"`) (e.g. `normal: [-1, 0, 0]` for cantilever fixed end).
 - Generating solid parabolic tetrahedral meshes with custom element sizes (`mesh_and_run_simulation`).
 - Solving the FEA system and extracting maximum von Mises stress (MPa), resultant displacement (mm), and Factor of Safety (`get_simulation_results`).
 
@@ -31,14 +31,14 @@ For dialog and rebuild recovery, see `solidworks-diagnostics`.
 > [!IMPORTANT]
 > **STRICT TOOL EXECUTION HIERARCHY**:
 > 1. **Priority 1 — Native MCP Tools (Always use first)**:
->    Always use dedicated SolidWorks MCP tools (`set_study_material`, `create_simulation_study`, `add_study_fixture`, `add_study_load`, `mesh_and_run_simulation`, `get_simulation_results`, `select_by_geometry`, `capture_viewport`).
+>    Always use dedicated SolidWorks MCP tools (`set_study_material`, `create_simulation_study`, `add_study_fixture`, `add_study_load`, `mesh_and_run_simulation`, `get_simulation_results`, `select` (`"by": "geometry"`), `capture_viewport`).
 >    - Native tools automatically initialize and dynamically load `cosworks.dll`.
 >    - They execute on the dedicated STA COM thread, preventing threading apartments collisions.
 >    - They handle complex COSMOSWorks VARIANT wrapping (e.g. null dispatch for `RefGeom`) automatically.
 >    - They handle unit parsing ($N/m^2$ to Pa, mm to m) safely.
-> 2. **Priority 2 — `execute_python` (Security-Gated Fallback ONLY)**:
+> 2. **Priority 2 — `execute_code` (Security-Gated Fallback ONLY)**:
 >    Do **NOT** write raw COSMOSWorks Python scripts for standard static studies, loads, fixtures, or results.
->    `execute_python` is locked by default and requires explicit human user consent in chat.
+>    `execute_code` is locked by default and requires explicit human user consent in chat.
 
 ---
 
@@ -60,7 +60,7 @@ For dialog and rebuild recovery, see `solidworks-diagnostics`.
   - `"roller"`: Translates freely along surface plane; constrained normal to face.
   - `"hinge"`: Constrains radial and axial displacement; permits rotation around cylindrical axis.
   - `"symmetry"`: Normal displacement and in-plane rotations zero.
-- `"face_name"`: Optional face name or entity identifier. Prefer selecting faces via `select_by_geometry` before calling.
+- `"face_name"`: Optional face name or entity identifier. Prefer selecting faces via `select` (`"by": "geometry"`) before calling.
 - `"face_point"`: Optional 3D coordinate on target face `[x, y, z]`.
 - `"study_name"`: Target study name (empty for active study).
 
@@ -70,8 +70,8 @@ For dialog and rebuild recovery, see `solidworks-diagnostics`.
 - `"unit"`:
   - For pressure: `"N/m^2"` (or `"Pa"`), `"psi"`, `"MPa"`
   - For force: `"N"`, `"lbf"`
-- `"direction"`: Load direction or orientation.
-- `"face_name"`: Optional face name. Prefer selecting faces via `select_by_geometry` before calling.
+- `"direction"`: One of `"top"`, `"bottom"`, `"left"`, `"right"`, `"front"`, `"back"`.
+- `"face_name"`: Optional face name. Prefer selecting faces via `select` (`"by": "geometry"`) before calling.
 - `"face_point"`: Optional 3D coordinate on target face `[x, y, z]`.
 - `"study_name"`: Target study name (empty for active study).
 
@@ -93,7 +93,7 @@ For dialog and rebuild recovery, see `solidworks-diagnostics`.
 1. **Always Use Parabolic Tetrahedral Elements**:
    - First-order linear tetrahedra exhibit severe shear locking in bending. The MCP mesher automatically requests high-quality parabolic (10-node) solid elements.
 2. **Deterministic Restraint Selection**:
-   - Never guess face names for boundary conditions. Use `select_by_geometry` with normal vectors (e.g. `normal: [-1, 0, 0]` for the cantilever fixed root face).
+   - Never guess face names for boundary conditions. Use `select` (`"by": "geometry"`) with normal vectors (e.g. `normal: [-1, 0, 0]` for the cantilever fixed root face).
 3. **Reference Geometry Null Dispatch Requirement**:
    - In raw COM, `ICWLoadsAndRestraintsManager.AddRestraint` fails if `RefGeom` is passed as empty integer `0` instead of `None` / `pythoncom.Empty`. The native MCP tool encapsulates this bug fix permanently.
 4. **Stress Output Units**:
@@ -121,7 +121,8 @@ set_study_material {
 }
 
 // 4. Select Cantilever Root Face and Apply Fixed Support Fixture
-select_by_geometry {
+select {
+  "by": "geometry",
   "target_type": "face",
   "surface_type": "plane",
   "normal": [-1, 0, 0]
@@ -131,7 +132,8 @@ add_study_fixture {
 }
 
 // 5. Select Tip Face and Apply Downward Transverse Load (5000 N)
-select_by_geometry {
+select {
+  "by": "geometry",
   "target_type": "face",
   "surface_type": "plane",
   "normal": [0, 1, 0]
@@ -140,7 +142,7 @@ add_study_load {
   "load_type": "force",
   "value": 5000.0,
   "unit": "N",
-  "direction": "down"
+  "direction": "bottom"
 }
 
 // 6. Mesh Solid and Run Analysis

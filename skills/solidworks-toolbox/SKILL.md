@@ -15,7 +15,7 @@ Use this skill when utilizing the official SolidWorks Toolbox standard component
 - Inserting pre-configured fasteners, washers, nuts, retaining rings, and bearings directly into assemblies (`add_component`).
 - Switching Toolbox part configurations using `manage_configuration` (e.g. changing an M12 bolt to M16 or updating length from 40mm to 60mm).
 - Managing custom metadata and BOM descriptions using `manage_custom_properties`.
-- Constraining Toolbox fasteners to assembly holes and faces using `add_mate` and `select_by_geometry`.
+- Constraining Toolbox fasteners to assembly holes and faces using `add_mate` and `select` (`"by": "geometry"`).
 
 If you do NOT have a SolidWorks Toolbox license or need standalone parametric parts created from scratch, use `solidworks-din-parts`.
 For assembly mates and constraints, use `solidworks-assemblies`.
@@ -32,9 +32,9 @@ For diagnostics and dialog recovery, use `solidworks-diagnostics`.
 >    - Native `load_addin {"name": "toolbox"}` dynamically loads `swBrowser.dll` without manual COM hacking.
 >    - Native `add_component` ensures the master Toolbox file is properly loaded into memory (`sw.OpenDoc6`) before placement.
 >    - Native `manage_configuration` switches configurations safely on the STA thread.
-> 2. **Priority 2 — `execute_python` (Security-Gated Fallback ONLY)**:
+> 2. **Priority 2 — `execute_code` (Security-Gated Fallback ONLY)**:
 >    Do **NOT** write raw COM scripts for standard Toolbox operations.
->    `execute_python` is locked by default and requires explicit human user consent in chat.
+>    `execute_code` is locked by default and requires explicit human user consent in chat.
 
 ---
 
@@ -58,8 +58,9 @@ manage_configuration {
   "name": "M8x30"
 }
 
-// 4. Concentric Mate to Flange Hole via select_by_geometry
-select_by_geometry {
+// 4. Concentric Mate to Flange Hole via select by geometry
+select {
+  "by": "geometry",
   "target_type": "face",
   "surface_type": "cylinder",
   "radius": 4.0,
@@ -71,7 +72,7 @@ add_mate {
   "comp2": "ISO 4017-1",
   "entity1": "Hole_Cylinder",
   "entity2": "Bolt_Shank",
-  "align": "aligned"
+  "align": 0
 }
 
 // 5. Coincident Mate: Bolt Head Underside to Counterbore Seat
@@ -81,7 +82,7 @@ add_mate {
   "comp2": "ISO 4017-1",
   "entity1": "Counterbore_Seat",
   "entity2": "Bolt_Washer_Face",
-  "align": "anti_aligned"
+  "align": 1
 }
 
 // 6. Verify Clearance & Collisions

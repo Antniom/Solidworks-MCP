@@ -31,14 +31,14 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 RUNNER_NOT_INSTALLED_MESSAGE = (
-    "The .NET runner behind the sw_* tools was not found (expected in solidworks_mcp/bin/mecagent_runner). "
+    "The .NET runner was not found (expected in solidworks_mcp/bin/mecagent_runner), so runner-backed modes are unavailable. "
     "Every other SolidWorks tool works without it. Reinstall the plugin, or set the MECAGENT_RUNNER_PATH "
     "environment variable to MecAgent.SolidWorks.Runner.exe."
 )
 
 
 class RunnerNotInstalledError(FileNotFoundError):
-    """Raised when a sw_* tool is used but no MecAgent runner executable can be found."""
+    """Raised when a runner-backed tool is used but no runner executable can be found."""
 
 
 # ============================================================================
