@@ -475,7 +475,42 @@ def find_blocking_modal_dialog(target_pid: Optional[int] = None) -> Optional[Dic
     2. Window is top-level, visible, and belongs to SolidWorks (#32770 or owned popup).
     """
     dialogs = list_active_dialogs(target_pid=target_pid)
-    return dialogs[0] if dialogs else None
+    for dlg in dialogs:
+        # SolidWorks' own progress windows ("Calculating Interference Detection", rebuild,
+        # meshing, solver ...) disable the main frame while it works. They are not waiting
+        # for the user, so they must not abort the running tool call.
+        if is_progress_dialog(dlg):
+            continue
+        return dlg
+    return None
+
+
+_PROGRESS_KEYWORDS = (
+    "calculating", "rebuilding", "rebuild", "meshing", "mesh progress", "solving", "solver",
+    "running", "progress", "please wait", "loading", "opening", "saving", "regenerat",
+    "updating", "processing", "preparing", "exporting", "importing", "resolving",
+)
+_PROGRESS_ONLY_BUTTONS = {"cancel", "stop", "abort", "pause", ""}
+
+
+def is_progress_dialog(dlg: Dict[str, Any]) -> bool:
+    """True if the dialog is a busy/progress window rather than a prompt awaiting an answer."""
+    try:
+        hwnd = int(dlg.get("hwnd") or 0)
+        # A native progress bar child is the strongest signal.
+        if hwnd and user32.FindWindowExW(hwnd, None, "msctls_progress32", None):
+            return True
+
+        buttons = [str(b.get("text", "")).replace("&", "").strip().lower() for b in (dlg.get("buttons") or [])]
+        if any(b not in _PROGRESS_ONLY_BUTTONS for b in buttons):
+            return False  # has OK / Yes / No / Close ... -> a real prompt
+        if dlg.get("edits"):
+            return False
+
+        text = " ".join([str(dlg.get("title", ""))] + [str(m) for m in (dlg.get("messages") or [])]).lower()
+        return any(k in text for k in _PROGRESS_KEYWORDS)
+    except Exception:
+        return False
 
 
 def attach_to_window_desktop(hwnd: int) -> bool:

@@ -92,6 +92,50 @@ class DeclarativeSelectionResolver:
         "-x": (-1.0, 0.0, 0.0),
     }
 
+    # Named directions resolve against the document's own reference planes, because part
+    # templates differ (this install's template is Z-up: Top Plane normal = +Z, not +Y).
+    _NAMED_DIRECTION_PLANES = {
+        "top": ("Top Plane", 1.0), "bottom": ("Top Plane", -1.0),
+        "front": ("Front Plane", 1.0), "back": ("Front Plane", -1.0),
+        "right": ("Right Plane", 1.0), "left": ("Right Plane", -1.0),
+    }
+
+    @classmethod
+    def template_direction_normal(cls, doc: Any, direction: str) -> Optional[Tuple[float, float, float]]:
+        """Normal of the named direction taken from the document's Top/Front/Right planes."""
+        spec = cls._NAMED_DIRECTION_PLANES.get((direction or "").lower())
+        if spec is None or doc is None:
+            return None
+        plane_name, sign = spec
+        try:
+            feat = doc.FeatureByName(plane_name)
+            if feat is None:
+                # Renamed/localised planes: default planes are the first three RefPlanes in order.
+                order = ["Front Plane", "Top Plane", "Right Plane"].index(plane_name)
+                planes = []
+                f = doc.FirstFeature
+                while f is not None and len(planes) < 3:
+                    if get_attr_or_call(f, "GetTypeName2") == "RefPlane":
+                        planes.append(f)
+                    f = f.GetNextFeature
+                feat = planes[order] if len(planes) > order else None
+            if feat is None:
+                return None
+            ref_plane = get_attr_or_call(feat, "GetSpecificFeature2")
+            xform = get_attr_or_call(ref_plane, "Transform") if ref_plane is not None else None
+            arr = get_attr_or_call(xform, "ArrayData") if xform is not None else None
+            if not arr or len(arr) < 9:
+                return None
+            # MathTransform uses row vectors: elements 6..8 are the image of the plane's Z axis.
+            n = [float(arr[6]), float(arr[7]), float(arr[8])]
+            mag = math.sqrt(sum(c * c for c in n))
+            if mag < 0.5:
+                return None
+            return tuple(sign * c / mag for c in n)
+        except Exception as e:
+            logger.debug(f"template_direction_normal({direction}) failed: {e}")
+            return None
+
     @classmethod
     def resolve_and_select(
         cls,
@@ -297,7 +341,8 @@ class DeclarativeSelectionResolver:
         """Finds face matching direction/normal vector across solid bodies and selects it."""
         desired_normal = None
         if target.direction and target.direction.lower() in cls.DIRECTION_NORMALS:
-            desired_normal = cls.DIRECTION_NORMALS[target.direction.lower()]
+            desired_normal = cls.template_direction_normal(doc, target.direction.lower()) \
+                or cls.DIRECTION_NORMALS[target.direction.lower()]
         elif target.normal and len(target.normal) >= 3:
             mag = math.sqrt(sum(c * c for c in target.normal[:3]))
             if mag > 1e-6:
@@ -349,14 +394,17 @@ class DeclarativeSelectionResolver:
                         continue
 
                     # Planar normal - use GetPlaneParams() with PlaneParams fallback
+                    # ISurface exposes PlaneParams as a property; get_attr_or_call returns
+                    # None (it does not raise) for a missing member, so try both by value.
                     params = None
-                    try:
-                        params = get_attr_or_call(surface_obj, "GetPlaneParams")
-                    except Exception:
+                    for member in ("PlaneParams", "GetPlaneParams"):
                         try:
-                            params = get_attr_or_call(surface_obj, "PlaneParams")
+                            params = get_attr_or_call(surface_obj, member)
                         except Exception:
                             params = None
+                        if params is not None and not callable(params):
+                            break
+                        params = None
 
                     if not params or len(params) < 3:
                         continue

@@ -74,6 +74,23 @@ def get_attr_or_call(obj: Any, name: str, *args, **kwargs) -> Any:
         return attr
 
 
+def transform_point(arr: Any, p: Any) -> list:
+    """
+    Apply a SolidWorks MathTransform (its 13/16-element ArrayData) to a 3D point.
+    Row-vector convention: p' = scale * (p . R) + T, R = arr[0:9], T = arr[9:12], scale = arr[12].
+    Done in Python because IMathUtility.CreatePoint / CreateTransform raise
+    DISP_E_MEMBERNOTFOUND under pywin32 late binding.
+    """
+    a = [float(v) for v in arr]
+    x, y, z = float(p[0]), float(p[1]), float(p[2])
+    s = a[12] if len(a) > 12 and a[12] else 1.0
+    return [
+        (x * a[0] + y * a[3] + z * a[6]) * s + a[9],
+        (x * a[1] + y * a[4] + z * a[7]) * s + a[10],
+        (x * a[2] + y * a[5] + z * a[8]) * s + a[11],
+    ]
+
+
 def byref_int(initial: int = 0) -> Any:
     """
     Create a ByRef VT_I4 VARIANT for COM [out] integer parameters.

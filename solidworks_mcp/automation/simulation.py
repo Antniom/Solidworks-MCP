@@ -414,15 +414,44 @@ class SimulationOperations:
         err_var = byref_int(0)
         pre_count = getattr(lrm, "Count", 0)
 
+        is_cylindrical = False
+        try:
+            surf = get_attr_or_call(face_entity, "GetSurface")
+            is_cylindrical = bool(get_attr_or_call(surf, "IsCylinder")) if surf is not None else False
+        except Exception:
+            pass
+        ftype = fixture_type.lower()
+        if ftype == "hinge" and not is_cylindrical:
+            return self._result(
+                False,
+                "A hinge fixture needs a cylindrical face (e.g. a pin hole); the selected face is not cylindrical.",
+                SwErrors.swInvalidParameter,
+            )
+
+        note = None
         try:
             restraint = lrm.AddRestraint(type_code, [face_entity], null_dispatch, err_var)
             err_val = getattr(err_var, "value", 0)
+            if (restraint is None or err_val != 0) and ftype == "immovable":
+                # "Immovable" only exists for shells/beams/trusses; on a solid face the
+                # equivalent restraint is Fixed (translations already zero for solids).
+                err_var = byref_int(0)
+                restraint = lrm.AddRestraint(FIXTURE_TYPE_FIXED, [face_entity], null_dispatch, err_var)
+                err_val = getattr(err_var, "value", 0)
+                if restraint is not None and err_val == 0:
+                    note = "Immovable is not available on solid faces; applied the equivalent Fixed restraint."
             if restraint is None or err_val != 0:
+                hints = {
+                    "roller": "Roller/Slider needs a planar face.",
+                    "symmetric": "Symmetry needs a planar face on the symmetry plane.",
+                    "immovable": "Immovable applies to shell/beam geometry only.",
+                }
                 return self._result(
                     False,
-                    f"AddRestraint failed with error code: {err_val}",
+                    f"AddRestraint ({fixture_type}) failed with Simulation error code {err_val}. "
+                    + hints.get(ftype, "Check that the face belongs to the meshed body and suits this fixture type."),
                     SwErrors.swSimulationError,
-                    {"error_code": err_val}
+                    {"error_code": err_val, "face_is_cylindrical": is_cylindrical}
                 )
 
             post_count = getattr(lrm, "Count", 0)
@@ -435,9 +464,11 @@ class SimulationOperations:
 
             return self._result(
                 True,
-                f"Applied '{fixture_type}' fixture to {direction or face_name or face_point}",
+                f"Applied '{fixture_type}' fixture to {direction or face_name or face_point}"
+                + (f" ({note})" if note else ""),
                 SwErrors.swSuccess,
                 {
+                    "note": note,
                     "fixture_type": fixture_type,
                     "target": direction or face_name or face_point,
                     "study_name": study.Name,
@@ -512,10 +543,22 @@ class SimulationOperations:
                     return self._result(False, f"AddPressure failed (code: {err_val})", SwErrors.swSimulationError)
 
                 get_attr_or_call(pres, "PressureBeginEdit")
-                # Unit mapping: 0 = N/m^2, 1 = psi, 3 = N/mm^2 (MPa)
-                u_map = {"n/m^2": 0, "pa": 0, "psi": 1, "mpa": 3, "n/mm^2": 3}
-                pres.Unit = u_map.get(unit.lower(), 0)
-                pres.Value = float(value)
+                # ICWPressure.Unit codes other than 0 (N/m^2) are not honoured reliably
+                # (verified: "MPa" was solved as Pa), so always convert to SI here.
+                to_pa = {
+                    "n/m^2": 1.0, "pa": 1.0, "kpa": 1e3, "mpa": 1e6, "n/mm^2": 1e6,
+                    "gpa": 1e9, "bar": 1e5, "psi": 6894.757293168, "ksi": 6894757.293168,
+                }
+                factor = to_pa.get(unit.strip().lower())
+                if factor is None:
+                    get_attr_or_call(pres, "PressureEndEdit")
+                    return self._result(
+                        False,
+                        f"Unsupported pressure unit '{unit}'. Use one of: {', '.join(sorted(to_pa))}",
+                        SwErrors.swInvalidParameters,
+                    )
+                pres.Unit = 0
+                pres.Value = float(value) * factor
                 get_attr_or_call(pres, "PressureEndEdit")
 
             elif load_type_lower == "force":
@@ -553,7 +596,12 @@ class SimulationOperations:
 
                 get_attr_or_call(force, "ForceBeginEdit")
                 force.Unit = FORCE_UNIT_N
-                val = float(value)
+                to_n = {"n": 1.0, "kn": 1e3, "lbf": 4.4482216152605, "kgf": 9.80665}
+                f_factor = to_n.get(unit.strip().lower())
+                if f_factor is None:
+                    # Pressure-style default ("N/m^2") or unknown unit on a force load: treat as newtons
+                    f_factor = 1.0
+                val = float(value) * f_factor
                 if is_directional:
                     # In COSMOSWorks AddForce(0), component 3 is normal to ref_geom
                     is_positive = dir_lower in ("right", "+x", "x", "top", "+y", "y", "front", "+z", "z")
@@ -584,7 +632,8 @@ class SimulationOperations:
                     "unit": unit,
                     "target": direction or face_name or face_point,
                     "study_name": study.Name,
-                    "load_count": post_count,
+                    # LoadsAndRestraintsManager.Count includes fixtures as well as loads.
+                    "loads_and_restraints_count": post_count,
                 }
             )
         except Exception as e:

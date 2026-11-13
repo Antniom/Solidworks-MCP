@@ -15,28 +15,40 @@ from ..utils import get_solidworks_info
 class CapabilityInspector:
     """Discovers and formats SolidWorks system capabilities and runtime state."""
 
+    # Candidate ProgIDs per add-in (first registered one wins). The previous single
+    # ProgIDs (e.g. "SldWorks.SimulationAddin") do not exist, so every add-in showed
+    # as not loaded even while Simulation was running studies.
     ADDINS_TO_CHECK = {
         "simulation": {
-            "prog_id": "SldWorks.SimulationAddin",
+            "prog_ids": ["CosmosWorks.CosmosWorks", "SldWorks.Simulation"],
             "name": "SOLIDWORKS Simulation (COSMOSWorks)",
         },
         "photoview": {
-            "prog_id": "PhotoView360.Addin",
+            "prog_ids": ["PhotoView360.PhotoView360Addin", "PhotoView360.Addin"],
             "name": "PhotoView 360",
         },
         "toolbox": {
-            "prog_id": "Toolbox.Addin",
+            "prog_ids": ["swBrowser.Browser", "SWBrowser.SWBrowserAddIn", "Toolbox.Addin"],
             "name": "SOLIDWORKS Toolbox",
         },
         "routing": {
-            "prog_id": "Routing.Addin",
+            "prog_ids": ["Routing.RoutingAddIn", "Routing.Addin"],
             "name": "SOLIDWORKS Routing",
         },
         "motion": {
-            "prog_id": "Motion.Addin",
+            "prog_ids": ["SWMotion.SWMotionAddIn", "Motion.Addin"],
             "name": "SOLIDWORKS Motion",
         },
     }
+
+    @staticmethod
+    def _progid_registered(prog_id: str) -> bool:
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, f"{prog_id}\\CLSID"):
+                return True
+        except Exception:
+            return False
 
     @classmethod
     def get_system_capabilities(cls, sw_app: Optional[Any] = None) -> Dict[str, Any]:
@@ -114,19 +126,22 @@ class CapabilityInspector:
 
                 # Check add-ins
                 for addin_key, addin_meta in cls.ADDINS_TO_CHECK.items():
-                    try:
-                        prog_id = addin_meta["prog_id"]
-                        # GetAddInObject checks if addin is active/loaded
-                        addin_obj = sw_app.GetAddInObject(prog_id)
-                        caps["addins"][addin_key] = {
-                            "name": addin_meta["name"],
-                            "loaded": addin_obj is not None,
-                        }
-                    except Exception:
-                        caps["addins"][addin_key] = {
-                            "name": addin_meta["name"],
-                            "loaded": False,
-                        }
+                    registered = [p for p in addin_meta["prog_ids"] if cls._progid_registered(p)]
+                    entry = {
+                        "name": addin_meta["name"],
+                        "installed": bool(registered),
+                        "loaded": False,
+                    }
+                    for prog_id in registered:
+                        try:
+                            # GetAddInObject returns the add-in object only while it is loaded
+                            if sw_app.GetAddInObject(prog_id) is not None:
+                                entry["loaded"] = True
+                                entry["prog_id"] = prog_id
+                                break
+                        except Exception:
+                            continue
+                    caps["addins"][addin_key] = entry
             except Exception as e:
                 caps["runtime"]["inspection_error"] = str(e)
 

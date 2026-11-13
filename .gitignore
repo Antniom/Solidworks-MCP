@@ -19,3 +19,7 @@ test_artifacts_phase3/
 screenshots/
 .checkpoints/
 knowledge/discovered/
+
+# Local runtime output
+solidworks_mcp/artifacts/
+backup_*/

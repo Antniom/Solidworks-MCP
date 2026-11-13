@@ -139,6 +139,8 @@ class SheetMetalOperations:
 
             pre_state = capture_pre_mutation_state(doc)
             ok_sel, sketch_name, err_msg = self._close_and_select_sketch(doc)
+            if ok_sel and hasattr(self, "_recapture_pre_volume"):
+                self._recapture_pre_volume(doc, pre_state)
             if not ok_sel:
                 return self._result(
                     False,
@@ -196,6 +198,8 @@ class SheetMetalOperations:
             vol_after = capture_vol_state(doc)
             suffix, delta_dict = format_vol_delta(pre_state.vol_state, vol_after)
             feat_name = getattr(feat, "Name", "Base-Flange1") if feat else "Base-Flange1"
+            # Remember the thickness actually used so flange/cut default to it.
+            self._sm_thickness_mm = float(t_mm)
 
             return self._result(
                 True,
@@ -240,8 +244,28 @@ class SheetMetalOperations:
             if not edge_indices:
                 edge_indices = [1]
 
+            if abs(float(angle) - 90.0) > 1e-6:
+                return self._result(
+                    False,
+                    f"flange: only 90° flanges are supported (got {angle}°); the flange is built as a "
+                    "perpendicular extruded wall.",
+                    SwErrors.swInvalidParameter,
+                )
+
             vol_before = capture_vol_state(doc)
+            # Use the real sheet thickness: the shortest edge of the base body.
             t_mm = getattr(self, "_sm_thickness_mm", 1.5)
+            try:
+                lengths = []
+                for e in edges:
+                    a = get_attr_or_call(get_attr_or_call(e, "GetStartVertex"), "GetPoint")
+                    b = get_attr_or_call(get_attr_or_call(e, "GetEndVertex"), "GetPoint")
+                    if a and b:
+                        lengths.append(math.dist(a[:3], b[:3]) * 1000.0)
+                if lengths:
+                    t_mm = min(l for l in lengths if l > 1e-6)
+            except Exception as t_ex:
+                logger.debug(f"flange thickness detection failed, using {t_mm} mm: {t_ex}")
             created_names = []
 
             for e_idx in edge_indices:
@@ -280,16 +304,21 @@ class SheetMetalOperations:
                 doc.InsertSketch2(True)
 
                 sk = getattr(doc.SketchManager, "ActiveSketch", None)
-                xform = getattr(sk, "ModelToSketchTransform", None) if sk else None
-                math_util = self._sw_app.GetMathUtility() if self._sw_app else None
+                xform = get_attr_or_call(sk, "ModelToSketchTransform") if sk else None
+                xf_arr = get_attr_or_call(xform, "ArrayData") if xform is not None else None
+                if not xf_arr or len(xf_arr) < 12:
+                    doc.InsertSketch2(True)
+                    return self._result(
+                        False,
+                        "flange error: could not obtain the sketch transform for the selected face.",
+                        SwErrors.swGeneralError,
+                    )
+
+                from ..core.com_compat import transform_point
 
                 def _to_sk(pt3):
-                    if math_util and xform:
-                        mp = math_util.CreatePoint(list(pt3))
-                        sp = mp.MultiplyTransform(xform)
-                        arr = sp.ArrayData
-                        return float(arr[0]), float(arr[1])
-                    return float(pt3[0]), float(pt3[1])
+                    sp = transform_point(xf_arr, pt3)
+                    return float(sp[0]), float(sp[1])
 
                 sx1, sy1 = _to_sk(pt1)
                 sx2, sy2 = _to_sk(pt2)
@@ -338,7 +367,13 @@ class SheetMetalOperations:
             get_attr_or_call(doc, "EditRebuild3")
             vol_after = capture_vol_state(doc)
             suffix, delta_dict = format_vol_delta(vol_before, vol_after)
-            names_str = ", ".join(created_names) if created_names else "Flange"
+            if not created_names:
+                return self._result(
+                    False,
+                    f"flange error: no flange feature was created on edge(s) {edge_indices}.",
+                    SwErrors.swFeatureError,
+                )
+            names_str = ", ".join(created_names)
 
             return self._result(
                 True,
@@ -354,6 +389,14 @@ class SheetMetalOperations:
             )
         except Exception as e:
             logger.error(f"flange error: {e}\n{traceback.format_exc()}")
+            # Never leave a half-built sketch open behind an error.
+            try:
+                doc_now, _ = self.get_active_doc()
+                if doc_now is not None and get_attr_or_call(doc_now, "GetActiveSketch2") is not None:
+                    doc_now.InsertSketch2(True)
+                    doc_now.EditUndo2(1)
+            except Exception:
+                pass
             return self._result(False, f"flange error: {e}", SwErrors.swGeneralError)
 
     def sheet_metal_cut(

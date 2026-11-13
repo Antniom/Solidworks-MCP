@@ -280,6 +280,55 @@ class DocumentOperations:
             logger.error(f"Open document error: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Error: {e}", SwErrors.swFileLoadError)
     
+    def _export_neutral(self, doc, filepath: str) -> Dict:
+        """
+        Export a copy of the active part/assembly to a neutral format chosen by extension
+        (STEP, IGES, STL, Parasolid, 3MF ...). The open document keeps its own file name.
+        """
+        from ..core import get_fs_policy
+        is_valid, canonical, err_msg = get_fs_policy().validate_path(filepath, must_exist=False)
+        if not is_valid:
+            return self._result(False, f"Filesystem security violation: {err_msg}", SwErrors.swFileSaveError)
+        filepath = canonical
+        dir_path = os.path.dirname(filepath)
+        if dir_path and not os.path.exists(dir_path):
+            os.makedirs(dir_path)
+        if os.path.exists(filepath):
+            try:
+                os.remove(filepath)  # so the existence check below proves this export wrote it
+            except OSError:
+                pass
+
+        errors = win32com.client.VARIANT(pythoncom.VT_BYREF | pythoncom.VT_I4, 0)
+        warnings = win32com.client.VARIANT(pythoncom.VT_BYREF | pythoncom.VT_I4, 0)
+        empty_export = win32com.client.VARIANT(pythoncom.VT_DISPATCH, None)
+        ok = False
+        detail = ""
+        try:
+            # SaveAs3 options: 1 = swSaveAsOptions_Silent | 2 = swSaveAsOptions_Copy
+            ok = bool(doc.Extension.SaveAs3(filepath, 0, 1 | 2, empty_export, empty_export, errors, warnings))
+        except Exception as e1:
+            detail = f"Extension.SaveAs3: {e1}"
+            try:
+                ok = bool(doc.Extension.SaveAs(filepath, 0, 1 | 2, empty_export, errors, warnings))
+            except Exception as e2:
+                detail += f"; Extension.SaveAs: {e2}"
+        size = os.path.getsize(filepath) if os.path.exists(filepath) else 0
+        if not ok or size == 0:
+            return self._result(
+                False,
+                f"Export to '{filepath}' failed (errors={getattr(errors, 'value', '?')}, "
+                f"warnings={getattr(warnings, 'value', '?')}). {detail}".strip(),
+                SwErrors.swFileSaveError,
+            )
+        return self._result(
+            True,
+            f"Exported copy to '{filepath}' ({size:,} bytes)",
+            SwErrors.swSuccess,
+            {"path": filepath, "size_bytes": size, "method": "Extension.SaveAs3 (copy)",
+             "warnings": getattr(warnings, "value", 0)},
+        )
+
     def save_document(self, filepath: str = None) -> Dict:
         """
         Save the active document
@@ -306,6 +355,12 @@ class DocumentOperations:
                     "Assembly": ".sldasm",
                     "Drawing": ".slddrw",
                 }.get(dtype)
+                export_exts = {
+                    "Part": {".step", ".stp", ".igs", ".iges", ".stl", ".x_t", ".x_b", ".3mf", ".obj", ".ply", ".sat", ".parasolid"},
+                    "Assembly": {".step", ".stp", ".igs", ".iges", ".stl", ".x_t", ".x_b", ".3mf", ".sat"},
+                }.get(dtype, set())
+                if ext in export_exts:
+                    return self._export_neutral(doc, filepath)
                 if expected_ext and ext != expected_ext:
                     return self._result(
                         False,
@@ -547,13 +602,20 @@ class DocumentOperations:
             docs = []
             type_names = {1: "Part", 2: "Assembly", 3: "Drawing"}
             
-            raw_docs = getattr(self._sw_app, "GetDocuments", None)
-            if callable(raw_docs):
-                try:
+            # Do not swallow failures here: an empty list from a dead COM handle
+            # used to be reported as "0 document(s) open".
+            try:
+                raw_docs = self._sw_app.GetDocuments
+                if callable(raw_docs):
                     raw_docs = raw_docs()
-                except Exception:
-                    pass
-            
+            except Exception as gd_ex:
+                return self._result(
+                    False,
+                    f"Could not query open documents (SolidWorks connection problem): {gd_ex}. "
+                    "Try connect_solidworks.",
+                    SwErrors.swConnectionError,
+                )
+
             for doc in (raw_docs or []):
                 try:
                     title = doc.GetTitle
@@ -984,6 +1046,15 @@ class DocumentOperations:
                     val_str = "Yes" if str(value).strip().lower() in ("true", "1", "yes") else "No"
                 else:
                     val_str = str(value)
+                if ptype_int in (3, 5) and not val_str.startswith("$PRP:") and not val_str.startswith('"'):
+                    try:
+                        float(val_str)
+                    except ValueError:
+                        return self._result(
+                            False,
+                            f"Custom property '{prop_name}': '{val_str}' is not a number (property_type='number').",
+                            SwErrors.swInvalidParameter,
+                        )
 
                 if prop_name in existing_names:
                     cpm.Set2(prop_name, val_str)
@@ -1000,7 +1071,17 @@ class DocumentOperations:
                         except Exception:
                             pass
 
-                # Post-condition verification
+                # Post-condition verification. The property must actually exist first: the
+                # ByRef read-back echoes the requested value for a property SolidWorks rejected
+                # (e.g. "abc" as a number), which used to be reported as success.
+                current_names = list(get_attr_or_call(cpm, "GetNames") or ())
+                if prop_name not in current_names:
+                    hint = " (value is not a valid number)" if ptype_int in (3, 5) else ""
+                    return self._result(
+                        False,
+                        f"Custom property '{prop_name}' was not created{hint}.",
+                        SwErrors.swGeneralError,
+                    )
                 raw_read, res_read = self._read_cpm_property(cpm, prop_name)
                 matched = False
                 if raw_read is not None or res_read is not None:
@@ -1015,12 +1096,6 @@ class DocumentOperations:
                         matched = (raw_read == val_str or res_read == val_str)
                     else:
                         matched = (raw_read == val_str or res_read == val_str or str(raw_read).strip() == str(val_str).strip() or str(res_read).strip() == str(val_str).strip())
-
-                if not matched:
-                    # Fallback check: check if name is in cpm.GetNames()
-                    current_names = get_attr_or_call(cpm, "GetNames") or ()
-                    if prop_name in current_names:
-                        matched = True
 
                 if not matched:
                     return self._result(

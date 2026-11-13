@@ -487,6 +487,17 @@ class SketchOperations:
                     SwErrors.swInvalidParameter,
                 )
 
+            # A sketch arc must span strictly between 0° and 360° (counter-clockwise from start).
+            # 360 used to fail with "ensure sketch is active", and 450 drew 90° while reporting 450°.
+            span = float(end_angle) - float(start_angle)
+            if span <= 0 or span >= 360:
+                return self._result(
+                    False,
+                    f"Invalid arc span {span}° (start={start_angle}, end={end_angle}): the counter-clockwise "
+                    "sweep must be between 0 and 360 degrees. Use draw_circle for a full circle.",
+                    SwErrors.swInvalidParameter,
+                )
+
             # Convert to meters
             cx_m = self._units.to_meters(cx, unit)
             cy_m = self._units.to_meters(cy, unit)

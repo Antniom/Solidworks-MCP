@@ -26,9 +26,16 @@ class CheckpointMetadata:
     last_feature_name: str
     snapshot_path: Optional[str] = None
     description: str = ""
+    # Parametric state captured at checkpoint time so rollback can restore values,
+    # not just delete later features.
+    dimension_values: Dict[str, float] = field(default_factory=dict)
+    equations: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
+        out = asdict(self)
+        out["dimension_count"] = len(out.pop("dimension_values", {}) or {})
+        out["equation_count"] = len(out.pop("equations", []) or [])
+        return out
 
 
 class CheckpointManager:
@@ -53,6 +60,129 @@ class CheckpointManager:
             last_name = feat.Name
             feat = feat.GetNextFeature
         return count, last_name
+
+    def _iter_dimensions(self, doc: Any):
+        """Yield (full_name, IDimension) for every display dimension in the feature tree."""
+        from ..core.com_compat import get_attr_or_call
+        seen = set()
+
+        def _dims_of(f):
+            try:
+                disp = get_attr_or_call(f, "GetFirstDisplayDimension")
+            except Exception:
+                disp = None
+            guard = 0
+            while disp is not None and guard < 2000:
+                guard += 1
+                try:
+                    d = get_attr_or_call(disp, "GetDimension")
+                    full = getattr(d, "FullName", "") if d is not None else ""
+                    if full and full not in seen:
+                        seen.add(full)
+                        yield full, d
+                except Exception:
+                    pass
+                try:
+                    disp = f.GetNextDisplayDimension(disp)
+                except Exception:
+                    break
+
+        feat = getattr(doc, "FirstFeature", None)
+        while feat is not None:
+            yield from _dims_of(feat)
+            try:
+                sub = get_attr_or_call(feat, "GetFirstSubFeature")
+                while sub is not None:
+                    yield from _dims_of(sub)
+                    sub = sub.GetNextSubFeature
+            except Exception:
+                pass
+            try:
+                feat = feat.GetNextFeature
+            except Exception:
+                break
+
+    def _capture_dimensions(self, doc: Any) -> Dict[str, float]:
+        values: Dict[str, float] = {}
+        try:
+            for full, d in self._iter_dimensions(doc):
+                try:
+                    values[full] = float(getattr(d, "SystemValue"))
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.debug(f"Dimension capture warning: {e}")
+        return values
+
+    def _capture_equations(self, doc: Any) -> List[str]:
+        from ..core.com_compat import get_attr_or_call
+        eqs: List[str] = []
+        try:
+            eq_mgr = get_attr_or_call(doc, "GetEquationMgr")
+            if eq_mgr is None:
+                return eqs
+            cnt = int(get_attr_or_call(eq_mgr, "GetCount") or 0)
+            for i in range(cnt):
+                eqs.append(str(eq_mgr.Equation(i) or ""))
+        except Exception as e:
+            logger.debug(f"Equation capture warning: {e}")
+        return eqs
+
+    def _restore_parametric_state(self, doc: Any, meta: "CheckpointMetadata") -> Dict[str, Any]:
+        """Restore dimension values and equations recorded in the checkpoint."""
+        from ..core.com_compat import get_attr_or_call
+        restored_dims: List[str] = []
+        failed_dims: List[str] = []
+        restored_eqs = 0
+        removed_eqs = 0
+
+        # Equations first: they may drive dimensions.
+        try:
+            eq_mgr = get_attr_or_call(doc, "GetEquationMgr")
+            if eq_mgr is not None:
+                cnt = int(get_attr_or_call(eq_mgr, "GetCount") or 0)
+                # Remove equations added after the checkpoint (from the end).
+                for i in range(cnt - 1, len(meta.equations) - 1, -1):
+                    try:
+                        eq_mgr.Delete(i)
+                        removed_eqs += 1
+                    except Exception as e:
+                        logger.debug(f"Equation delete warning at {i}: {e}")
+                cnt = int(get_attr_or_call(eq_mgr, "GetCount") or 0)
+                for i in range(min(cnt, len(meta.equations))):
+                    try:
+                        if str(eq_mgr.Equation(i) or "") != meta.equations[i]:
+                            eq_mgr.SetEquationAndConfigurationOption(i, meta.equations[i], 1, None)
+                            restored_eqs += 1
+                    except Exception as e:
+                        logger.debug(f"Equation restore warning at {i}: {e}")
+        except Exception as e:
+            logger.debug(f"Equation restore warning: {e}")
+
+        try:
+            for full, d in self._iter_dimensions(doc):
+                if full not in meta.dimension_values:
+                    continue
+                want = meta.dimension_values[full]
+                try:
+                    have = float(getattr(d, "SystemValue"))
+                    if abs(have - want) <= 1e-12:
+                        continue
+                    # 1 = swSetValue_InThisConfiguration
+                    d.SetSystemValue3(want, 1, "")
+                    restored_dims.append(full)
+                except Exception as e:
+                    failed_dims.append(full)
+                    logger.debug(f"Dimension restore warning for {full}: {e}")
+        except Exception as e:
+            logger.debug(f"Dimension restore warning: {e}")
+
+        return {
+            "restored_dimensions": restored_dims,
+            "failed_dimensions": failed_dims,
+            "restored_equations": restored_eqs,
+            "removed_equations": removed_eqs,
+        }
 
     def _normalize_title(self, doc: Any) -> str:
         """Get and normalize document title, stripping drawing sheet suffix and extensions."""
@@ -107,15 +237,22 @@ class CheckpointManager:
             last_feature_name=last_feat,
             snapshot_path=snapshot_path if snapshot_saved else None,
             description=description,
+            dimension_values=self._capture_dimensions(doc),
+            equations=self._capture_equations(doc),
         )
 
         key = f"{doc_title}::{name}"
+        replaced = key in self._checkpoints
         self._checkpoints[key] = meta
 
+        msg = f"Checkpoint '{name}' created at feature '{last_feat}' ({feat_count} features)"
+        if replaced:
+            msg += f" — replaced an earlier checkpoint with the same name"
         return {
             "success": True,
-            "message": f"Checkpoint '{name}' created at feature '{last_feat}' ({feat_count} features)",
+            "message": msg,
             "checkpoint": meta.to_dict(),
+            "replaced_existing": replaced,
         }
 
     def rollback_checkpoint(
@@ -171,16 +308,38 @@ class CheckpointManager:
             }
 
         deleted_names = []
+        failed_deletes = []
         # Delete new features in reverse order
         for feat_obj in reversed(new_features):
-            feat_name = feat_obj.Name
+            try:
+                feat_name = feat_obj.Name
+            except Exception:
+                # Already removed together with its parent (absorbed sketch etc.)
+                continue
             try:
                 ok = feat_obj.Select2(False, 0)
                 if ok:
                     doc.EditDelete()
                     deleted_names.append(feat_name)
+                else:
+                    failed_deletes.append(feat_name)
             except Exception as e:
+                failed_deletes.append(feat_name)
                 logger.warning(f"Error deleting feature '{feat_name}': {e}")
+
+        # A feature that could not be selected may have gone with its parent; re-check the tree.
+        if failed_deletes:
+            remaining = set()
+            f = getattr(doc, "FirstFeature", None)
+            while f is not None:
+                try:
+                    remaining.add(f.Name)
+                    f = f.GetNextFeature
+                except Exception:
+                    break
+            failed_deletes = [n for n in failed_deletes if n in remaining]
+
+        param_state = self._restore_parametric_state(doc, meta)
 
         # Rebuild document
         try:
@@ -188,12 +347,29 @@ class CheckpointManager:
         except Exception:
             pass
 
-        return {
-            "success": True,
-            "message": f"Rolled back to checkpoint '{name}'. Removed {len(deleted_names)} features.",
+        n_dims = len(param_state["restored_dimensions"])
+        n_eqs = param_state["restored_equations"] + param_state["removed_equations"]
+        ok = not failed_deletes and not param_state["failed_dimensions"]
+        msg = (
+            f"Rolled back to checkpoint '{name}'. Removed {len(deleted_names)} features, "
+            f"restored {n_dims} dimension value(s) and {n_eqs} equation change(s)."
+        )
+        if not ok:
+            msg += (
+                f" INCOMPLETE: could not delete {failed_deletes}; "
+                f"could not restore {param_state['failed_dimensions']}."
+            )
+        result = {
+            "success": ok,
+            "message": msg,
             "deleted_features": deleted_names,
             "reverted_to": target_feat,
+            **param_state,
         }
+        if not ok:
+            result["error"] = msg
+            result["failed_deletes"] = failed_deletes
+        return result
 
     def list_checkpoints(self, doc_title: Optional[str] = None) -> List[Dict[str, Any]]:
         """List active checkpoints, optionally filtered by document title."""

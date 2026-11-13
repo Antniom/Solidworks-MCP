@@ -102,16 +102,20 @@ class ModelVerifier:
             warnings.append(f"EditRebuild3 warning: {e}")
 
         # 2. Check rebuild error count
+        # IModelDoc2 has no GetRebuildErrorCount member: the old lookup always raised, was
+        # swallowed, and every model reported rebuild_clean=true. Scan feature error codes
+        # instead (the same check inspect_rebuild_errors uses).
         rebuild_count = 0
         try:
-            get_err_cnt = getattr(doc, "GetRebuildErrorCount", None)
-            if get_err_cnt:
-                rebuild_count = get_err_cnt() if callable(get_err_cnt) else get_err_cnt
+            from .post_conditions import get_model_rebuild_errors
+            feat_errors = get_model_rebuild_errors(doc)
+            rebuild_count = len(feat_errors)
+            for fe in feat_errors:
+                rebuild_errors.append(
+                    f"{fe.get('feature_name')} ({fe.get('feature_type')}): error code {fe.get('error_code')}"
+                )
         except Exception as e:
-            logger.debug(f"GetRebuildErrorCount check: {e}")
-
-        if rebuild_count > 0:
-            rebuild_errors.append(f"Model has {rebuild_count} rebuild errors.")
+            warnings.append(f"Rebuild error scan failed: {e}")
 
         # 3. Check bodies
         bodies = None
@@ -237,6 +241,18 @@ class ModelVerifier:
                 principal_matched = all(abs(e - a) <= tolerance_mm for e, a in zip(exp_sorted, act_sorted))
 
             dim_passed = exact_axis_passed or principal_matched
+            if principal_matched and not exact_axis_passed:
+                # Matched only after sorting: report diffs against the sorted pairing so a
+                # pass is not shown next to 30/70/40 mm "diffs", and say so in a warning.
+                exp_sorted = sorted(exp_vals)
+                act_sorted = sorted(act_vals)
+                diffs = {
+                    f"sorted_{i}": round(abs(e - a), 3) for i, (e, a) in enumerate(zip(exp_sorted, act_sorted))
+                }
+                warnings.append(
+                    "Dimensions match only in a different axis order "
+                    f"(expected {expected_dimensions}, actual {dimensions_mm}); check model orientation."
+                )
             if not dim_passed:
                 warnings.append(
                     f"Dimension mismatch: actual {dimensions_mm} vs expected {expected_dimensions} (tolerance: {tolerance_mm} mm)"

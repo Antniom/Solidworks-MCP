@@ -24,7 +24,7 @@ import threading
 import json
 import logging
 import traceback
-from typing import Any, Dict, Tuple, Optional
+from typing import Any, Dict, List, Tuple, Optional
 from pathlib import Path
 
 # MCP imports
@@ -148,11 +148,15 @@ def _tool_definitions() -> list[Tool]:
         ),
         Tool(
             name="save_document",
-            description="Save the active document.",
+            description=(
+                "Save the active document, or Save As to a new path. A neutral-format extension "
+                "(.step/.stp, .igs/.iges, .stl, .x_t/.x_b, .3mf, .sat; .obj/.ply for parts) exports a copy "
+                "instead and leaves the open document's own file unchanged."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "filepath": {"type": "string", "description": "Path to save (optional for Save As)"}
+                    "filepath": {"type": "string", "description": "Path to save (optional). Native extension = Save As; neutral extension = export copy."}
                 },
                 "required": []
             }
@@ -710,10 +714,18 @@ def _tool_definitions() -> list[Tool]:
         ),
         Tool(
             name="select_by_geometry",
-            description="Select model entities (faces, edges, vertices) using geometric filters such as surface type, face normal, radius, edge curve type, edge length, midpoint, point, and bounding box.",
+            description=(
+                "Select model entities (faces, edges, vertices) using geometric filters such as surface type, face normal, "
+                "radius, edge curve type, edge length, midpoint, point, and bounding box. Works in parts and assemblies; in an "
+                "assembly, coordinates/normals are in assembly space and 'component' limits the search to one component."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
+                    "component": {
+                        "type": "string",
+                        "description": "Assembly only: component name to search (e.g. 'pin-1'); omit to search all components"
+                    },
                     "target_type": {
                         "type": "string",
                         "enum": ["face", "edge", "vertex"],
@@ -879,7 +891,12 @@ def _tool_definitions() -> list[Tool]:
         ),
         Tool(
             name="add_mate",
-            description="Create an assembly mate (coincident, concentric, distance, parallel, perpendicular, tangent, angle) between two entities.",
+            description=(
+                "Create an assembly mate (coincident, concentric, distance, parallel, perpendicular, tangent, angle) "
+                "between two entities. Either name them (entity1/entity2 + comp1/comp2), or pre-select exactly two "
+                "faces/edges (e.g. two select_by_geometry calls with component=..., the second with append=true) "
+                "and pass use_selection=true (or entity1='@selected', entity2='@selected')."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -888,6 +905,7 @@ def _tool_definitions() -> list[Tool]:
                         "enum": ["coincident", "concentric", "perpendicular", "parallel", "tangent", "distance", "angle"],
                         "description": "Mate type"
                     },
+                    "use_selection": {"type": "boolean", "default": False, "description": "Mate the two currently selected entities instead of entity1/entity2"},
                     "entity1": {"type": "string", "description": "First entity/plane/face name (e.g. 'Top Plane')"},
                     "entity2": {"type": "string", "description": "Second entity/plane/face name"},
                     "comp1": {"type": "string", "description": "Optional component name for entity1 (e.g. 'part-1')"},
@@ -900,7 +918,7 @@ def _tool_definitions() -> list[Tool]:
                     "max_limit": {"type": "number", "description": "Optional maximum limit for LimitDistance or LimitAngle mate"},
                     "unit": {"type": "string", "default": "mm", "enum": ["mm", "inch", "m", "cm"], "description": "Distance unit"}
                 },
-                "required": ["mate_type", "entity1", "entity2"]
+                "required": ["mate_type"]
             }
         ),
         Tool(
@@ -2285,8 +2303,9 @@ def _dispatch_tool(name: str, arguments: dict) -> Dict[str, Any]:
             mark=arguments.get("mark", 0),
             append=arguments.get("append", False),
             unit=arguments.get("unit", "mm"),
+            component=arguments.get("component"),
         )
-    
+
     elif name == "capture_viewport":
         result = sw_automation.capture_viewport(
             filepath=arguments.get("filepath"),
@@ -2320,6 +2339,7 @@ def _dispatch_tool(name: str, arguments: dict) -> Dict[str, Any]:
             min_limit=arguments.get("min_limit"),
             max_limit=arguments.get("max_limit"),
             unit=arguments.get("unit", "mm"),
+            use_selection=bool(arguments.get("use_selection", False)),
         )
 
     elif name == "check_interference":
@@ -2557,10 +2577,17 @@ def _dispatch_tool(name: str, arguments: dict) -> Dict[str, Any]:
         runner = get_mecagent_runner()
         if arguments.get("reset_session"):
             runner.reset_session()
+        _hint = None
+        try:
+            _d, _ = sw_automation.get_active_doc()
+            _hint = sw_automation.get_document_type(_d) if _d is not None else None
+        except Exception:
+            _hint = None
         res = runner.execute_csharp(
             code=arguments.get("code", ""),
             read_only_only=bool(arguments.get("read_only_only", False)),
             timeout_ms=int(arguments.get("timeout_ms", 120000)),
+            doc_type_hint=_hint,
         )
         ok = bool(res.get("success", False))
         result = {
@@ -2665,6 +2692,13 @@ def _dispatch_tool(name: str, arguments: dict) -> Dict[str, Any]:
             },
         )
         ok = bool(res.get("success", False))
+        # The library prints metres/m² but labels them mm/mm² (an 80 mm edge showed as
+        # "0.080000 mm"); convert the numbers so the labels are true.
+        if isinstance(res.get("details"), str):
+            res["details"] = _fix_topology_units(res["details"])
+        if ok and isinstance(res.get("details"), str) and res["details"].strip().startswith("No active model"):
+            ok = False
+            res["errorMessage"] = res["details"]
         result = {
             "success": ok,
             "message": res.get("details") if ok else (res.get("errorMessage") or res.get("error") or "Topology navigation failed"),
@@ -2691,41 +2725,10 @@ def _dispatch_tool(name: str, arguments: dict) -> Dict[str, Any]:
         }
 
     elif name == "sw_get_edge_analysis":
-        runner = get_mecagent_runner()
-        res = runner.invoke_sdk_method(
-            "getEdgeAnalysis",
-            {"facePath": arguments.get("face_path", "")},
-        )
-        ok = bool(res.get("success", False))
-        result = {
-            "success": ok,
-            "message": res.get("details") if ok else (res.get("errorMessage") or res.get("error") or "Edge analysis failed"),
-            "error_code": 0 if ok else int(SwErrors.swGeneralError),
-            "error_name": "swSuccess" if ok else "swGeneralError",
-            "data": res,
-        }
+        result = _edge_analysis_handler(str(arguments.get("face_path", "") or ""))
 
     elif name == "sw_modify_feature_parameter_by_path":
-        runner = get_mecagent_runner()
-        res = runner.invoke_sdk_method(
-            "modifyFeatureParameterByPath",
-            {
-                "featurePath": arguments.get("feature_path", ""),
-                "depthMm": arguments.get("depth_mm"),
-                "reverseDirection": arguments.get("reverse_direction"),
-                "draftEnabled": arguments.get("draft_enabled"),
-                "draftAngleDeg": arguments.get("draft_angle_deg"),
-                "filletRadiusMm": arguments.get("fillet_radius_mm"),
-            },
-        )
-        ok = bool(res.get("success", False))
-        result = {
-            "success": ok,
-            "message": res.get("details") if ok else (res.get("errorMessage") or res.get("error") or "Feature parameter modification failed"),
-            "error_code": 0 if ok else int(SwErrors.swGeneralError),
-            "error_name": "swSuccess" if ok else "swGeneralError",
-            "data": res,
-        }
+        result = _modify_feature_parameter_by_path_handler(arguments)
 
     # lminventor Parity Handlers
     elif name == "draw_closed_profile":
@@ -3276,25 +3279,348 @@ class _PythonFinalAnswerSignal(Exception):
         self.value = value
 
 
+_NUM = r"-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?"
+
+
+def _fix_topology_units(text: str) -> str:
+    """Convert metre values that MecAgent's Navigate output labels as mm/mm² into real mm."""
+    import re as _re
+
+    def _scaled(segment: str, factor: float) -> str:
+        return _re.sub(_NUM, lambda m: f"{float(m.group(0)) * factor:.3f}", segment)
+
+    out_lines = []
+    for line in text.splitlines():
+        key = line.strip().split(":", 1)[0].strip()
+        if ":" not in line:
+            out_lines.append(line)
+            continue
+        head, tail = line.split(":", 1)
+        if key == "Area":
+            line = head + ":" + _scaled(tail, 1e6)
+        elif key in ("Length", "Dimensions", "Center", "Bounding Box", "UV Bounds", "Start", "End", "Mid"):
+            tail = _scaled(tail, 1000.0)
+            if "mm" not in tail:
+                tail = tail.rstrip() + " mm"
+            line = head + ":" + tail
+        out_lines.append(line)
+    return "\n".join(out_lines)
+
+
+def _edge_analysis_handler(face_path: str) -> Dict[str, Any]:
+    """
+    Edge table for one face ('Feature/Face[i]', 0-based like sw_navigate_topology) or for body 1:
+    length (mm), curve type, start/end/mid (mm), and dihedral angle between the two adjacent
+    faces for planar/planar edges (90 = square corner, <180 convex, >180 concave).
+    Replaces the MecAgent GetEdgeAnalysis call, which ignored face_path, reported metres as mm
+    and printed 180° for the square edges of a box.
+    """
+    import math as _math
+    import re as _re
+
+    doc, err = sw_automation.get_active_doc()
+    if err:
+        return err
+
+    def _vec(p):
+        return [float(p[0]), float(p[1]), float(p[2])]
+
+    def _plane_normal(face):
+        """Outward unit normal of a planar face, or None for non-planar faces."""
+        try:
+            surf = get_attr_or_call(face, "GetSurface")
+            if surf is None or not bool(get_attr_or_call(surf, "IsPlane")):
+                return None
+            # IFace2.Normal already accounts for the face's sense relative to its surface
+            # (outward for a solid). Raw PlaneParams + FaceInSurfaceSense handling inverted
+            # the normals and reported box edges as 270° concave.
+            n = get_attr_or_call(face, "Normal")
+            if n is None or len(n) < 3:
+                params = get_attr_or_call(surf, "PlaneParams")
+                n = [float(params[0]), float(params[1]), float(params[2])]
+                sense = get_attr_or_call(face, "FaceInSurfaceSense")
+                if callable(sense):
+                    sense = sense()
+                if sense is not None and not bool(sense):
+                    n = [-c for c in n]
+            n = [float(n[0]), float(n[1]), float(n[2])]
+            mag = _math.sqrt(sum(c * c for c in n)) or 1.0
+            return [c / mag for c in n]
+        except Exception:
+            return None
+
+    def _centroid(face):
+        box = get_attr_or_call(face, "GetBox")
+        return [(box[0] + box[3]) / 2, (box[1] + box[4]) / 2, (box[2] + box[5]) / 2] if box else None
+
+    scope = "body 1"
+    if face_path:
+        m = _re.match(r"^\s*([^/]+)/Face\[(\d+)\]\s*$", face_path)
+        if not m:
+            return {"success": False, "message": f"face_path must look like 'Feature/Face[0]', got '{face_path}'.",
+                    "error_code": int(SwErrors.swInvalidInput), "error_name": "swInvalidInput"}
+        feat = doc.FeatureByName(m.group(1))
+        faces = list(get_attr_or_call(feat, "GetFaces") or []) if feat is not None else []
+        idx = int(m.group(2))
+        if not faces or idx >= len(faces):
+            return {"success": False, "message": f"Face '{face_path}' not found (feature has {len(faces)} faces).",
+                    "error_code": int(SwErrors.swSelectionError), "error_name": "swSelectionError"}
+        edges = list(get_attr_or_call(faces[idx], "GetEdges") or [])
+        scope = face_path
+    else:
+        bodies = get_attr_or_call(doc, "GetBodies2", 0, False) or []
+        if not bodies:
+            return {"success": False, "message": "No solid body in the active document.",
+                    "error_code": int(SwErrors.swGeneralError), "error_name": "swGeneralError"}
+        edges = list(get_attr_or_call(bodies[0], "GetEdges") or [])
+
+    rows = []
+    for i, e in enumerate(edges):
+        row: Dict[str, Any] = {"index": i}
+        try:
+            crv = get_attr_or_call(e, "GetCurve")
+            if crv is not None and bool(get_attr_or_call(crv, "IsLine")):
+                row["type"] = "line"
+            elif crv is not None and bool(get_attr_or_call(crv, "IsCircle")):
+                row["type"] = "circle/arc"
+                try:
+                    row["radius_mm"] = round(float(get_attr_or_call(crv, "CircleParams")[6]) * 1000, 3)
+                except Exception:
+                    pass
+            else:
+                row["type"] = "other"
+            v1, v2 = get_attr_or_call(e, "GetStartVertex"), get_attr_or_call(e, "GetEndVertex")
+            p1 = _vec(get_attr_or_call(v1, "GetPoint")) if v1 else None
+            p2 = _vec(get_attr_or_call(v2, "GetPoint")) if v2 else None
+            cp = get_attr_or_call(e, "GetCurveParams3")
+            t0, t1 = float(get_attr_or_call(cp, "UMinValue")), float(get_attr_or_call(cp, "UMaxValue"))
+            length = float(crv.GetLength3(t0, t1)) if crv is not None else 0.0
+            row["length_mm"] = round(length * 1000, 3)
+            if p1:
+                row["start_mm"] = [round(c * 1000, 3) for c in p1]
+            if p2:
+                row["end_mm"] = [round(c * 1000, 3) for c in p2]
+            if p1 and p2 and row["type"] == "line":
+                row["mid_mm"] = [round((a + b) * 500, 3) for a, b in zip(p1, p2)]
+            adj = [f for f in (get_attr_or_call(e, "GetTwoAdjacentFaces2") or []) if f is not None]
+            if len(adj) == 2:
+                n1, n2 = _plane_normal(adj[0]), _plane_normal(adj[1])
+                if n1 and n2:
+                    cosang = max(-1.0, min(1.0, sum(a * b for a, b in zip(n1, n2))))
+                    between_normals = _math.degrees(_math.acos(cosang))
+                    c1, c2 = _centroid(adj[0]), _centroid(adj[1])
+                    # Convex if face 2's centroid lies behind face 1's outward normal.
+                    convex = True
+                    if c1 and c2:
+                        convex = sum((b - a) * n for a, b, n in zip(c1, c2, n1)) <= 1e-9
+                    interior = 180.0 - between_normals if convex else 180.0 + between_normals
+                    row["dihedral_deg"] = round(interior, 2)
+                    row["convex"] = convex
+        except Exception as ex:
+            row["error"] = str(ex)
+        rows.append(row)
+
+    lines = [f"Edge analysis for {scope}: {len(rows)} edge(s) (lengths/coords in mm)"]
+    for r in rows:
+        ang = f" angle={r['dihedral_deg']}° {'convex' if r.get('convex') else 'concave'}" if "dihedral_deg" in r else ""
+        rad = f" r={r['radius_mm']}" if "radius_mm" in r else ""
+        lines.append(f"[{r['index']}] {r.get('type', '?')} L={r.get('length_mm', '?')}{rad}{ang} mid={r.get('mid_mm', r.get('start_mm'))}")
+    return {
+        "success": True,
+        "message": "\n".join(lines),
+        "error_code": 0,
+        "error_name": "swSuccess",
+        "data": {"scope": scope, "edges": rows, "count": len(rows)},
+    }
+
+
+def _modify_feature_parameter_by_path_handler(arguments: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Apply depth / fillet radius / reverse / draft changes to one feature.
+
+    The MecAgent controller expects (path, parameterID, value) where parameterID is a full
+    dimension name such as 'D1@Boss-Extrude1@part.Part'; the old wrapper sent unrelated keys
+    so every call failed with "Unrecognized value format: ''".
+    """
+    feature_path = str(arguments.get("feature_path", "") or "").strip()
+    feat_name = feature_path.split("/")[0]
+    if not feat_name:
+        return {"success": False, "message": "feature_path is required.", "error_code": int(SwErrors.swInvalidInput), "error_name": "swInvalidInput"}
+
+    numeric_requests = []
+    if arguments.get("depth_mm") is not None:
+        numeric_requests.append(("depth_mm", float(arguments["depth_mm"])))
+    if arguments.get("fillet_radius_mm") is not None:
+        numeric_requests.append(("fillet_radius_mm", float(arguments["fillet_radius_mm"])))
+    flag_requests = {k: arguments.get(k) for k in ("reverse_direction", "draft_enabled", "draft_angle_deg") if arguments.get(k) is not None}
+
+    if not numeric_requests and not flag_requests:
+        return {
+            "success": False,
+            "message": "Nothing to change: pass depth_mm, fillet_radius_mm, reverse_direction, draft_enabled or draft_angle_deg.",
+            "error_code": int(SwErrors.swInvalidInput), "error_name": "swInvalidInput",
+        }
+
+    applied: List[Dict[str, Any]] = []
+    errors: List[str] = []
+
+    if numeric_requests:
+        dims_res = sw_automation.get_dimensions(feature_name=feat_name)
+        dims = [d for d in (dims_res.get("data") or {}).get("dimensions", []) if d.get("owner_feature") == feat_name]
+        linear = [d for d in dims if d.get("units") not in ("deg", "count")]
+        if not linear:
+            errors.append(f"No linear dimension found on feature '{feat_name}'.")
+        else:
+            target = linear[0]  # D1 = depth (extrude/cut) or radius (constant fillet)
+            runner = get_mecagent_runner()
+            for key, val in numeric_requests:
+                res = runner.invoke_sdk_method(
+                    "modifyFeatureParameterByPath",
+                    {"path": feat_name, "parameterId": target["full_name"], "value": f"{val}"},
+                )
+                if res.get("success"):
+                    applied.append({"parameter": key, "dimension": target["full_name"], "value_mm": val})
+                else:
+                    # Fall back to the native dimension setter (verifies + rolls back on failure).
+                    sd = sw_automation.set_dimension(name=target["full_name"], value=val, units="mm")
+                    if sd.get("success"):
+                        applied.append({"parameter": key, "dimension": target["full_name"], "value_mm": val, "via": "set_dimension"})
+                    else:
+                        errors.append(f"{key}: {res.get('errorMessage') or res.get('error')} / {sd.get('message')}")
+
+    if flag_requests:
+        doc, err = sw_automation.get_active_doc()
+        if err:
+            errors.append(err.get("message", "No active document"))
+        else:
+            try:
+                feat = doc.FeatureByName(feat_name)
+                if feat is None:
+                    raise RuntimeError(f"Feature '{feat_name}' not found")
+                fdef = get_attr_or_call(feat, "GetDefinition")
+                if fdef is None or not hasattr(fdef, "ReverseDirection"):
+                    raise RuntimeError(f"Feature '{feat_name}' is not an extrude/cut; reverse/draft not applicable")
+                fdef.AccessSelections(doc, None)
+                if "reverse_direction" in flag_requests:
+                    fdef.ReverseDirection = bool(flag_requests["reverse_direction"])
+                if "draft_enabled" in flag_requests or "draft_angle_deg" in flag_requests:
+                    enable = bool(flag_requests.get("draft_enabled", True))
+                    fdef.SetDraftWhileExtruding(True, enable)
+                    if "draft_angle_deg" in flag_requests:
+                        import math as _math
+                        fdef.SetDraftAngle(True, _math.radians(float(flag_requests["draft_angle_deg"])))
+                ok_mod = bool(feat.ModifyDefinition(fdef, doc, None))
+                if not ok_mod:
+                    fdef.ReleaseSelectionAccess()
+                    raise RuntimeError("ModifyDefinition returned False")
+                applied.append({"parameter": "flags", **flag_requests})
+            except Exception as fx:
+                errors.append(f"reverse/draft: {fx}")
+
+    if not errors:
+        _doc_after, _ = sw_automation.get_active_doc()
+        if _doc_after is not None:
+            get_attr_or_call(_doc_after, "EditRebuild3")
+    ok = not errors
+    return {
+        "success": ok,
+        "message": (f"Modified '{feat_name}': {applied}" if ok else f"Modification of '{feat_name}' failed: {'; '.join(errors)}"),
+        "error_code": 0 if ok else int(SwErrors.swGeneralError),
+        "error_name": "swSuccess" if ok else "swGeneralError",
+        "data": {"applied": applied, "errors": errors},
+    }
+
+
 def _reload_api_handler() -> Dict[str, Any]:
     """Hot-reload solidworks_mcp submodules without dropping the active SolidWorks COM session."""
     import importlib
     reloaded = []
     errors = []
-    target_prefixes = ("solidworks_mcp.core.", "solidworks_mcp.automation.", "solidworks_mcp.utils.")
-    for mod_name, mod_obj in list(sys.modules.items()):
-        if mod_obj is not None and mod_name.startswith(target_prefixes):
-            try:
-                importlib.reload(mod_obj)
-                reloaded.append(mod_name)
-            except Exception as ex:
-                errors.append({"module": mod_name, "error": str(ex)})
+    skipped = []
+    # com_worker owns the live STA thread singleton that every COM proxy belongs to.
+    # Reloading it creates a second thread, after which the existing ISldWorks proxy
+    # fails on every call ("SldWorks.Application.ActiveDoc"), so it is never reloaded.
+    never_reload = {"solidworks_mcp.core.com_worker"}
+
+    # Preserve in-memory checkpoint state across the reload.
+    saved_checkpoints = None
+    try:
+        from .core import checkpoint as _ckpt_mod
+        if getattr(_ckpt_mod, "_checkpoint_manager", None) is not None:
+            saved_checkpoints = dict(_ckpt_mod._checkpoint_manager._checkpoints)
+    except Exception:
+        saved_checkpoints = None
+
+    # Keep the running MecAgent runner process: reloading mecagent_runner reset its singleton,
+    # which started a second runner and left the first one alive until the server exited.
+    saved_runner = None
+    try:
+        _mr = sys.modules.get("solidworks_mcp.core.mecagent_runner")
+        saved_runner = getattr(_mr, "_runner_bridge", None) if _mr else None
+    except Exception:
+        saved_runner = None
+
+    def _order(name: str) -> int:
+        # Leaves first, then core, then automation.base, then the mixins, then packages.
+        if name.startswith("solidworks_mcp.utils."):
+            return 0
+        if name.startswith("solidworks_mcp.core."):
+            return 1
+        if name == "solidworks_mcp.automation.base":
+            return 2
+        if name.startswith("solidworks_mcp.automation."):
+            return 3
+        return 4
+
+    prefixes = ("solidworks_mcp.core.", "solidworks_mcp.automation.", "solidworks_mcp.utils.")
+    packages = ("solidworks_mcp.utils", "solidworks_mcp.core", "solidworks_mcp.automation")
+    names = [n for n, m in list(sys.modules.items()) if m is not None and (n.startswith(prefixes) or n in packages)]
+    for mod_name in sorted(names, key=_order):
+        if mod_name in never_reload:
+            skipped.append(mod_name)
+            continue
+        try:
+            importlib.reload(sys.modules[mod_name])
+            reloaded.append(mod_name)
+        except Exception as ex:
+            errors.append({"module": mod_name, "error": f"{type(ex).__name__}: {ex}"})
+
+    # Point the live automation object at the freshly reloaded class so edited
+    # tool implementations take effect without dropping the SolidWorks session.
+    rebound = False
+    try:
+        new_cls = getattr(sys.modules["solidworks_mcp.automation"], "SolidWorksAutomation")
+        sw_automation.__class__ = new_cls
+        rebound = True
+    except Exception as ex:
+        errors.append({"module": "solidworks_mcp.automation", "error": f"class rebind failed: {ex}"})
+
+    if saved_runner is not None:
+        try:
+            _mr = sys.modules["solidworks_mcp.core.mecagent_runner"]
+            saved_runner.__class__ = _mr.MecAgentRunnerBridge  # pick up edited methods
+            _mr._runner_bridge = saved_runner
+        except Exception as ex:
+            errors.append({"module": "solidworks_mcp.core.mecagent_runner", "error": f"runner rebind failed: {ex}"})
+
+    if saved_checkpoints:
+        try:
+            from .core.checkpoint import get_checkpoint_manager as _gcm
+            _gcm()._checkpoints.update(saved_checkpoints)
+        except Exception as ex:
+            errors.append({"module": "solidworks_mcp.core.checkpoint", "error": f"checkpoint restore failed: {ex}"})
+
     return {
         "success": len(errors) == 0,
-        "message": f"Hot-reloaded {len(reloaded)} module(s) ({len(errors)} error(s))",
+        "message": f"Hot-reloaded {len(reloaded)} module(s) ({len(errors)} error(s)); COM session kept",
         "error_code": 0 if len(errors) == 0 else int(SwErrors.swGeneralError),
         "error_name": "swSuccess" if len(errors) == 0 else "swGeneralError",
-        "data": {"reloaded_modules": reloaded, "errors": errors},
+        "data": {
+            "reloaded_modules": reloaded,
+            "skipped_modules": skipped,
+            "automation_class_rebound": rebound,
+            "errors": errors,
+        },
     }
 
 
@@ -3921,17 +4247,9 @@ def _show_interactive_studio_handler(arguments: dict) -> Dict[str, Any]:
         elif os.environ.get("SOLIDWORKS_STUDIO_TEST_DIR"):
             artifact_path = Path(os.environ["SOLIDWORKS_STUDIO_TEST_DIR"]) / "solidworks_studio.html"
         else:
-            user_profile = Path(os.environ.get("USERPROFILE", os.path.expanduser("~")))
-            brain_base = user_profile / ".gemini" / "antigravity" / "brain"
-            if brain_base.exists():
-                brain_dirs = [p for p in brain_base.iterdir() if p.is_dir() and not p.name.startswith(".")]
-                if brain_dirs:
-                    brain_dirs.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-                    artifact_dir = brain_dirs[0]
-                else:
-                    artifact_dir = Path.cwd() / "artifacts"
-            else:
-                artifact_dir = Path.cwd() / "artifacts"
+            # Previously this wrote into the most recent ~/.gemini/antigravity/brain/* folder
+            # (another tool's private data). Use the server's own artifacts folder instead.
+            artifact_dir = Path(__file__).resolve().parent / "artifacts"
             artifact_dir.mkdir(parents=True, exist_ok=True)
             artifact_path = artifact_dir / "solidworks_studio.html"
 

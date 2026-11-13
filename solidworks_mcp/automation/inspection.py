@@ -29,6 +29,41 @@ from ..core import (
 logger = logging.getLogger(__name__)
 
 
+def face_centroid_m(face: Any) -> Optional[List[float]]:
+    """
+    Area-weighted centroid of a face in metres, from its tessellation.
+    The bounding-box centre (used before) is wrong for any face with an off-centre hole.
+    Falls back to the bounding-box centre if tessellation is unavailable.
+    """
+    try:
+        tris = get_attr_or_call(face, "GetTessTriangles", True)
+        if tris and len(tris) >= 9:
+            total_a = 0.0
+            acc = [0.0, 0.0, 0.0]
+            for i in range(0, len(tris) - 8, 9):
+                p = (tris[i:i + 3], tris[i + 3:i + 6], tris[i + 6:i + 9])
+                u = [p[1][k] - p[0][k] for k in range(3)]
+                v = [p[2][k] - p[0][k] for k in range(3)]
+                cr = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]]
+                a = 0.5 * math.sqrt(sum(c * c for c in cr))
+                if a <= 0:
+                    continue
+                total_a += a
+                for k in range(3):
+                    acc[k] += a * (p[0][k] + p[1][k] + p[2][k]) / 3.0
+            if total_a > 0:
+                return [c / total_a for c in acc]
+    except Exception as e:
+        logger.debug(f"face tessellation centroid failed: {e}")
+    try:
+        box = get_attr_or_call(face, "GetBox")
+        if box and len(box) >= 6:
+            return [(box[0] + box[3]) / 2.0, (box[1] + box[4]) / 2.0, (box[2] + box[5]) / 2.0]
+    except Exception:
+        pass
+    return None
+
+
 class InspectionOperations:
     """
     Mixin class for geometry inspection, verification, and viewport capture.
@@ -119,9 +154,12 @@ class InspectionOperations:
             )
 
             status_msg = "PASSED" if report.passed else "FAILED"
+            reasons = list(report.rebuild_errors) + list(report.warnings)
+            detail = ("; " + "; ".join(reasons[:5])) if reasons else ""
             return self._result(
                 report.passed,
-                f"Model verification {status_msg}: {len(report.warnings)} warnings",
+                f"Model verification {status_msg}: {len(report.rebuild_errors)} rebuild error(s), "
+                f"{len(report.warnings)} warning(s){detail}",
                 SwErrors.swSuccess if report.passed else SwErrors.swFeatureError,
                 report.to_dict(),
             )
@@ -343,9 +381,12 @@ class InspectionOperations:
         mark: int = 0,
         append: bool = False,
         unit: str = "mm",
+        component: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Select model entities (faces, edges, vertices) by geometric filters.
+        In an assembly, searches component bodies (optionally only `component`) and
+        compares geometry in assembly coordinates.
 
         Args:
             target_type: 'face', 'edge', or 'vertex'
@@ -405,14 +446,88 @@ class InspectionOperations:
                 if n_len > 1e-9:
                     req_norm = [c / n_len for c in normal[:3]]
 
-            bodies = doc.GetBodies2(0, False) if callable(getattr(doc, "GetBodies2", None)) else getattr(doc, "GetBodies2", None)
-            if not bodies:
-                return self._result(False, "No solid bodies found in active model.", SwErrors.swSelectionError)
+            # (body, 13-element transform or None, component name or None)
+            body_entries: List[Tuple[Any, Optional[List[float]], Optional[str]]] = []
+            if dtype == "Assembly":
+                comps = []
+                try:
+                    comps = list(doc.GetComponents(False) or [])  # all levels
+                except Exception:
+                    comps = []
+                want = (component or "").strip().lower()
+                for c in comps:
+                    try:
+                        cname = str(get_attr_or_call(c, "Name2") or "")
+                        short = cname.split("/")[-1].lower()
+                        if want and want not in (cname.lower(), short):
+                            continue
+                        if bool(get_attr_or_call(c, "IsSuppressed")):
+                            continue
+                        cbodies = None
+                        try:
+                            cbodies = c.GetBodies2(0)
+                        except Exception:
+                            try:
+                                cbodies = c.GetBodies3(0, None)
+                                if isinstance(cbodies, tuple) and len(cbodies) == 2 and not hasattr(cbodies[0], "GetFaces"):
+                                    cbodies = cbodies[0]
+                            except Exception:
+                                cbodies = None
+                        if not cbodies:
+                            continue
+                        arr = None
+                        try:
+                            xf = get_attr_or_call(c, "Transform2")
+                            arr = list(get_attr_or_call(xf, "ArrayData")) if xf is not None else None
+                        except Exception:
+                            arr = None
+                        for b in cbodies:
+                            body_entries.append((b, arr, cname))
+                    except Exception as c_ex:
+                        logger.debug(f"select_by_geometry: component scan error: {c_ex}")
+                if not body_entries:
+                    return self._result(
+                        False,
+                        f"No component bodies found{(' for component ' + repr(component)) if component else ''} in the assembly.",
+                        SwErrors.swSelectionError,
+                    )
+            else:
+                bodies = doc.GetBodies2(0, False) if callable(getattr(doc, "GetBodies2", None)) else getattr(doc, "GetBodies2", None)
+                if not bodies:
+                    return self._result(False, "No solid bodies found in active model.", SwErrors.swSelectionError)
+                body_entries = [(b, None, None) for b in bodies]
+
+            # Component-space -> assembly-space helpers. MathTransform.ArrayData uses row vectors:
+            # p' = scale * (p . R) + T with R = arr[0:9] (3x3, row-major), T = arr[9:12], scale = arr[12].
+            cur_xf: List[Optional[List[float]]] = [None]
+
+            def _tx_vec(v):
+                a = cur_xf[0]
+                if a is None or v is None:
+                    return v
+                return [v[0] * a[0] + v[1] * a[3] + v[2] * a[6],
+                        v[0] * a[1] + v[1] * a[4] + v[2] * a[7],
+                        v[0] * a[2] + v[1] * a[5] + v[2] * a[8]]
+
+            def _tx_pt(p):
+                a = cur_xf[0]
+                if a is None or p is None:
+                    return p
+                r = _tx_vec(p)
+                s = a[12] if len(a) > 12 and a[12] else 1.0
+                return [r[0] * s + a[9], r[1] * s + a[10], r[2] * s + a[11]]
+
+            def _tx_box(bx):
+                if cur_xf[0] is None or not bx or len(bx) < 6:
+                    return bx
+                corners = [_tx_pt([x, y, z]) for x in (bx[0], bx[3]) for y in (bx[1], bx[4]) for z in (bx[2], bx[5])]
+                return [min(c[i] for c in corners) for i in range(3)] + [max(c[i] for c in corners) for i in range(3)]
 
             matched_entities = []
             entity_descriptors = []
 
-            for body in bodies:
+            for body, body_xf, body_comp in body_entries:
+                cur_xf[0] = body_xf
                 if target_type_clean == "face":
                     faces = get_attr_or_call(body, "GetFaces") or []
                     for f_idx, f in enumerate(faces):
@@ -468,6 +583,7 @@ class InspectionOperations:
                                     f_normal = [params[0], params[1], params[2]]
                             except Exception:
                                 pass
+                        f_normal = _tx_vec(f_normal)
 
                         if req_norm:
                             if not f_normal:
@@ -492,7 +608,7 @@ class InspectionOperations:
                                 continue
 
                         # Bounding box check
-                        box = get_attr_or_call(f, "GetBox")
+                        box = _tx_box(get_attr_or_call(f, "GetBox"))
                         if box and len(box) >= 6:
                             if bmin_m and any(box[i] < bmin_m[i] - 1e-4 for i in range(3)):
                                 continue
@@ -506,16 +622,17 @@ class InspectionOperations:
                                     continue
 
                         area_m2 = get_attr_or_call(f, "GetArea") or 0.0
-                        centroid_m = [(box[i] + box[i + 3]) / 2.0 for i in range(3)] if box and len(box) >= 6 else None
+                        centroid_m = _tx_pt(face_centroid_m(f))
 
                         desc = {
-                            "index": f_idx,
+                            "index": f_idx + 1,  # 1-based, same as list_faces / find_face
                             "type": "face",
                             "surface_type": stype_str,
                             "area_mm2": round(area_m2 * 1e6, 2),
                             "centroid_mm": [round(c * 1000, 2) for c in centroid_m] if centroid_m else None,
                             "normal": [round(c, 4) for c in f_normal] if f_normal else None,
                             "radius_mm": round(f_radius * 1000, 2) if f_radius is not None else None,
+                            "component": body_comp,
                         }
                         matched_entities.append(f)
                         entity_descriptors.append(desc)
@@ -553,8 +670,8 @@ class InspectionOperations:
                         # Vertices and length
                         v1 = get_attr_or_call(e, "GetStartVertex")
                         v2 = get_attr_or_call(e, "GetEndVertex")
-                        pt1 = get_attr_or_call(v1, "GetPoint") if v1 else None
-                        pt2 = get_attr_or_call(v2, "GetPoint") if v2 else None
+                        pt1 = _tx_pt(get_attr_or_call(v1, "GetPoint")) if v1 else None
+                        pt2 = _tx_pt(get_attr_or_call(v2, "GetPoint")) if v2 else None
 
                         e_len_m = 0.0
                         e_mid_m = None
@@ -566,7 +683,7 @@ class InspectionOperations:
                             cparams = get_attr_or_call(curve, "CircleParams")
                             if cparams and len(cparams) >= 7:
                                 e_len_m = 2.0 * math.pi * cparams[6]
-                                e_mid_m = [cparams[0], cparams[1], cparams[2]]
+                                e_mid_m = _tx_pt([cparams[0], cparams[1], cparams[2]])
 
                         # Length filter
                         if length_m is not None:
@@ -606,12 +723,13 @@ class InspectionOperations:
                                 continue
 
                         desc = {
-                            "index": e_idx,
+                            "index": e_idx + 1,  # 1-based, same as list_edges / find_edge
                             "type": "edge",
                             "curve_type": ctype_str,
                             "length_mm": round(e_len_m * 1000, 2),
                             "midpoint_mm": [round(c * 1000, 2) for c in e_mid_m] if e_mid_m else None,
                             "radius_mm": round(e_radius * 1000, 2) if e_radius is not None else None,
+                            "component": body_comp,
                         }
                         matched_entities.append(e)
                         entity_descriptors.append(desc)
@@ -619,7 +737,7 @@ class InspectionOperations:
                 elif target_type_clean == "vertex":
                     vertices = get_attr_or_call(body, "GetVertices") or []
                     for v_idx, v in enumerate(vertices):
-                        pt = get_attr_or_call(v, "GetPoint")
+                        pt = _tx_pt(get_attr_or_call(v, "GetPoint"))
                         if not pt:
                             continue
 
@@ -634,7 +752,7 @@ class InspectionOperations:
                             continue
 
                         desc = {
-                            "index": v_idx,
+                            "index": v_idx + 1,
                             "type": "vertex",
                             "point_mm": [round(c * 1000, 2) for c in pt],
                         }
@@ -761,12 +879,10 @@ class InspectionOperations:
                         elif get_attr_or_call(surf, "IsTorus"):
                             stype = "Torus"
 
-                    box = get_attr_or_call(f, "GetBox")
                     cx, cy, cz = 0.0, 0.0, 0.0
-                    if box and len(box) >= 6:
-                        cx = (box[0] + box[3]) * 500.0
-                        cy = (box[1] + box[4]) * 500.0
-                        cz = (box[2] + box[5]) * 500.0
+                    c_m = face_centroid_m(f)
+                    if c_m is not None:
+                        cx, cy, cz = (c * 1000.0 for c in c_m)
 
                     norm = get_attr_or_call(f, "Normal")
                     n_str = ""
@@ -896,8 +1012,8 @@ class InspectionOperations:
         select: bool = True,
     ) -> Dict[str, Any]:
         """
-        Locate a body face by its centroid coordinates (mm) and optionally select it.
-        Returns 1-based face index.
+        Locate a body face by its true (area-weighted) centroid in mm and optionally select it.
+        Returns a 1-based face index (same numbering as list_faces and select_by_geometry).
         """
         try:
             doc, err = self.get_active_doc()
@@ -924,12 +1040,10 @@ class InspectionOperations:
                         elif stype_req in ("cylinder", "cyl", "5891") and not get_attr_or_call(surf, "IsCylinder"):
                             continue
 
-                    box = get_attr_or_call(f, "GetBox")
-                    if not box or len(box) < 6:
+                    c_m = face_centroid_m(f)
+                    if c_m is None:
                         continue
-                    cx = (box[0] + box[3]) * 500.0
-                    cy = (box[1] + box[4]) * 500.0
-                    cz = (box[2] + box[5]) * 500.0
+                    cx, cy, cz = (c * 1000.0 for c in c_m)
 
                     if x is not None and abs(cx - x) > tolerance:
                         continue

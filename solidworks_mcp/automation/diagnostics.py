@@ -239,6 +239,18 @@ class DiagnosticOperations:
 
                         if not verified:
                             msg = f"Post-condition failed: Add-in '{name_or_path}' returned code {ret_code} but COM add-in object could not be resolved."
+                            if norm_name in ("toolbox", "swbrowser"):
+                                try:
+                                    import winreg
+                                    with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, "swBrowser.Browser\\CLSID"):
+                                        pass
+                                except Exception:
+                                    msg = (
+                                        "SOLIDWORKS Toolbox is not registered in this installation "
+                                        "(no 'swBrowser.Browser' COM class; Toolbox is typically absent from "
+                                        "Student/Education installs). Use the solidworks-din-parts skill to model "
+                                        "standard hardware instead."
+                                    )
                             return False, msg, {"dll_path": dll_path, "return_code": ret_code, "verified_loaded": False}
 
                         msg = f"Add-in '{name_or_path}' loaded successfully (code {ret_code}: {desc})."
@@ -606,25 +618,45 @@ class DiagnosticOperations:
                 ckpt_name = active_txn.get("checkpoint_name")
                 rolled_back = False
 
+                rb_res: Dict[str, Any] = {}
                 if ckpt_name:
                     rb_res = get_checkpoint_manager().rollback_checkpoint(doc=doc, name=ckpt_name)
                     rolled_back = bool(rb_res.get("success"))
 
-                if not rolled_back:
-                    try:
-                        undo_fn = getattr(doc, "EditUndo2", None)
-                        if callable(undo_fn):
-                            undo_fn(1)
-                            rolled_back = True
-                    except Exception:
-                        pass
+                vol_after = capture_vol_state(doc)
+                suffix, delta_dict = format_vol_delta(active_txn.get("vol_before"), vol_after)
+                vb = active_txn.get("vol_before")
+                # Geometry must match the state captured at 'begin' (volume, faces, edges, bodies).
+                geometry_restored = (
+                    vb is None or vol_after is None
+                    or (abs(vb[0] - vol_after[0]) <= max(1e-3, abs(vb[0]) * 1e-9) and tuple(vb[1:]) == tuple(vol_after[1:]))
+                )
 
                 self._active_txn = None
+                data = {
+                    "transaction": txn_name,
+                    "status": "aborted",
+                    "rolled_back": rolled_back,
+                    "geometry_restored": geometry_restored,
+                    "geometry_delta": delta_dict,
+                    "rollback": {k: v for k, v in rb_res.items() if k not in ("success",)},
+                }
+                if rolled_back and geometry_restored:
+                    return self._result(
+                        True,
+                        f"Transaction '{txn_name}' aborted — changes since 'begin' rolled back "
+                        "(features, dimension values and equations)",
+                        SwErrors.swSuccess,
+                        data,
+                    )
                 return self._result(
-                    True,
-                    f"Transaction '{txn_name}' aborted — all changes since 'begin' rolled back",
-                    SwErrors.swSuccess,
-                    {"transaction": txn_name, "status": "aborted", "rolled_back": rolled_back},
+                    False,
+                    f"Transaction '{txn_name}' aborted but the model was NOT fully restored"
+                    f"{suffix}. {rb_res.get('error') or rb_res.get('message') or 'No checkpoint was available.'} "
+                    "Changes that are not features, dimensions or equations (e.g. custom properties, "
+                    "configurations, materials) are not tracked.",
+                    SwErrors.swGeneralError,
+                    data,
                 )
 
             else:

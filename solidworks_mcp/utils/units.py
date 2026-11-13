@@ -99,7 +99,14 @@ class UnitConverter:
         """
         if isinstance(unit, Unit):
             return unit
-        
+
+        # After reload_api the Unit enum class is re-created, so a converter built before
+        # the reload holds members of the *old* class (isinstance fails, and they are not
+        # keys of the new TO_METERS). Map them back through their string value.
+        legacy_value = getattr(unit, "value", None)
+        if isinstance(legacy_value, str):
+            unit = legacy_value
+
         if isinstance(unit, str):
             unit_lower = unit.lower().strip()
             if unit_lower in UNIT_ALIASES:
@@ -124,7 +131,7 @@ class UnitConverter:
             converter.to_meters(2, "inch")  # Returns 0.0508
         """
         if unit is None:
-            parsed_unit = self._default_unit
+            parsed_unit = self._parse_unit(self._default_unit)
         else:
             parsed_unit = self._parse_unit(unit)
         
@@ -146,7 +153,7 @@ class UnitConverter:
             converter.from_meters(0.0254, "inch")  # Returns 1.0
         """
         if unit is None:
-            parsed_unit = self._default_unit
+            parsed_unit = self._parse_unit(self._default_unit)
         else:
             parsed_unit = self._parse_unit(unit)
         
@@ -183,7 +190,7 @@ class UnitConverter:
             Formatted string like "50.00mm"
         """
         if unit is None:
-            parsed_unit = self._default_unit
+            parsed_unit = self._parse_unit(self._default_unit)
         else:
             parsed_unit = self._parse_unit(unit)
         

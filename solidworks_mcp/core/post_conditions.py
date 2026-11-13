@@ -67,14 +67,30 @@ def capture_vol_state(doc: Any) -> Optional[Tuple[float, int, int, int]]:
 
         volume_mm3 = 0.0
         mp_resolved = False
+        # Per-body mass properties first: the document-level value is stale (0) right after a
+        # sketch is closed, which made every sketch feature report volume_before = 0.
         try:
-            get_mp = getattr(doc, "GetMassProperties", None)
-            mp_arr = get_mp() if callable(get_mp) else get_mp
-            if mp_arr and len(mp_arr) >= 4:
-                volume_mm3 = float(mp_arr[3]) * 1e9
+            total = 0.0
+            got_any = False
+            for b in bodies:
+                bmp = b.GetMassProperties(1.0)  # density irrelevant; index 3 = volume (m^3)
+                if bmp and len(bmp) >= 4:
+                    total += float(bmp[3])
+                    got_any = True
+            if got_any and total > 0:
+                volume_mm3 = total * 1e9
                 mp_resolved = True
-        except Exception:
-            pass
+        except Exception as bm_ex:
+            logger.debug(f"capture_vol_state body mass properties failed: {bm_ex}")
+        if not mp_resolved:
+            try:
+                get_mp = getattr(doc, "GetMassProperties", None)
+                mp_arr = get_mp() if callable(get_mp) else get_mp
+                if mp_arr and len(mp_arr) >= 4 and float(mp_arr[3]) > 0:
+                    volume_mm3 = float(mp_arr[3]) * 1e9
+                    mp_resolved = True
+            except Exception:
+                pass
 
         if not mp_resolved:
             try:

@@ -459,8 +459,17 @@ class SolidWorksAutomation:
                 pass
         
         try:
-            _ = get_attr_or_call(self._sw_app, "Visible")
+            # get_attr_or_call swallows missing-member errors and returns None, so probe the
+            # proxy directly. A dead late-bound proxy raises AttributeError for every member
+            # (seen as "SldWorks.Application.ActiveDoc"), which means the handle is stale.
+            _ = self._sw_app.Visible
             return True
+        except AttributeError as e:
+            logger.warning(f"SolidWorks COM proxy is stale ({e}); marking disconnected.")
+            self._connected = False
+            self._sw_app = None
+            self._connected_pid = None
+            return False
         except Exception as e:
             # If busy (RPC_E_SERVERCALL_RETRYLATER -2147417846 / 0x8001010A), SolidWorks is STILL connected!
             if hasattr(e, "args") and len(e.args) > 0 and e.args[0] in (-2147417846, 0x8001010A, -2147418111, 0x80010001):
@@ -774,7 +783,19 @@ class SolidWorksAutomation:
 
             # Step 1: Normal connection (no specific PID requested)
             if self.is_connected:
-                version = get_attr_or_call(self._sw_app, "RevisionNumber")
+                version = None
+                try:
+                    version = self._sw_app.RevisionNumber()
+                except TypeError:
+                    version = self._sw_app.RevisionNumber
+                except Exception as ver_ex:
+                    logger.warning(f"Existing SolidWorks handle failed RevisionNumber ({ver_ex}); reconnecting.")
+                if not version:
+                    # The handle answers Visible but not real calls: drop it and reconnect cleanly.
+                    self._connected = False
+                    self._sw_app = None
+                    self._connected_pid = None
+                    return self.connect()
                 cur_pid = get_attr_or_call(self._sw_app, "GetProcessID") or getattr(self, "_connected_pid", None)
                 was_invisible = False
                 try:
@@ -978,7 +999,7 @@ class SolidWorksAutomation:
         try:
             doc = self._sw_app.ActiveDoc
         except Exception as ex:
-            if is_rpc_disconnect_error(ex):
+            if is_rpc_disconnect_error(ex) or isinstance(ex, AttributeError):
                 logger.warning(f"RPC server unavailable ({ex}) during get_active_doc. Attempting auto-reconnect once...")
                 self._connected = False
                 self._sw_app = None

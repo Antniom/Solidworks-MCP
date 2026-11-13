@@ -43,11 +43,23 @@ class FeatureOperations:
     # Helper Methods
     # ========================================================================
     
+    def _recapture_pre_volume(self, doc, pre_state) -> None:
+        """Re-read the starting volume after leaving sketch edit (it reads 0 inside a sketch)."""
+        try:
+            from ..core.post_conditions import capture_vol_state as _cvs
+            fresh = _cvs(doc)
+            if fresh is not None or getattr(pre_state, "vol_state", None) is None:
+                pre_state.vol_state = fresh
+        except Exception as _e:
+            logger.debug(f"pre-volume recapture failed: {_e}")
+
     def _find_last_sketch(self, doc) -> Optional[str]:
         """
-        Find the name of the last sketch in the feature tree.
-        Uses get_attr_or_call for safe COM member resolution.
-        
+        Find the name of the last *unused* sketch in the feature tree.
+        Sketches already consumed by a feature (they have child features such as
+        Boss-Extrude1) are skipped, so a feature call with no new sketch fails
+        instead of silently re-using an old profile.
+
         Returns:
             Sketch name string or None
         """
@@ -58,7 +70,13 @@ class FeatureOperations:
                 try:
                     feat_type = get_attr_or_call(feat, "GetTypeName2")
                     if feat_type == "ProfileFeature":
-                        last_sketch = feat.Name
+                        children = None
+                        try:
+                            children = get_attr_or_call(feat, "GetChildren")
+                        except Exception:
+                            children = None
+                        if not children:
+                            last_sketch = feat.Name
                 except Exception as e:
                     logger.debug(f"Error checking feature type: {e}")
                 try:
@@ -212,7 +230,9 @@ class FeatureOperations:
                     f"Try: create_sketch → draw geometry → extrude_sketch",
                     SwErrors.swFeatureError,
                     {"diagnostics": sketch_info})
-            
+
+            self._recapture_pre_volume(doc, pre_state)
+
             # Step 2: Determine end condition
             end_cond = 6 if both_directions else 0  # 6=MidPlane, 0=Blind
             
@@ -346,7 +366,11 @@ class FeatureOperations:
                     f"Ensure sketch is on an existing face.",
                     SwErrors.swFeatureError,
                     {"diagnostics": sketch_info})
-            
+
+            # Mass properties read as 0 while a sketch is being edited; retake the
+            # starting volume now that the sketch is closed.
+            self._recapture_pre_volume(doc, pre_state)
+
             # Determine end condition
             if through_all:
                 if both_directions:
@@ -775,8 +799,19 @@ class FeatureOperations:
 
                     sys_val = getattr(dim_obj, "SystemValue", 0.0)
 
+                    # IDimension.GetType: swDimensionParamType_e 2 = integer (e.g. pattern instance count)
+                    param_type = None
+                    try:
+                        param_type = get_attr_or_call(dim_obj, "GetType")
+                    except Exception:
+                        param_type = None
+
                     # Value in document units
-                    if dim_type_code in (1, 3, 16):  # Angular
+                    if param_type == 2:
+                        val_doc = float(int(round(float(sys_val))))
+                        unit_label = "count"
+                        dim_type_name = "Integer"
+                    elif dim_type_code in (1, 3, 16):  # Angular
                         val_doc = float(sys_val) * 180.0 / math.pi
                         unit_label = "deg"
                     else:  # Linear
@@ -1152,6 +1187,15 @@ class FeatureOperations:
             post_dims = post_insp.get("data", {}).get("dimensions_mm", {})
             if pre_dims and post_dims:
                 geom_changed = any(abs(post_dims.get(k, 0) - pre_dims.get(k, 0)) > 1e-4 for k in ("dx", "dy", "dz"))
+            # Also count volume / face / edge changes: an internal hole or fillet can change
+            # without touching the bounding box.
+            pre_d, post_d = pre_insp.get("data", {}) or {}, post_insp.get("data", {}) or {}
+            if not geom_changed:
+                geom_changed = (
+                    abs(float(post_d.get("volume_mm3", 0) or 0) - float(pre_d.get("volume_mm3", 0) or 0)) > 1e-3
+                    or post_d.get("faces_count") != pre_d.get("faces_count")
+                    or post_d.get("edges_count") != pre_d.get("edges_count")
+                )
 
             full_dim_name = getattr(dim, "FullName", name)
 
@@ -1343,6 +1387,28 @@ class FeatureOperations:
                 )
 
             elif action_clean == "reorder":
+                loc_clean = str(move_location).strip().lower()
+                if (not target_feature or not target_feature.strip()) and loc_clean in ("to_end", "to_top"):
+                    # to_end/to_top need no target: anchor on the last / first solid feature.
+                    names = []
+                    f_it = doc.FirstFeature
+                    while f_it is not None:
+                        try:
+                            if get_attr_or_call(f_it, "GetTypeName2") not in (
+                                "CommentsFolder", "FavoriteFolder", "HistoryFolder", "SelectionSetFolder",
+                                "SensorFolder", "DocsFolder", "DetailCabinet", "SurfaceBodyFolder",
+                                "SolidBodyFolder", "EnvFolder", "InkMarkupFolder", "EqnFolder",
+                                "MaterialFolder", "RefPlane", "OriginProfileFeature",
+                            ):
+                                names.append(f_it.Name)
+                            f_it = f_it.GetNextFeature
+                        except Exception:
+                            break
+                    names = [n for n in names if n != target_feat_name]
+                    if not names:
+                        return self._result(False, "No other feature to reorder against.", SwErrors.swFeatureError)
+                    target_feature = names[-1] if loc_clean == "to_end" else names[0]
+                    move_location = "after" if loc_clean == "to_end" else "before"
                 if not target_feature or not target_feature.strip():
                     return self._result(False, "Missing target_feature for 'reorder' action", SwErrors.swInvalidInput)
                 tgt_name = target_feature.strip()
@@ -1626,8 +1692,9 @@ class FeatureOperations:
                                 try:
                                     crv = get_attr_or_call(e, "GetCurve")
                                     is_ln = False
-                                    if crv:
-                                        is_ln = getattr(crv, "IsLine", lambda: False)() or getattr(crv, "Identity", lambda: 0)() == 3001
+                                    if crv is not None:
+                                        # IsLine / Identity are properties under late binding.
+                                        is_ln = bool(get_attr_or_call(crv, "IsLine")) or get_attr_or_call(crv, "Identity") == 3001
                                     if is_ln:
                                         e.Select2(True, 1)
                                         has_mark1 = True
@@ -1667,35 +1734,77 @@ class FeatureOperations:
                 num_val = int(num1)
                 angle_rad = math.radians(float(angle))
 
-                if feature_name:
-                    empty_callout = null_dispatch()
-                    doc.Extension.SelectByID2(feature_name.strip(), "BODYFEATURE", 0, 0, 0, True, 4, empty_callout, 0)
-
+                # Re-mark whatever the caller pre-selected: the pattern API needs the axis
+                # (edge / cylindrical face / axis) with mark 1 and seed features with mark 4.
                 sel_mgr = doc.SelectionManager
-                has_mark1 = False
+                pre_selected = []
                 for i in range(1, sel_mgr.GetSelectedObjectCount2(-1) + 1):
-                    if sel_mgr.GetSelectedObjectMark(i) == 1:
-                        has_mark1 = True
-                        break
+                    try:
+                        pre_selected.append((
+                            sel_mgr.GetSelectedObject6(i, -1),
+                            int(sel_mgr.GetSelectedObjectType3(i, -1)),
+                            int(sel_mgr.GetSelectedObjectMark(i)),
+                        ))
+                    except Exception:
+                        pass
+                doc.ClearSelection2(True)
+
+                AXIS_TYPES = (1, 2, 5)  # swSelEDGES, swSelFACES, swSelDATUMAXES
+                has_mark1 = False
+                seed_selected = False
+                for obj, sel_type, mark in pre_selected:
+                    if obj is None:
+                        continue
+                    try:
+                        if sel_type in AXIS_TYPES and not has_mark1:
+                            has_mark1 = bool(obj.Select2(True, 1))
+                        elif sel_type not in AXIS_TYPES and not feature_name:
+                            seed_selected = bool(obj.Select2(True, 4)) or seed_selected
+                    except Exception:
+                        pass
+
+                if feature_name:
+                    feat_obj = doc.FeatureByName(feature_name.strip())
+                    if feat_obj:
+                        seed_selected = bool(feat_obj.Select2(True, 4))
+                    else:
+                        empty_callout = null_dispatch()
+                        seed_selected = bool(doc.Extension.SelectByID2(
+                            feature_name.strip(), "BODYFEATURE", 0, 0, 0, True, 4, empty_callout, 0
+                        ))
+                if not seed_selected:
+                    return self._result(
+                        False,
+                        f"create_pattern: seed feature '{feature_name}' not found (pass feature_name or pre-select a feature).",
+                        SwErrors.swSelectionFailed,
+                    )
 
                 if not has_mark1:
+                    # No axis given: fall back to the largest cylindrical face of the model.
+                    best_face, best_area = None, -1.0
                     bodies = doc.GetBodies2(0, False) or ()
                     for b in bodies:
                         faces = get_attr_or_call(b, "GetFaces") or ()
                         for f in faces:
                             try:
                                 surf = get_attr_or_call(f, "GetSurface")
-                                is_cyl = False
-                                if surf:
-                                    is_cyl = getattr(surf, "IsCylinder", lambda: False)() or getattr(surf, "Identity", lambda: 0)() == 4002
-                                if is_cyl:
-                                    f.Select2(True, 1)
-                                    has_mark1 = True
-                                    break
+                                # IsCylinder is a property under late binding (calling it raises).
+                                if surf is not None and bool(get_attr_or_call(surf, "IsCylinder")):
+                                    area = float(get_attr_or_call(f, "GetArea") or 0.0)
+                                    if area > best_area:
+                                        best_face, best_area = f, area
                             except Exception:
                                 pass
-                        if has_mark1:
-                            break
+                    if best_face is not None:
+                        has_mark1 = bool(best_face.Select2(True, 1))
+
+                if not has_mark1:
+                    return self._result(
+                        False,
+                        "create_pattern: circular pattern needs an axis. Pre-select a cylindrical face, "
+                        "circular/linear edge or axis (e.g. with select_by_geometry) before calling.",
+                        SwErrors.swSelectionFailed,
+                    )
 
                 feat = None
                 try:
@@ -1780,7 +1889,20 @@ class FeatureOperations:
                 "din": 4,
                 "iso": 8,
             }
-            std_int = std_map.get(str(standard).lower(), 8)
+            std_key = str(standard).strip().lower().replace(" ", "_").replace("-", "_")
+            if std_key not in std_map:
+                return self._result(
+                    False,
+                    f"Unsupported hole standard '{standard}'. Use one of: ISO, DIN, ANSI Metric, ANSI Inch, BSI, DME.",
+                    SwErrors.swInvalidParameter,
+                )
+            std_int = std_map[std_key]
+            if str(hole_type).lower() not in type_map:
+                return self._result(
+                    False,
+                    f"Unsupported hole_type '{hole_type}'. Use one of: {', '.join(type_map)}.",
+                    SwErrors.swInvalidParameter,
+                )
 
             end_cond_map = {
                 "blind": 0,
@@ -1811,8 +1933,38 @@ class FeatureOperations:
             }
             fastener_idx = fastener_table.get((std_int, htype_int), 139 if std_int == 8 else 0)
 
-            diam_m = self._units.to_meters(diameter, unit) if diameter else 0.006
-            depth_m = self._units.to_meters(depth, unit) if depth else 0.02
+            if end_int == 0 and not depth:
+                return self._result(
+                    False, "create_hole_wizard: end_condition 'blind' needs a depth.", SwErrors.swInvalidParameter
+                )
+
+            # -1 tells HoleWizard5 to use the standard's own value for that slot. The old code
+            # always passed 6 mm / 20 mm and zeros for Value1..12, which SolidWorks turned into
+            # 1-inch-radius full-height holes.
+            DEFAULT = -1.0
+            import re as _re
+            m_nom = _re.match(r"^\s*M\s*(\d+(?:\.\d+)?)", str(size), _re.I)
+            nominal = float(m_nom.group(1)) if m_nom else None
+
+            diam_m = self._units.to_meters(diameter, unit) if diameter else DEFAULT
+            if diam_m == DEFAULT and htype_int == 2 and nominal:
+                # Plain "hole" uses drill-size names, so "M5" is unknown and SolidWorks fell back to
+                # its first drill size (Ø0.15 mm). Use the ISO 273 medium clearance hole instead.
+                clearance = {3: 3.4, 4: 4.5, 5: 5.5, 6: 6.6, 8: 9.0, 10: 11.0, 12: 13.5, 14: 15.5,
+                             16: 17.5, 20: 22.0, 24: 26.0, 30: 33.0}
+                d_mm = clearance.get(int(nominal), nominal * 1.1)
+                diam_m = d_mm / 1000.0
+            depth_m = self._units.to_meters(depth, unit) if depth else DEFAULT
+
+            # Tapped blind hole: `Depth` is the tap-drill depth; the thread depth (`Length`) defaulted
+            # to the standard's 2xD, deeper than the drill, leaving a full-diameter bore with an island.
+            length_m = DEFAULT
+            if htype_int == 4 and end_int == 0 and depth and nominal:
+                pitch = {3: 0.5, 4: 0.7, 5: 0.8, 6: 1.0, 8: 1.25, 10: 1.5, 12: 1.75, 14: 2.0,
+                         16: 2.0, 20: 2.5, 24: 3.0, 30: 3.5}.get(int(nominal), nominal * 0.15)
+                depth_mm = depth_m * 1000.0
+                thread_mm = max(depth_mm - 2.0 * pitch, 0.5 * depth_mm)
+                length_m = thread_mm / 1000.0
 
             pre_state = capture_pre_mutation_state(doc)
 
@@ -1824,8 +1976,9 @@ class FeatureOperations:
                 end_int,
                 diam_m,
                 depth_m,
-                depth_m,
-                0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                length_m,
+                DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT,
+                DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT,
                 "",
                 False,
                 False,
@@ -1840,12 +1993,75 @@ class FeatureOperations:
             if not ok:
                 return self._result(False, f"create_hole_wizard failed post-condition verification: {post_msg}", SwErrors.swFeatureError, post_diag)
 
+            # HoleWizard5 ignores the thread depth for tapped holes (it keeps the standard 2xD, deeper
+            # than a short tap drill, leaving a full-diameter bore with an island). Fix it on the
+            # feature definition: verified to give thread 8 / drill 10 for M6 x 10.
+            if feat is not None and length_m != DEFAULT:
+                try:
+                    fdef = get_attr_or_call(feat, "GetDefinition")
+                    fdef.AccessSelections(doc, null_dispatch())
+                    fdef.ThreadDepth = float(length_m)
+                    if not feat.ModifyDefinition(fdef, doc, null_dispatch()):
+                        fdef.ReleaseSelectionAccess()
+                        logger.warning("create_hole_wizard: ModifyDefinition(ThreadDepth) returned False")
+                    get_attr_or_call(doc, "EditRebuild3")
+                except Exception as td_ex:
+                    logger.warning(f"create_hole_wizard: could not set thread depth: {td_ex}")
+
+            # Plain holes made from an M-size are named after SolidWorks' fallback drill size
+            # ("Ø0.15 (0.15) Diameter Hole1"); give them a truthful name.
+            if feat is not None and htype_int == 2 and nominal and not diameter:
+                try:
+                    feat.Name = f"M{nominal:g} Clearance Hole Ø{diam_m * 1000:g}"
+                except Exception:
+                    pass
+
+            # Sanity check the material removed against the nominal size, so a wrong hole is
+            # reported as a failure instead of "[SUCCESS]".
+            removed = None
+            try:
+                from ..core.post_conditions import capture_vol_state as _cvs
+                after = _cvs(doc)
+                before = getattr(pre_state, "vol_state", None)
+                if after and before:
+                    removed = before[0] - after[0]
+            except Exception:
+                removed = None
+            if removed is not None and nominal:
+                nominal_mm = nominal
+                bbox_h = 0.0
+                try:
+                    box = doc.GetPartBox(True)
+                    bbox_h = max(abs(box[3] - box[0]), abs(box[4] - box[1]), abs(box[5] - box[2])) * 1000.0
+                except Exception:
+                    pass
+                hole_len = (float(depth) if (end_int == 0 and depth) else bbox_h) or bbox_h
+                # Generous ceiling: counterbore/countersink head ≈ 2× nominal over the full length.
+                ceiling = 3.1416 * (nominal_mm) ** 2 * max(hole_len, 1.0)
+                # Floor: at least half a tap-drill-sized cylinder (0.8 x nominal) over the blind
+                # depth, or over 1 mm for through holes (catches the Ø0.15 mm fallback hole).
+                floor_len = float(depth) if (end_int == 0 and depth) else 1.0
+                floor = 0.5 * 3.1416 * (0.4 * nominal_mm) ** 2 * floor_len
+                if removed < floor or removed > ceiling:
+                    return self._result(
+                        False,
+                        f"create_hole_wizard: feature '{getattr(feat, 'Name', '?')}' was created but removed "
+                        f"{removed:.1f} mm³, which does not fit a {size} {hole_type} "
+                        f"(expected {floor:.0f} <= V <= {ceiling:.0f} mm³). Check the selected face and size; "
+                        "undo the feature with manage_feature delete if it is wrong.",
+                        SwErrors.swFeatureError,
+                        {"feature_name": getattr(feat, "Name", None), "volume_removed_mm3": round(removed, 2)},
+                    )
+
             feat_name = getattr(feat, "Name", "HoleWizard")
             return self._result(
                 True,
-                f"Successfully created Hole Wizard feature ({hole_type} {size})",
+                f"Successfully created Hole Wizard feature ({hole_type} {size})"
+                + (f", removed {removed:.1f} mm³" if removed is not None else ""),
                 SwErrors.swSuccess,
-                {"feature_name": feat_name, "hole_type": hole_type, "size": size},
+                {"feature_name": feat_name, "hole_type": hole_type, "size": size,
+                 "volume_removed_mm3": round(removed, 2) if removed is not None else None,
+                 "note": "fastener_type is informational; the fastener is chosen from standard + hole_type."},
             )
         except Exception as e:
             logger.error(f"create_hole_wizard error: {e}\n{traceback.format_exc()}")
@@ -1880,6 +2096,21 @@ class FeatureOperations:
             doc, err = self.get_active_doc()
             if err:
                 return err
+
+            if tapped:
+                return self._result(
+                    False,
+                    "hole_linear does not model threads (tapped=true was previously ignored silently). "
+                    "Use create_hole_wizard with hole_type='tap' for a tapped hole.",
+                    SwErrors.swInvalidParameter,
+                )
+            want_cbore = float(cbore_diameter or 0.0) > 0.0
+            if want_cbore and (float(cbore_diameter) <= float(diameter) or float(cbore_depth or 0.0) <= 0.0):
+                return self._result(
+                    False,
+                    "Counterbore needs cbore_diameter > diameter and cbore_depth > 0.",
+                    SwErrors.swInvalidParameter,
+                )
 
             bodies = get_attr_or_call(doc, "GetBodies2", 0, False) or []
             if not bodies:
@@ -1947,18 +2178,26 @@ class FeatureOperations:
             # Transform 3D model point (m) into active sketch 2D space using sketch.ModelToSketchTransform
             sk = getattr(doc.SketchManager, "ActiveSketch", None)
             sx_m, sy_m = hole_pt_mm[0] / 1000.0, hole_pt_mm[1] / 1000.0
+            xform_ok = False
             try:
-                if sk is not None and self._sw_app is not None:
-                    math_util = self._sw_app.GetMathUtility()
-                    xform = sk.ModelToSketchTransform
-                    if math_util and xform:
-                        mp = math_util.CreatePoint([hole_pt_mm[0] / 1000.0, hole_pt_mm[1] / 1000.0, hole_pt_mm[2] / 1000.0])
-                        sp = mp.MultiplyTransform(xform)
-                        arr = sp.ArrayData
-                        if arr and len(arr) >= 2:
-                            sx_m, sy_m = float(arr[0]), float(arr[1])
-            except Exception:
-                pass
+                if sk is not None:
+                    xform = get_attr_or_call(sk, "ModelToSketchTransform")
+                    xf_arr = get_attr_or_call(xform, "ArrayData") if xform is not None else None
+                    if xf_arr and len(xf_arr) >= 12:
+                        # Applied in Python: IMathUtility.CreatePoint fails under late binding.
+                        from ..core.com_compat import transform_point
+                        sp = transform_point(xf_arr, [c / 1000.0 for c in hole_pt_mm])
+                        sx_m, sy_m = float(sp[0]), float(sp[1])
+                        xform_ok = True
+            except Exception as xf_ex:
+                logger.debug(f"hole_linear sketch transform failed: {xf_ex}")
+            if not xform_ok and fa_i != 2:
+                doc.InsertSketch2(True)
+                return self._result(
+                    False,
+                    "hole_linear: could not map the hole centre into the face's sketch coordinates.",
+                    SwErrors.swGeneralError,
+                )
 
             r_m = (float(diameter) / 2.0) / 1000.0
             doc.SketchManager.CreateCircleByRadius(sx_m, sy_m, 0.0, r_m)
@@ -1977,11 +2216,30 @@ class FeatureOperations:
                     {"hole_center_mm": hole_pt_mm, "cut_result": cut_res},
                 )
 
+            cbore_res = None
+            if want_cbore:
+                cbore_res = self.hole_linear(
+                    face_axis=face_axis, face_value=face_value,
+                    ref1_axis=ref1_axis, ref1_value=ref1_value, dist1=dist1,
+                    ref2_axis=ref2_axis, ref2_value=ref2_value, dist2=dist2,
+                    diameter=float(cbore_diameter), depth=float(cbore_depth),
+                    tapped=False, cbore_diameter=0.0, cbore_depth=0.0, unit=unit,
+                )
+                if not cbore_res.get("success"):
+                    return self._result(
+                        False,
+                        f"hole_linear: the hole was cut but the counterbore failed: {cbore_res.get('message')}",
+                        SwErrors.swFeatureError,
+                        {"hole_center_mm": hole_pt_mm, "cbore_result": cbore_res},
+                    )
+                vol_after = capture_vol_state(doc)
+
             suffix, delta_dict = format_vol_delta(vol_before, vol_after)
             extent_str = "through-all" if through_all else f"{depth}mm deep"
+            cbore_str = f" with C'bore D={cbore_diameter}mm x {cbore_depth}mm" if want_cbore else ""
             return self._result(
                 True,
-                f"Hole D={diameter}mm {extent_str} on {face_axis}={face_value} "
+                f"Hole D={diameter}mm {extent_str}{cbore_str} on {face_axis}={face_value} "
                 f"({dist1}mm from {ref1_axis}={ref1_value}, {dist2}mm from {ref2_axis}={ref2_value}){suffix}",
                 SwErrors.swSuccess,
                 {
@@ -1989,6 +2247,8 @@ class FeatureOperations:
                     "diameter_mm": diameter,
                     "depth_mm": depth,
                     "through_all": through_all,
+                    "cbore_diameter_mm": cbore_diameter if want_cbore else None,
+                    "cbore_depth_mm": cbore_depth if want_cbore else None,
                     "geometry_delta": delta_dict,
                 },
             )
@@ -2120,17 +2380,56 @@ class FeatureOperations:
                         lhs = eq_str.split("=")[0].strip().strip('"') if "=" in eq_str else ""
                         if lhs.lower() == clean_name.lower():
                             new_eq = f'"{lhs}" = {clean_expr}'
-                            eq_mgr.SetEquationAndConfigurationOption(i, new_eq, 1, None)
+
+                            def _norm(s: str) -> str:
+                                return "".join(str(s).split()).lower()
+
+                            # Try the setters in order until the stored equation text really changes;
+                            # SetEquationAndConfigurationOption silently no-ops under late binding.
+                            setters = (
+                                lambda: eq_mgr.SetEquationAndConfigurationOption(i, new_eq, 1, None),
+                                lambda: eq_mgr.SetEquationAndConfigurationOption(
+                                    i, new_eq, 1, win32com.client.VARIANT(pythoncom.VT_ARRAY | pythoncom.VT_BSTR, [])
+                                ),
+                                lambda: setattr(eq_mgr, "Equation", (i, new_eq)),
+                                lambda: eq_mgr.SetEquation(i, new_eq) if hasattr(eq_mgr, "SetEquation") else None,
+                            )
+                            applied = False
+                            for setter in setters:
+                                try:
+                                    setter()
+                                except Exception as set_err:
+                                    logger.debug(f"set_parameter setter failed: {set_err}")
+                                if _norm(eq_mgr.Equation(i) or "") == _norm(new_eq):
+                                    applied = True
+                                    break
+                            if not applied:
+                                # Last resort: replace the equation in place (delete + re-add at same index).
+                                try:
+                                    eq_mgr.Delete(i)
+                                    eq_mgr.Add2(i, new_eq, True)
+                                    applied = _norm(eq_mgr.Equation(i) or "") == _norm(new_eq)
+                                except Exception as readd_err:
+                                    logger.debug(f"set_parameter delete/re-add failed: {readd_err}")
+
                             get_attr_or_call(doc, "EditRebuild3")
                             val = eq_mgr.Value(i)
+                            if not applied:
+                                return self._result(
+                                    False,
+                                    f"Parameter '{lhs}' could not be updated: equation is still "
+                                    f"'{eq_mgr.Equation(i)}' (value={val}).",
+                                    SwErrors.swGeneralError,
+                                    {"index": i, "name": lhs, "expression": str(eq_mgr.Equation(i)), "value": val},
+                                )
                             return self._result(
                                 True,
                                 f"Parameter '{lhs}' set to '{clean_expr}' (value={val})",
                                 SwErrors.swSuccess,
                                 {"index": i, "name": lhs, "expression": clean_expr, "value": val},
                             )
-                    except Exception:
-                        pass
+                    except Exception as loop_err:
+                        logger.debug(f"set_parameter equation scan warning at {i}: {loop_err}")
 
             # Fallback: try setting numeric model dimension via set_dimension
             try:

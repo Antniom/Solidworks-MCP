@@ -80,11 +80,24 @@ class AssemblyOperations:
             ext = os.path.splitext(component_path)[1].lower()
             doc_type = SwDocumentTypes.swDocASSEMBLY if ext == ".sldasm" else SwDocumentTypes.swDocPART
 
+            box_center = [0.0, 0.0, 0.0]
             if HAS_PYWIN32:
                 errors = byref_int(0)
                 warnings = byref_int(0)
                 # OpenDoc6 with Option 1 = swOpenDocOptions_Silent
-                self._sw_app.OpenDoc6(component_path, int(doc_type), 1, "", errors, warnings)
+                comp_doc = self._sw_app.OpenDoc6(component_path, int(doc_type), 1, "", errors, warnings)
+                # AddComponent4 places the component's bounding-box centre (not its origin) at the
+                # given point, so read that centre in the component's own coordinates.
+                try:
+                    if comp_doc is not None:
+                        if doc_type == SwDocumentTypes.swDocPART:
+                            bx = comp_doc.GetPartBox(True)
+                        else:
+                            bx = comp_doc.GetBox(0)
+                        if bx and len(bx) >= 6:
+                            box_center = [(bx[0] + bx[3]) / 2.0, (bx[1] + bx[4]) / 2.0, (bx[2] + bx[5]) / 2.0]
+                except Exception as bx_ex:
+                    logger.debug(f"add_component: bbox read failed: {bx_ex}")
                 # Ensure assembly remains active
                 title = get_attr_or_call(doc, "GetTitle")
                 self._sw_app.ActivateDoc3(title, False, 2, errors)
@@ -92,9 +105,12 @@ class AssemblyOperations:
             # Capture pre-state for post-condition verification (F3)
             pre_state = capture_pre_mutation_state(doc)
 
-            # Insert component
+            # Insert component so that its ORIGIN lands on (x, y, z)
             try:
-                comp = doc.AddComponent4(component_path, "", x_m, y_m, z_m)
+                comp = doc.AddComponent4(
+                    component_path, "",
+                    x_m + box_center[0], y_m + box_center[1], z_m + box_center[2],
+                )
             except Exception as insert_ex:
                 logger.warning(f"AddComponent4 failed for '{component_path}': {insert_ex}")
                 comp = None
@@ -110,6 +126,25 @@ class AssemblyOperations:
                 )
 
             comp_name = comp.Name2
+
+            # Verify the component origin landed on the requested point.
+            origin_mm = None
+            try:
+                got = get_attr_or_call(get_attr_or_call(comp, "Transform2"), "ArrayData")
+                origin_mm = [round(float(got[i]) * 1000.0, 3) for i in (9, 10, 11)]
+            except Exception:
+                origin_mm = None
+            target_mm = [round(x_m * 1000.0, 3), round(y_m * 1000.0, 3), round(z_m * 1000.0, 3)]
+            if origin_mm is None or any(abs(a - b) > 0.01 for a, b in zip(origin_mm, target_mm)):
+                # Report but keep the component (it was inserted); include where it actually is.
+                return self._result(
+                    False,
+                    f"Component '{comp_name}' was inserted, but its origin is at {origin_mm} mm, not at the "
+                    f"requested {target_mm} mm. It is still in the assembly.",
+                    SwErrors.swGeneralError,
+                    {"name": comp_name, "origin_mm": origin_mm, "requested_mm": target_mm, "inserted": True},
+                )
+
             return self._result(
                 True,
                 f"Component '{comp_name}' inserted into assembly",
@@ -139,9 +174,12 @@ class AssemblyOperations:
         min_limit: Optional[float] = None,
         max_limit: Optional[float] = None,
         unit: str = "mm",
+        use_selection: bool = False,
     ) -> Dict:
         """
         Add a mate between two entities in the active assembly.
+        With use_selection=True the two currently selected entities are mated
+        (select them first with select_by_geometry / select_entity).
 
         Args:
             mate_type: 'coincident', 'concentric', 'perpendicular', 'parallel', 'tangent', 'distance', 'angle'
@@ -177,8 +215,49 @@ class AssemblyOperations:
                 )
             sw_mate_type = self.MATE_TYPES[mate_type_lower]
 
-            # Clear selection
-            doc.ClearSelection2(True)
+            # "@selected" works even with clients that cached the older schema (no use_selection).
+            if str(entity1 or "").strip().lower() in ("@selected", "@selection") or \
+               str(entity2 or "").strip().lower() in ("@selected", "@selection"):
+                use_selection = True
+            if use_selection:
+                # Re-select the two current picks with mark 1 (AddMate3 reads marked entities).
+                sel_mgr = doc.SelectionManager
+                count = int(sel_mgr.GetSelectedObjectCount2(-1) or 0)
+                if count != 2:
+                    return self._result(
+                        False,
+                        f"use_selection=true needs exactly 2 selected entities, found {count}.",
+                        SwErrors.swSelectionError,
+                    )
+                picked = [sel_mgr.GetSelectedObject6(i, -1) for i in (1, 2)]
+                doc.ClearSelection2(True)
+                for i, ent in enumerate(picked):
+                    ok_sel = False
+                    try:
+                        ok_sel = bool(ent.Select2(i > 0, 1))
+                    except Exception:
+                        ok_sel = False
+                    if not ok_sel:
+                        # Entities that are not IEntity (e.g. features) use Select4 with a select data object.
+                        try:
+                            sd = sel_mgr.CreateSelectData()
+                            sd.Mark = 1
+                            ok_sel = bool(ent.Select4(i > 0, sd))
+                        except Exception:
+                            ok_sel = False
+                    if not ok_sel:
+                        return self._result(
+                            False, f"Could not re-select selected entity #{i + 1} for the mate.", SwErrors.swSelectionError
+                        )
+            else:
+                if not entity1 or not entity2:
+                    return self._result(
+                        False,
+                        "Pass entity1 and entity2, or pre-select two entities and set use_selection=true.",
+                        SwErrors.swInvalidParameter,
+                    )
+                # Clear selection
+                doc.ClearSelection2(True)
 
             # Helper to resolve selection for component entity
             def select_target(ent_name: str, comp_name: Optional[str], append: bool) -> bool:
@@ -208,7 +287,7 @@ class AssemblyOperations:
                     null_callout = win32com.client.VARIANT(pythoncom.VT_DISPATCH, None) if HAS_PYWIN32 else None
                     return doc.Extension.SelectByID2(ent_name, "", 0.0, 0.0, 0.0, append, 1, null_callout, 0)
 
-            ok1 = select_target(entity1, comp1, False)
+            ok1 = True if use_selection else select_target(entity1, comp1, False)
             if not ok1:
                 return self._result(
                     False,
@@ -216,7 +295,7 @@ class AssemblyOperations:
                     SwErrors.swSelectionError,
                 )
 
-            ok2 = select_target(entity2, comp2, True)
+            ok2 = True if use_selection else select_target(entity2, comp2, True)
             if not ok2:
                 return self._result(
                     False,
@@ -561,6 +640,18 @@ class AssemblyOperations:
                 )
             elif act in ("set_flexible", "flexible", "set_rigid", "rigid"):
                 want_flexible = act in ("set_flexible", "flexible")
+                # Flexible/rigid solving only exists for subassemblies, not part components.
+                try:
+                    comp_path = str(get_attr_or_call(target, "GetPathName") or "")
+                except Exception:
+                    comp_path = ""
+                if comp_path.lower().endswith(".sldprt"):
+                    return self._result(
+                        False,
+                        f"'{comp_name}' is a part, not a subassembly; flexible/rigid solving only applies to subassemblies.",
+                        SwErrors.swInvalidParameter,
+                        {"component": comp_name, "path": comp_path},
+                    )
                 # swComponentSolvingOption_e: 0 = swComponentRigidSolving, 1 = swComponentFlexibleSolving
                 solving_code = 1 if want_flexible else 0
                 applied = False
@@ -575,6 +666,13 @@ class AssemblyOperations:
                         pass
                 get_attr_or_call(doc, "EditRebuild3")
                 state_label = "Flexible" if want_flexible else "Rigid"
+                if not applied:
+                    return self._result(
+                        False,
+                        f"Could not set '{comp_name}' to {state_label} solving (CompConfigProperties returned False).",
+                        SwErrors.swGeneralError,
+                        {"component": comp_name, "solving": state_label.lower(), "applied": False},
+                    )
                 return self._result(
                     True,
                     f"Subassembly '{comp_name}' set to {state_label} solving (applied={applied}).",

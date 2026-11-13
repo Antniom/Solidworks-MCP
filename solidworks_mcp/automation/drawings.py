@@ -328,13 +328,42 @@ class DrawingOperations:
             y_m = converter.to_meters(y, unit)
             z_m = converter.to_meters(z, unit)
 
+            sel_count = 0
+            try:
+                sel_mgr = doc.SelectionManager
+                sel_count = int(sel_mgr.GetSelectedObjectCount2(-1))
+            except Exception:
+                sel_count = 0
+            if sel_count < 1:
+                return self._result(
+                    False,
+                    "add_drawing_dimension needs at least one drawing edge/vertex selected first "
+                    "(nothing is selected).",
+                    SwErrors.swSelectionFailed,
+                )
+
             dim = doc.AddDimension2(x_m, y_m, z_m)
             try:
                 doc.GraphicsRedraw2()
             except Exception:
                 pass
 
-            dim_name = dim.Name if dim is not None else None
+            if dim is None:
+                return self._result(
+                    False,
+                    f"AddDimension2 returned no dimension for the {sel_count} selected entity(ies); "
+                    "the selection cannot be dimensioned.",
+                    SwErrors.swGeneralError,
+                )
+
+            dim_name = None
+            try:
+                dim_name = dim.Name
+            except Exception:
+                try:
+                    dim_name = dim.GetNameForSelection()
+                except Exception:
+                    dim_name = None
             return self._result(
                 True,
                 f"Added drawing dimension at ({x}, {y}) {unit}",
@@ -561,7 +590,7 @@ class DrawingOperations:
                 return self._result(False, "insert_bom_table requires an active Drawing document", SwErrors.swInvalidDocumentType)
 
             from ..utils import resolve_bom_template
-            tbl_tmpl = resolve_bom_template(sw_app=self.sw_app, template_path=template_path)
+            tbl_tmpl = resolve_bom_template(sw_app=self._sw_app,template_path=template_path)
 
             if not tbl_tmpl or not os.path.exists(tbl_tmpl):
                 return self._result(False, f"BOM template file not found: {tbl_tmpl}", SwErrors.swFileNotFoundError)
@@ -578,40 +607,93 @@ class DrawingOperations:
             x_m = converter.to_meters(x, unit)
             y_m = converter.to_meters(y, unit)
 
-            target_view = None
-            try:
-                first_view = doc.GetFirstView()
-                if first_view:
-                    target_view = first_view.GetNextView() or first_view
-            except Exception:
-                pass
+            from ..core.com_compat import get_attr_or_call
 
-            bom_table = None
+            # First model view (GetFirstView returns the sheet itself).
+            target_view = None
+            first_view = None
             try:
-                bom_table = doc.Extension.InsertBomTable3(
-                    tbl_tmpl, x_m, y_m, btype_int, configuration or "", False, 1, False
+                first_view = get_attr_or_call(doc, "GetFirstView")
+                if first_view is not None:
+                    target_view = get_attr_or_call(first_view, "GetNextView")
+            except Exception:
+                target_view = None
+            if target_view is None:
+                return self._result(
+                    False,
+                    "insert_bom_table: the drawing has no model view to attach a BOM to.",
+                    SwErrors.swInvalidDocumentType,
                 )
-            except Exception as e1:
-                logger.debug(f"Extension.InsertBomTable3 failed: {e1}")
+
+            def _table_count() -> int:
+                # SolidWorks attaches the BOM to the sheet, not to the model view, so count
+                # BOM features in the drawing's feature tree (and sheet + view tables as backup).
+                n = 0
                 try:
-                    bom_table = doc.Extension.InsertBomTable(
-                        tbl_tmpl, x_m, y_m, btype_int, configuration or ""
+                    f = doc.FirstFeature
+                    while f is not None:
+                        if get_attr_or_call(f, "GetTypeName2") == "BomFeat":
+                            n += 1
+                        f = f.GetNextFeature
+                except Exception:
+                    pass
+                if n:
+                    return n
+                for v in (first_view, target_view):
+                    try:
+                        n += int(get_attr_or_call(v, "GetTableAnnotationCount") or 0)
+                    except Exception:
+                        pass
+                return n
+
+            cfg = configuration or ""
+            if not cfg:
+                try:
+                    cfg = str(get_attr_or_call(target_view, "ReferencedConfiguration") or "")
+                except Exception:
+                    cfg = ""
+
+            before_tables = _table_count()
+            bom_table = None
+            attempts = []
+            # IModelDocExtension has no InsertBomTable*; the API lives on IView.
+            # InsertBomTable4(UseAnchorPoint, X, Y, AnchorType, BomType, Configuration,
+            #                 TableTemplate, Hidden, IndentedNumberingType, DetailedCutList)
+            numbering = 1 if btype_int == 3 else 0
+            for use_anchor in (False, True):
+                try:
+                    bom_table = target_view.InsertBomTable4(
+                        use_anchor, x_m, y_m, int(anchor_type), btype_int, cfg, tbl_tmpl, False, numbering, False
+                    )
+                except Exception as e1:
+                    attempts.append(f"InsertBomTable4(anchor={use_anchor}): {e1}")
+                    bom_table = None
+                if bom_table is not None:
+                    break
+            if bom_table is None:
+                try:
+                    bom_table = target_view.InsertBomTable3(
+                        False, x_m, y_m, int(anchor_type), btype_int, cfg, tbl_tmpl, False, numbering
                     )
                 except Exception as e2:
-                    logger.debug(f"Extension.InsertBomTable failed: {e2}")
-                    if target_view:
-                        try:
-                            bom_table = target_view.InsertBomTable2(
-                                False, x_m, y_m, int(anchor_type), btype_int,
-                                configuration or "", tbl_tmpl
-                            )
-                        except Exception as e3:
-                            logger.debug(f"target_view.InsertBomTable2 failed: {e3}")
+                    attempts.append(f"InsertBomTable3: {e2}")
 
             try:
                 doc.GraphicsRedraw2()
             except Exception:
                 pass
+
+            after_tables = _table_count()
+            if bom_table is None or after_tables <= before_tables:
+                return self._result(
+                    False,
+                    "insert_bom_table: no BOM table was created "
+                    f"(view tables before={before_tables}, after={after_tables}). "
+                    "BOMs need a drawing view of an assembly or multi-body part. "
+                    + ("; ".join(attempts) if attempts else ""),
+                    SwErrors.swGeneralError,
+                    {"template": tbl_tmpl, "configuration": cfg, "attempts": attempts},
+                )
 
             title = "BOM Table"
             if bom_table is not None:
