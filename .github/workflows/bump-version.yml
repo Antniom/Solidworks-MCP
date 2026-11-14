@@ -1,0 +1,50 @@
+name: Bump plugin version
+
+# Claude Code only delivers a plugin update when the version in .claude-plugin/plugin.json
+# changes. This bumps the patch number on every push to main so each push reaches users of the
+# marketplace. Pushes made by this workflow (GITHUB_TOKEN) do not trigger it again.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: bump-version
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    if: github.actor != 'github-actions[bot]'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Skip when this push already changed the version
+        id: check
+        run: |
+          before="${{ github.event.before }}"
+          if [ "$before" != "0000000000000000000000000000000000000000" ] \
+             && git cat-file -e "$before^{commit}" 2>/dev/null \
+             && git diff "$before" HEAD -- .claude-plugin/plugin.json | grep -q '^[-+].*"version"'; then
+            echo "Version was changed by hand in this push; not bumping."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Bump patch version
+        if: steps.check.outputs.skip != 'true'
+        id: bump
+        run: echo "version=$(python3 .github/scripts/bump_version.py)" >> "$GITHUB_OUTPUT"
+
+      - name: Commit and push
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "chore: bump plugin version to ${{ steps.bump.outputs.version }}"
+          git pull --rebase origin main
+          git push origin HEAD:main
