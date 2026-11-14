@@ -38,6 +38,8 @@ class VerificationReport:
     dimension_check: Optional[DimensionCheck] = None
     warnings: List[str] = field(default_factory=list)
     rebuild_errors: List[str] = field(default_factory=list)
+    bbox_min_mm: Optional[List[float]] = None
+    bbox_max_mm: Optional[List[float]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         out = {
@@ -46,6 +48,8 @@ class VerificationReport:
             "rebuild_error_count": self.rebuild_error_count,
             "body_count": self.body_count,
             "dimensions_mm": self.dimensions_mm,
+            "bbox_min_mm": self.bbox_min_mm,
+            "bbox_max_mm": self.bbox_max_mm,
             "volume_mm3": round(self.volume_mm3, 2),
             "surface_area_mm2": round(self.surface_area_mm2, 2),
             "center_of_mass_mm": [round(c, 3) for c in self.center_of_mass_mm],
@@ -117,14 +121,46 @@ class ModelVerifier:
         except Exception as e:
             warnings.append(f"Rebuild error scan failed: {e}")
 
-        # 3. Check bodies
+        # 3. Check bodies. GetBodies2 is a part-only member; for an assembly count the bodies of
+        #    every resolved component and take the box from IAssemblyDoc.GetBox (MCP-002).
         bodies = None
+        is_assembly = False
         try:
-            bodies = doc.GetBodies2(0, False)
-        except Exception as e:
-            warnings.append(f"GetBodies2 error: {e}")
-
-        body_count = len(bodies) if bodies else 0
+            from .com_compat import get_attr_or_call as _gac
+            is_assembly = _gac(doc, "GetType") == 2
+        except Exception:
+            is_assembly = False
+        min_pt = [float("inf"), float("inf"), float("inf")]
+        max_pt = [float("-inf"), float("-inf"), float("-inf")]
+        if is_assembly:
+            body_count = 0
+            try:
+                for comp in (doc.GetComponents(False) or []):
+                    try:
+                        if comp.IsSuppressed():
+                            continue
+                    except Exception:
+                        pass
+                    try:
+                        cb = comp.GetBodies2(0)
+                        body_count += len(cb) if cb else 0
+                    except Exception:
+                        pass
+            except Exception as e:
+                warnings.append(f"Component body count failed: {e}")
+            try:
+                box = doc.GetBox(0)
+                if box and len(box) >= 6:
+                    min_pt = [box[0], box[1], box[2]]
+                    max_pt = [box[3], box[4], box[5]]
+            except Exception as e:
+                warnings.append(f"Assembly GetBox error: {e}")
+        else:
+            try:
+                bodies = doc.GetBodies2(0, False)
+            except Exception as e:
+                warnings.append(f"GetBodies2 error: {e}")
+            body_count = len(bodies) if bodies else 0
         if body_count == 0:
             warnings.append("No solid bodies found in model.")
 
@@ -133,8 +169,8 @@ class ModelVerifier:
 
         # 4. Compute bounding box
         dimensions_mm = {"dx": 0.0, "dy": 0.0, "dz": 0.0}
-        min_pt = [float("inf"), float("inf"), float("inf")]
-        max_pt = [float("-inf"), float("-inf"), float("-inf")]
+        if is_assembly and min_pt[0] != float("inf"):
+            dimensions_mm = {k: round((max_pt[i] - min_pt[i]) * 1000.0, 3) for i, k in enumerate(("dx", "dy", "dz"))}
 
         if bodies:
             for body in bodies:
@@ -268,12 +304,19 @@ class ModelVerifier:
 
         passed = (rebuild_count == 0) and (body_count > 0) and dim_passed
 
+        bbox_min = bbox_max = None
+        if min_pt[0] != float("inf"):
+            bbox_min = [round(v * 1000.0, 3) + 0.0 for v in min_pt]
+            bbox_max = [round(v * 1000.0, 3) + 0.0 for v in max_pt]
+
         return VerificationReport(
             passed=passed,
             rebuild_clean=(rebuild_count == 0),
             rebuild_error_count=rebuild_count,
             body_count=body_count,
             dimensions_mm=dimensions_mm,
+            bbox_min_mm=bbox_min,
+            bbox_max_mm=bbox_max,
             volume_mm3=volume_mm3,
             surface_area_mm2=surface_area_mm2,
             center_of_mass_mm=com_mm,

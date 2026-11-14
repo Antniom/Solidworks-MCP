@@ -228,9 +228,22 @@ class DeclarativeSelectionResolver:
 
         null_callout = win32com.client.VARIANT(pythoncom.VT_DISPATCH, None) if HAS_PYWIN32 else None
         try:
-            ok = doc.Extension.SelectByID2(
-                target.name, "BODYFEATURE", 0.0, 0.0, 0.0, target.append, target.mark, null_callout, 0
-            )
+            # Select the feature object itself: works for every feature type. SelectByID2 with
+            # "BODYFEATURE" cannot select sketches, planes or folders (MCP-004).
+            ok = False
+            try:
+                feat = doc.FeatureByName(target.name)
+                if feat is not None:
+                    ok = bool(feat.Select2(target.append, target.mark))
+            except Exception as fe:
+                logger.debug(f"FeatureByName/Select2 for '{target.name}' failed: {fe}")
+            if not ok:
+                for sel_type in ("BODYFEATURE", "SKETCH", "PLANE", "AXIS", ""):
+                    if doc.Extension.SelectByID2(
+                        target.name, sel_type, 0.0, 0.0, 0.0, target.append, target.mark, null_callout, 0
+                    ):
+                        ok = True
+                        break
             if ok:
                 return SelectionResult(
                     success=True,

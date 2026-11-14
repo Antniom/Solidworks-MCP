@@ -725,7 +725,7 @@ _TOOL_HANDLERS: Dict[str, Callable[[dict], Dict[str, Any]]] = {
     'draw_polygon': _auto('draw_polygon', ('cx', 0), ('cy', 0), ('radius', 25), ('sides', 6), 'unit'),
     'draw_text': _auto('draw_text', ('text', ''), ('x', 0.0), ('y', 0.0), ('height', 12.0), ('font_name', 'Segoe UI'), ('bold', True), ('italic', False), ('angle', 0.0), ('center', False), 'unit'),
     'extrude_sketch': _auto('extrude_sketch', ('depth', 10), ('both_directions', False), ('reverse_dir', False), 'unit'),
-    'cut_extrude': _auto('cut_extrude', ('depth', 10), ('through_all', False), ('both_directions', False), 'unit'),
+    'cut_extrude': _auto('cut_extrude', ('depth', 10), ('through_all', False), ('both_directions', False), 'unit', 'reverse_dir'),
     'fillet_edges': _auto('fillet_edges', ('radius', 2), 'unit'),
     'chamfer_edges': _auto('chamfer_edges', ('distance', 2), ('angle', 45), 'unit'),
     'get_dimensions': _auto('get_dimensions', 'feature_name', 'dimension_name'),
@@ -769,6 +769,7 @@ _TOOL_HANDLERS: Dict[str, Callable[[dict], Dict[str, Any]]] = {
     'drive_kinematic_motion': _auto('drive_kinematic_motion', ('constraint_name', ''), ('start_value', 0.0), ('end_value', 90.0), ('steps', 10), ('unit', 'mm'), ('check_interference', False)),
     'manage_positional_representations': _auto('manage_positional_representations', ('action', 'list'), 'name', 'constraint_name', 'value', 'suppress_constraint'),
     'apply_material_appearance': _auto('apply_material_appearance', ('appearance_name', 'Smooth - White'), 'color_rgb', 'reflectivity', 'transparency', ('target_type', 'part'), 'target_name'),
+    'set_material': _auto('set_material', 'material_name', ('database', 'SOLIDWORKS Materials'), ('configuration', '')),
     # Merged tools: one name, routed by a mode argument to the same underlying operations
     'create_document': _route('type', {
         'part': _auto('create_new_part'),
@@ -785,7 +786,7 @@ _TOOL_HANDLERS: Dict[str, Callable[[dict], Dict[str, Any]]] = {
     'select': _route('by', {
         'name': _select_entity,
         'point': _select_entity,
-        'geometry': _auto('select_by_geometry', ('target_type', 'face'), 'surface_type', 'normal', ('normal_tolerance', 0.05), 'radius', ('radius_tolerance', 0.05), 'point_on_surface', 'curve_type', 'length', ('length_tolerance', 0.1), 'midpoint', 'point', 'bbox_min', 'bbox_max', ('mark', 0), ('append', False), 'unit', 'component'),
+        'geometry': _auto('select_by_geometry', ('target_type', 'face'), 'surface_type', 'normal', ('normal_tolerance', 0.05), 'radius', ('radius_tolerance', 0.05), 'point_on_surface', 'curve_type', 'length', ('length_tolerance', 0.1), 'midpoint', 'point', 'bbox_min', 'bbox_max', ('mark', 0), ('append', False), 'unit', 'component', ('max_results', 200), ('time_budget_s', 40.0)),
         'centroid': _select_by_centroid,
         'path': _sdk("selectByPath", "Selection by path failed", build=lambda a: {
             "path": a.get("path", ""), "multiSelect": bool(a.get("append", False)), "mark": int(a.get("mark", 0))}),

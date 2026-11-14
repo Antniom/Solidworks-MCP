@@ -324,16 +324,21 @@ class FeatureOperations:
     # ========================================================================
     
     def cut_extrude(self, depth: float = 10, through_all: bool = False,
-                    both_directions: bool = False, unit: str = None) -> Dict:
+                    both_directions: bool = False, unit: str = None,
+                    reverse_dir: Optional[bool] = None) -> Dict:
         """
         Cut extrude (remove material)
         FIXED v4.0: Proper sketch handling and parameter counts
-        
+
         Args:
-            depth: Cut depth (ignored if through_all=True)
+            depth: Cut depth (ignored if through_all=True). With both_directions it is the TOTAL
+                   depth, split equally either side of the sketch (mid-plane).
             through_all: Cut through entire model
-            both_directions: Cut in both directions
+            both_directions: Mid-plane cut (or through-all on both sides)
             unit: Unit for depth
+            reverse_dir: True/False forces the side of a one-sided cut (False = against the sketch
+                         normal, i.e. into the face for a face sketch; True = along the normal, verified
+                         live); None tries the default side first and the opposite side if that fails
         
         Returns:
             Result dictionary
@@ -371,25 +376,31 @@ class FeatureOperations:
             # starting volume now that the sketch is closed.
             self._recapture_pre_volume(doc, pre_state)
 
-            # Determine end condition
+            # Determine end condition (values from swEndConditions_e in the interop DLL)
             if through_all:
                 if both_directions:
-                    end_cond = 2  # swEndCondThroughAllBoth
+                    end_cond = 9  # swEndCondThroughAllBoth (2 is ThroughNext: it stopped at the next face, MCP-009)
                 else:
                     end_cond = 1  # swEndCondThroughAll
                 cut_depth = 0
             else:
                 if both_directions:
-                    end_cond = 6  # swEndCondMidPlane
+                    end_cond = 6  # swEndCondMidPlane: `depth` is the TOTAL, split equally either side
                 else:
                     end_cond = 0  # swEndCondBlind
                 cut_depth = depth_m
-            
+
             feat = None
             method_used = ""
-            
+            # reverse_dir None = try the default side, then the opposite one (old behaviour);
+            # True/False = only that side, so the caller controls which way a one-sided cut goes.
+            if reverse_dir is None or both_directions:
+                dir_options = [False, True]
+            else:
+                dir_options = [bool(reverse_dir)]
+
             # Method 1: FeatureCut4 (27 params for SW 2025)
-            for dir_opt in [False, True]:
+            for dir_opt in dir_options:
                 try:
                     feat = doc.FeatureManager.FeatureCut4(
                         True,           # Sd - single direction
@@ -423,7 +434,7 @@ class FeatureOperations:
             
             # Method 2: FeatureCut3 (26 params fallback)
             if feat is None:
-                for dir_opt in [False, True]:
+                for dir_opt in dir_options:
                     try:
                         feat = doc.FeatureManager.FeatureCut3(
                             True, False, dir_opt, end_cond, 0,
@@ -442,9 +453,14 @@ class FeatureOperations:
                         logger.debug(f"FeatureCut3 (dir={dir_opt}) failed: {e}")
             
             if feat is None:
+                side_hint = ""
+                if reverse_dir is not None and not both_directions:
+                    side_hint = (f" With reverse_dir={bool(reverse_dir)} the cut goes "
+                                 f"{'along' if reverse_dir else 'against'} the sketch normal; there may be no material "
+                                 f"on that side - try reverse_dir={not bool(reverse_dir)} or omit it.")
                 return self._result(False,
                     f"Cut failed on sketch '{sketch_name}'. "
-                    f"Ensure sketch is drawn on an existing face with a closed profile.",
+                    f"Ensure sketch is drawn on an existing face with a closed profile.{side_hint}",
                     SwErrors.swFeatureError,
                     {"sketch_name": sketch_name})
             
@@ -454,11 +470,21 @@ class FeatureOperations:
                 return self._result(False, f"Cut extrude failed post-condition verification: {post_msg}",
                                   SwErrors.swFeatureError, post_diag)
             
-            cut_type = "through all" if through_all else f"{depth}{unit_str}"
-            
-            return self._result(True, f"Cut extrude: {cut_type} [{method_used}]",
+            if through_all:
+                cut_type = "through all, both directions" if both_directions else "through all"
+            elif both_directions:
+                cut_type = f"mid-plane, {depth}{unit_str} total ({depth / 2:g}{unit_str} each side)"
+            else:
+                cut_type = f"{depth}{unit_str}"
+            reversed_used = method_used.endswith("_Rev")
+
+            return self._result(True, f"Cut extrude: {cut_type}" + (", reversed direction" if reversed_used and not both_directions else "")
+                              + f" [{method_used}]",
                               SwErrors.swSuccess,
                               {"depth": depth, "through_all": through_all,
+                               "both_directions": both_directions,
+                               "end_condition": {0: "blind", 1: "through_all", 6: "mid_plane", 9: "through_all_both"}[end_cond],
+                               "reversed_direction": reversed_used,
                                "sketch_name": sketch_name,
                                "api_method": method_used,
                                "feature_name": getattr(feat, "Name", "Cut-Extrude")})
@@ -1219,6 +1245,55 @@ class FeatureOperations:
             logger.error(f"set_dimension error: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Error setting dimension: {e}", SwErrors.swGeneralError)
 
+    _REF_GEOM_TYPES = {"RefPlane", "RefAxis", "RefPoint", "CoordSys", "OriginProfileFeature"}
+    _SKETCH_TYPES = {"ProfileFeature", "3DProfileFeature"}
+
+    def _set_feature_visibility(self, doc, feat, name: str, hide: bool) -> Dict:
+        """Hide/show reference geometry, a sketch, or the solid bodies a feature produced."""
+        verb = "hidden" if hide else "shown"
+        type_name = str(get_attr_or_call(feat, "GetTypeName2") or "")
+        doc.ClearSelection2(True)
+        if type_name in self._REF_GEOM_TYPES or type_name in self._SKETCH_TYPES:
+            if not feat.Select2(False, 0):
+                return self._result(False, f"Could not select '{name}'", SwErrors.swSelectionError)
+            if type_name in self._SKETCH_TYPES:
+                get_attr_or_call(doc, "BlankSketch" if hide else "UnblankSketch")
+            else:
+                get_attr_or_call(doc, "BlankRefGeom" if hide else "UnblankRefGeom")
+            doc.ClearSelection2(True)
+            try:
+                vis = get_attr_or_call(feat, "Visible")  # swVisibilityState_e: 1 = hidden, 2 = shown
+            except Exception:
+                vis = None
+            if vis in (1, 2) and (vis == 1) != hide:
+                return self._result(False, f"'{name}' ({type_name}) was not {verb} (visibility state {vis})",
+                                    SwErrors.swFeatureError, {"feature": name, "type": type_name, "visible_state": vis})
+            return self._result(True, f"{type_name} '{name}' {verb}", SwErrors.swSuccess,
+                                {"feature": name, "type": type_name, "hidden": hide, "visible_state": vis})
+
+        # Solid-body feature: hide/show every body that has faces created by it.
+        bodies = []
+        for face in (get_attr_or_call(feat, "GetFaces") or []):
+            try:
+                body = get_attr_or_call(face, "GetBody")
+            except Exception:
+                body = None
+            if body is not None and not any(body is b or body == b for b in bodies):
+                bodies.append(body)
+        if not bodies:
+            return self._result(False, f"'{name}' ({type_name}) is not reference geometry, a sketch, or a body feature with "
+                                       "faces; nothing to hide/show", SwErrors.swInvalidInput)
+        names = []
+        for body in bodies:
+            body.HideBody(bool(hide))
+            names.append(str(get_attr_or_call(body, "Name") or ""))
+        doc.GraphicsRedraw2()
+        still = [n for b, n in zip(bodies, names) if bool(get_attr_or_call(b, "Visible")) == bool(hide)]
+        if still:
+            return self._result(False, f"Bodies not {verb}: {still}", SwErrors.swFeatureError, {"bodies": names})
+        return self._result(True, f"{len(names)} body/bodies of '{name}' {verb}: {names}", SwErrors.swSuccess,
+                            {"feature": name, "type": type_name, "bodies": names, "hidden": hide})
+
     def manage_feature(
         self,
         action: str,
@@ -1259,10 +1334,10 @@ class FeatureOperations:
                 )
 
             action_clean = (action or "").strip().lower()
-            if action_clean not in ("suppress", "unsuppress", "rename", "delete", "reorder", "set_color"):
+            if action_clean not in ("suppress", "unsuppress", "rename", "delete", "reorder", "set_color", "hide", "show"):
                 return self._result(
                     False,
-                    f"Invalid action '{action}'. Valid actions: 'suppress', 'unsuppress', 'rename', 'delete', 'reorder', 'set_color'.",
+                    f"Invalid action '{action}'. Valid actions: 'suppress', 'unsuppress', 'rename', 'delete', 'reorder', 'set_color', 'hide', 'show'.",
                     SwErrors.swInvalidInput,
                 )
 
@@ -1277,6 +1352,9 @@ class FeatureOperations:
                     f"Feature '{target_feat_name}' not found in active document",
                     SwErrors.swFeatureError,
                 )
+
+            if action_clean in ("hide", "show"):
+                return self._set_feature_visibility(doc, feat, target_feat_name, action_clean == "hide")
 
             if action_clean == "suppress":
                 # SetSuppression2: 0 = swSuppressFeature
@@ -2200,11 +2278,26 @@ class FeatureOperations:
                 )
 
             r_m = (float(diameter) / 2.0) / 1000.0
-            doc.SketchManager.CreateCircleByRadius(sx_m, sy_m, 0.0, r_m)
+            from ..core.sketch_guard import arc_center_radius, close, direct_sketch, TOL_M
+            with direct_sketch(doc):  # no snapping onto existing concentric edges (MCP-013)
+                circle = doc.SketchManager.CreateCircleByRadius(sx_m, sy_m, 0.0, r_m)
+            got = arc_center_radius(circle) if circle is not None else None
+            if circle is None or (got is not None and not (close(got[0], (sx_m, sy_m)) and abs(got[1] - r_m) <= TOL_M)):
+                doc.InsertSketch2(True)
+                return self._result(
+                    False,
+                    "hole_linear: the hole circle could not be created exactly"
+                    + (f" (got r={got[1] * 1000:.4f} mm at sketch ({got[0][0] * 1000:.4f}, {got[0][1] * 1000:.4f}))" if got else "")
+                    + ". Nothing was cut; delete the leftover sketch with manage_feature if needed.",
+                    SwErrors.swSketchError,
+                )
             doc.InsertSketch2(True)
 
+            # Through-all goes through the whole part along the hole axis on both sides of the face,
+            # so it cannot stop after the first wall or depend on which side SolidWorks picks (MCP-012).
             through_all = (float(depth) <= 0.0)
-            cut_res = self.cut_extrude(depth=float(depth) if not through_all else 10.0, through_all=through_all, unit="mm")
+            cut_res = self.cut_extrude(depth=float(depth) if not through_all else 10.0, through_all=through_all,
+                                       both_directions=through_all, unit="mm")
             vol_after = capture_vol_state(doc)
             v1 = vol_after[0] if vol_after else v0
 
@@ -2215,6 +2308,21 @@ class FeatureOperations:
                     SwErrors.swFeatureError,
                     {"hole_center_mm": hole_pt_mm, "cut_result": cut_res},
                 )
+
+            # Measure the hole that was actually cut: cylinder faces whose axis is the hole axis.
+            walls = self._hole_walls_on_axis(doc, hole_pt_mm, fa_i)
+            radii = sorted({round(r, 4) for r, _ in walls})
+            req_r_mm = float(diameter) / 2.0
+            if walls and not any(abs(r - req_r_mm) <= 1e-3 for r, _ in walls):
+                return self._result(
+                    False,
+                    f"hole_linear: requested D={diameter} mm but the hole on this axis has radius {radii} mm "
+                    "(it merged with existing geometry). The cut feature is still in the tree; delete it with "
+                    "manage_feature if it is wrong.",
+                    SwErrors.swFeatureError,
+                    {"hole_center_mm": hole_pt_mm, "measured_radii_mm": radii, "cut_result": cut_res},
+                )
+            walls_pierced = sum(1 for r, _ in walls if abs(r - req_r_mm) <= 1e-3)
 
             cbore_res = None
             if want_cbore:
@@ -2235,7 +2343,7 @@ class FeatureOperations:
                 vol_after = capture_vol_state(doc)
 
             suffix, delta_dict = format_vol_delta(vol_before, vol_after)
-            extent_str = "through-all" if through_all else f"{depth}mm deep"
+            extent_str = (f"through-all ({walls_pierced} wall(s) pierced)" if through_all else f"{depth}mm deep")
             cbore_str = f" with C'bore D={cbore_diameter}mm x {cbore_depth}mm" if want_cbore else ""
             return self._result(
                 True,
@@ -2249,12 +2357,40 @@ class FeatureOperations:
                     "through_all": through_all,
                     "cbore_diameter_mm": cbore_diameter if want_cbore else None,
                     "cbore_depth_mm": cbore_depth if want_cbore else None,
+                    "walls_pierced": walls_pierced,
                     "geometry_delta": delta_dict,
                 },
             )
         except Exception as e:
             logger.error(f"hole_linear error: {e}\n{traceback.format_exc()}")
             return self._result(False, f"hole_linear error: {e}", SwErrors.swGeneralError)
+
+    def _hole_walls_on_axis(self, doc, center_mm, axis_i: int):
+        """(radius_mm, area_mm2) of every cylindrical face whose axis is the line through center_mm along axis_i."""
+        import math as _m
+        axis = [0.0, 0.0, 0.0]
+        axis[axis_i] = 1.0
+        c = [v / 1000.0 for v in center_mm]
+        out = []
+        for body in (get_attr_or_call(doc, "GetBodies2", 0, False) or []):
+            for f in (get_attr_or_call(body, "GetFaces") or []):
+                try:
+                    surf = get_attr_or_call(f, "GetSurface")
+                    if surf is None or not bool(get_attr_or_call(surf, "IsCylinder")):
+                        continue
+                    p = [float(v) for v in get_attr_or_call(surf, "CylinderParams")]
+                    o, d, r = p[0:3], p[3:6], p[6]
+                    if abs(abs(sum(a * b for a, b in zip(d, axis))) - 1.0) > 1e-6:
+                        continue  # not parallel to the hole axis
+                    v = [c[i] - o[i] for i in range(3)]
+                    along = sum(v[i] * axis[i] for i in range(3))
+                    perp = _m.sqrt(max(0.0, sum(x * x for x in v) - along * along))
+                    if perp > 1e-6:
+                        continue  # parallel but off-axis
+                    out.append((r * 1000.0, float(get_attr_or_call(f, "GetArea") or 0.0) * 1e6))
+                except Exception:
+                    continue
+        return out
 
     # ========================================================================
     # Global Variables & Equations (IEquationMgr + Model Dimensions)

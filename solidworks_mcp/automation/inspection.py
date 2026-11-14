@@ -112,9 +112,16 @@ class InspectionOperations:
             res_dict["faces_count"] = faces_count
             res_dict["edges_count"] = edges_count
 
+            if dtype == "Assembly":
+                res_dict.pop("faces_count", None)  # body face counts are a part-level measure
+                res_dict.pop("edges_count", None)
+            span = ""
+            if report.bbox_min_mm and report.bbox_max_mm:
+                span = " (" + ", ".join(
+                    f"{ax} {lo:g}..{hi:g}" for ax, lo, hi in zip("XYZ", report.bbox_min_mm, report.bbox_max_mm)) + ")"
             return self._result(
                 True,
-                f"Inspection complete: {report.body_count} bodies, bounding box: {report.dimensions_mm['dx']}x{report.dimensions_mm['dy']}x{report.dimensions_mm['dz']} mm, volume: {res_dict['volume']:.2f} mm3",
+                f"Inspection complete: {report.body_count} bodies, bounding box: {report.dimensions_mm['dx']}x{report.dimensions_mm['dy']}x{report.dimensions_mm['dz']} mm{span}, volume: {res_dict['volume']:.2f} mm3",
                 SwErrors.swSuccess,
                 res_dict,
             )
@@ -202,20 +209,26 @@ class InspectionOperations:
                 )
             filepath = canonical
 
-            # Set orientation and zoom to fit
-            try:
-                # swStandardViews_e. Unknown/custom named views use -1 so the name is honoured.
-                standard_views = {
-                    "front": 1, "back": 2, "left": 3, "right": 4, "top": 5, "bottom": 6,
-                    "isometric": 7, "trimetric": 8, "dimetric": 9,
-                }
-                view_id = standard_views.get(view_name.strip().lstrip("*").lower(), -1)
+            # Set orientation and zoom to fit, unless the caller already positioned the view
+            # (view_name None / "" / "current"): the showcase camera used to be reset here (MCP-017).
+            keep_view = view_name is None or str(view_name).strip().lower() in ("", "current", "*current")
+            if not keep_view:
+                try:
+                    # swStandardViews_e. Unknown/custom named views use -1 so the name is honoured.
+                    standard_views = {
+                        "front": 1, "back": 2, "left": 3, "right": 4, "top": 5, "bottom": 6,
+                        "isometric": 7, "trimetric": 8, "dimetric": 9,
+                    }
+                    view_id = standard_views.get(view_name.strip().lstrip("*").lower(), -1)
 
-                doc.ShowNamedView2(view_name, view_id)
-                doc.ViewZoomtofit2()
+                    doc.ShowNamedView2(view_name, view_id)
+                    doc.ViewZoomtofit2()
+                except Exception as e:
+                    logger.debug(f"View adjustment warning: {e}")
+            try:
                 doc.GraphicsRedraw2()
-            except Exception as e:
-                logger.debug(f"View adjustment warning: {e}")
+            except Exception:
+                pass
 
             # Save image
             saved = False
@@ -380,9 +393,12 @@ class InspectionOperations:
         append: bool = False,
         unit: str = "mm",
         component: Optional[str] = None,
+        max_results: int = 200,
+        time_budget_s: float = 40.0,
     ) -> Dict[str, Any]:
         """
         Select model entities (faces, edges, vertices) by geometric filters.
+        Stops after max_results matches or time_budget_s seconds and says so (partial result).
         In an assembly, searches component bodies (optionally only `component`) and
         compares geometry in assembly coordinates.
 
@@ -446,6 +462,7 @@ class InspectionOperations:
 
             # (body, 13-element transform or None, component name or None)
             body_entries: List[Tuple[Any, Optional[List[float]], Optional[str]]] = []
+            pruned = 0
             if dtype == "Assembly":
                 comps = []
                 try:
@@ -453,6 +470,16 @@ class InspectionOperations:
                 except Exception:
                     comps = []
                 want = (component or "").strip().lower()
+                # Region of interest from spatial filters, used to skip whole components whose box
+                # cannot contain a match (an imported STEP component can have thousands of faces).
+                roi = None
+                if bmin_m or bmax_m:
+                    roi = ([v - 1e-4 for v in (bmin_m or [-1e9] * 3)], [v + 1e-4 for v in (bmax_m or [1e9] * 3)])
+                else:
+                    anchor = pos_m or mid_m or point_m
+                    if anchor:
+                        roi = ([v - 1e-3 for v in anchor], [v + 1e-3 for v in anchor])
+                pruned = 0
                 for c in comps:
                     try:
                         cname = str(get_attr_or_call(c, "Name2") or "")
@@ -461,6 +488,14 @@ class InspectionOperations:
                             continue
                         if bool(get_attr_or_call(c, "IsSuppressed")):
                             continue
+                        if roi is not None:
+                            try:
+                                cb = c.GetBox(False, False)  # assembly coordinates
+                                if cb and len(cb) >= 6 and any(cb[i + 3] < roi[0][i] or cb[i] > roi[1][i] for i in range(3)):
+                                    pruned += 1
+                                    continue
+                            except Exception:
+                                pass
                         cbodies = None
                         try:
                             cbodies = c.GetBodies2(0)
@@ -524,11 +559,34 @@ class InspectionOperations:
             matched_entities = []
             entity_descriptors = []
 
+            # Stop well inside the 60 s worker timeout and return what was found so far, instead of
+            # leaving the COM worker busy for minutes on a large assembly (MCP-001).
+            import time as _time
+            deadline = _time.monotonic() + max(1.0, float(time_budget_s))
+            cap = max(1, int(max_results))
+            truncated_reason = None
+            scanned = 0
+
+            def _stop() -> bool:
+                nonlocal truncated_reason
+                if truncated_reason:
+                    return True
+                if len(matched_entities) >= cap:
+                    truncated_reason = f"max_results={cap} reached"
+                elif _time.monotonic() > deadline:
+                    truncated_reason = f"time budget of {time_budget_s:g} s used up"
+                return truncated_reason is not None
+
             for body, body_xf, body_comp in body_entries:
+                if _stop():
+                    break
                 cur_xf[0] = body_xf
                 if target_type_clean == "face":
                     faces = get_attr_or_call(body, "GetFaces") or []
                     for f_idx, f in enumerate(faces):
+                        if _stop():
+                            break
+                        scanned += 1
                         surf = get_attr_or_call(f, "GetSurface")
                         if not surf:
                             continue
@@ -638,6 +696,9 @@ class InspectionOperations:
                 elif target_type_clean == "edge":
                     edges = get_attr_or_call(body, "GetEdges") or []
                     for e_idx, e in enumerate(edges):
+                        if _stop():
+                            break
+                        scanned += 1
                         curve = get_attr_or_call(e, "GetCurve")
                         if not curve:
                             continue
@@ -735,6 +796,9 @@ class InspectionOperations:
                 elif target_type_clean == "vertex":
                     vertices = get_attr_or_call(body, "GetVertices") or []
                     for v_idx, v in enumerate(vertices):
+                        if _stop():
+                            break
+                        scanned += 1
                         pt = _tx_pt(get_attr_or_call(v, "GetPoint"))
                         if not pt:
                             continue
@@ -757,12 +821,18 @@ class InspectionOperations:
                         matched_entities.append(v)
                         entity_descriptors.append(desc)
 
+            pruned_count = pruned
+            scope_note = (f" Scanned {scanned} {target_type_clean}(s)"
+                          + (f", skipped {pruned_count} component(s) outside the filter region" if pruned_count else "") + ".")
             if not matched_entities:
                 return self._result(
                     False,
-                    f"No {target_type_clean}s matched the specified geometric filters.",
+                    f"No {target_type_clean}s matched the specified geometric filters"
+                    + (f" before the search stopped ({truncated_reason}); add `component` or a bbox/point filter to narrow it."
+                       if truncated_reason else ".") + scope_note,
                     SwErrors.swSelectionError,
-                    {"selected_count": 0, "entities": []},
+                    {"selected_count": 0, "entities": [], "truncated": bool(truncated_reason),
+                     "scanned": scanned, "components_pruned": pruned_count},
                 )
 
             # Apply selection in SolidWorks
@@ -807,15 +877,23 @@ class InspectionOperations:
                     SwErrors.swSelectionError,
                 )
 
+            msg = f"Selected {len(matched_entities)} {target_type_clean}(s) by geometry filters."
+            if truncated_reason:
+                msg += (f" PARTIAL: search stopped early ({truncated_reason}); more may exist. Narrow it with "
+                        "`component` or a bbox/point filter.")
             return self._result(
                 True,
-                f"Selected {len(matched_entities)} {target_type_clean}(s) by geometry filters.",
+                msg + scope_note,
                 SwErrors.swSuccess,
                 {
                     "selected_count": len(matched_entities),
                     "total_selection_count": post_count,
                     "target_type": target_type_clean,
                     "entities": entity_descriptors,
+                    "truncated": bool(truncated_reason),
+                    "truncated_reason": truncated_reason,
+                    "scanned": scanned,
+                    "components_pruned": pruned_count,
                 },
             )
         except Exception as e:
@@ -1174,6 +1252,80 @@ class InspectionOperations:
         "green": ([45, 165, 80], 0.45, 0.5, 0.0),
     }
 
+    def set_material(self, material_name: str, database: str = "SOLIDWORKS Materials", configuration: str = "") -> Dict:
+        """Assign an engineering material (density etc.) to the active part and read it back."""
+        try:
+            doc, err = self.get_active_doc()
+            if err:
+                return err
+            if self.get_document_type(doc) != "Part":
+                return self._result(False, "set_material needs an active Part document (set it per component part)",
+                                    SwErrors.swInvalidDocumentType)
+            name = (material_name or "").strip()
+            if not name:
+                return self._result(False, "material_name is required", SwErrors.swInvalidInput)
+            config = configuration or ""
+            if not config:
+                try:
+                    config = str(doc.ConfigurationManager.ActiveConfiguration.Name)
+                except Exception:
+                    config = ""
+
+            def read_back():
+                # GetMaterialPropertyName2(config, out database): the out string must be passed by reference.
+                try:
+                    out_db = win32com.client.VARIANT(pythoncom.VT_BYREF | pythoncom.VT_BSTR, "")
+                    res = doc.GetMaterialPropertyName2(config, out_db)
+                    if isinstance(res, (list, tuple)):
+                        return str(res[0] or ""), str(res[1] or "") if len(res) > 1 else ""
+                    if res:
+                        return str(res), str(out_db.value or "")
+                except Exception:
+                    pass
+                try:  # "database|material|..." on older versions
+                    parts = str(get_attr_or_call(doc, "MaterialIdName") or "").split("|")
+                    if len(parts) >= 2:
+                        return parts[1], parts[0]
+                except Exception:
+                    pass
+                return "", ""
+
+            mass_before = None
+            try:
+                mass_before = float(get_attr_or_call(doc, "GetMassProperties")[5])
+            except Exception:
+                pass
+            tried = []
+            for db in dict.fromkeys([database or "SOLIDWORKS Materials", "SOLIDWORKS Materials", "solidworks materials", ""]):
+                tried.append(db or "<any>")
+                try:
+                    doc.SetMaterialPropertyName2(config, db, name)
+                except Exception:
+                    continue
+                got, got_db = read_back()
+                if got.strip().lower() == name.lower():
+                    get_attr_or_call(doc, "EditRebuild3")
+                    mass = None
+                    try:
+                        mass = float(get_attr_or_call(doc, "GetMassProperties")[5])
+                    except Exception:
+                        pass
+                    msg = f"Material '{got}' ({got_db or db}) assigned to configuration '{config}'"
+                    if mass is not None:
+                        msg += f"; mass {mass:.4f} kg"
+                    return self._result(True, msg, SwErrors.swSuccess, {
+                        "material": got, "database": got_db or db, "configuration": config,
+                        "mass_kg": mass, "mass_before_kg": mass_before})
+            current, _ = read_back()
+            return self._result(
+                False,
+                f"Material '{name}' was not found/applied (databases tried: {tried}; current material: "
+                f"'{current or 'none'}'). Use the exact name shown in the SolidWorks material dialog, e.g. 'AISI 304', "
+                "'6061-T6 (SS)', 'Plain Carbon Steel', 'ABS'.",
+                SwErrors.swInvalidInput, {"current_material": current})
+        except Exception as e:
+            return self._result(False, f"set_material failed: {e}", SwErrors.swOperationFailed)
+
     def apply_material_appearance(
         self,
         appearance_name: str = "Smooth - White",
@@ -1201,7 +1353,16 @@ class InspectionOperations:
                     if k in preset_key or preset_key in k:
                         preset = v
                         break
+            custom_label = False
             if preset is None:
+                if not (color_rgb and len(color_rgb) == 3):
+                    return self._result(
+                        False,
+                        f"Unknown appearance '{appearance_name}'. Use one of: "
+                        + ", ".join(sorted(self._APPEARANCE_PRESETS)) + ", or pass color_rgb (the name is then a label).",
+                        SwErrors.swInvalidInput,
+                    )
+                custom_label = True  # free-text name with an explicit colour: name is only a label
                 preset = ([200, 205, 210], 0.45, 0.6, 0.0)
 
             rgb = color_rgb if (color_rgb and len(color_rgb) == 3) else preset[0]
@@ -1223,12 +1384,21 @@ class InspectionOperations:
                 0.0,
             ]
 
+            # A typed SAFEARRAY of doubles: a plain Python list is marshalled as an array of VARIANTs,
+            # which SolidWorks misread (a beige request rendered dark green, MCP-014/016). The
+            # feature-level set_color already used this form and gave the right colour.
+            from ..core.com_compat import null_dispatch
+            mat_arr = win32com.client.VARIANT(pythoncom.VT_ARRAY | pythoncom.VT_R8, [float(v) for v in mat_vals])
+
             ttype = (target_type or "part").strip().lower()
+            readback = None
+            overridden_by = []
             if ttype == "feature" and target_name:
-                feat = self._find_feature_by_name(doc, target_name) if hasattr(self, "_find_feature_by_name") else None
+                feat = doc.FeatureByName(target_name)
                 if feat is None:
                     return self._result(False, f"Feature '{target_name}' not found.", SwErrors.swFeatureError)
-                feat.SetMaterialPropertyValues2(mat_vals, 1, None)
+                feat.SetMaterialPropertyValues2(mat_arr, 1, null_dispatch())
+                readback = get_attr_or_call(feat, "GetMaterialPropertyValues2", 1, None)
             elif ttype in ("occurrence", "component") and target_name:
                 comps = get_attr_or_call(doc, "GetComponents", False) or []
                 target_comp = None
@@ -1238,31 +1408,105 @@ class InspectionOperations:
                         break
                 if target_comp is None:
                     return self._result(False, f"Component '{target_name}' not found.", SwErrors.swSelectionError)
-                target_comp.MaterialPropertyValues = mat_vals
+                target_comp.MaterialPropertyValues = mat_arr
+                readback = get_attr_or_call(target_comp, "MaterialPropertyValues")
             else:
-                doc.MaterialPropertyValues = mat_vals
+                doc.MaterialPropertyValues = mat_arr
+                readback = get_attr_or_call(doc, "MaterialPropertyValues")
+                # Colours set on features/faces win over the part colour; say which ones do.
+                try:
+                    f = doc.FirstFeature
+                    while f is not None:
+                        vals = get_attr_or_call(f, "GetMaterialPropertyValues2", 1, None)
+                        if vals and len(vals) >= 3 and any(v >= 0 for v in vals[:3]):
+                            overridden_by.append(f.Name)
+                        f = f.GetNextFeature
+                except Exception:
+                    pass
 
             try:
                 doc.GraphicsRedraw2()
             except Exception:
                 pass
 
+            if readback is not None and len(readback) >= 3:
+                got = [round(float(v) * 255) for v in readback[:3]]
+                if any(abs(g - int(w)) > 1 for g, w in zip(got, rgb)):
+                    return self._result(
+                        False,
+                        f"Colour was not stored as requested: asked RGB {list(rgb)}, SolidWorks holds {got}.",
+                        SwErrors.swGeneralError,
+                        {"requested_rgb": list(rgb), "stored_rgb": got},
+                    )
+
+            msg = (f"Applied {'custom colour labelled ' if custom_label else 'appearance '}'{appearance_name}' "
+                   f"(RGB={list(rgb)}, specular={spec:.2f}, transparency={transp:.2f}) to {ttype}")
+            if overridden_by:
+                msg += (f". Note: feature colours on {', '.join(overridden_by[:6])}"
+                        f"{'…' if len(overridden_by) > 6 else ''} override the part colour on their faces")
             return self._result(
                 True,
-                f"Applied appearance '{appearance_name}' (RGB={rgb}, specular={spec:.2f}, transparency={transp:.2f}) to {ttype}",
+                msg,
                 SwErrors.swSuccess,
                 {
                     "appearance_name": appearance_name,
-                    "color_rgb": rgb,
+                    "custom_label": custom_label,
+                    "color_rgb": list(rgb),
+                    "stored_rgb": [round(float(v) * 255) for v in readback[:3]] if readback is not None and len(readback) >= 3 else None,
                     "specular": spec,
                     "transparency": transp,
                     "target_type": ttype,
                     "target_name": target_name,
+                    "overridden_by_features": overridden_by,
                 },
             )
         except Exception as e:
             logger.error(f"apply_material_appearance error: {e}")
             return self._result(False, f"apply_material_appearance error: {e}", SwErrors.swGeneralError)
+
+    @staticmethod
+    def _orient_view(doc, view, eye_mm, target_mm, up_vec=None):
+        """
+        Point the view from eye_mm at target_mm (up_vec default world +Y, or +Z when looking along Y)
+        and zoom to a box around the target sized by the eye distance.
+        The view's Orientation3 transform is edited in place (its ArrayData is writable); creating a
+        new MathTransform through IMathUtility fails under late binding.
+        Row-vector convention: view = model . R, with R's columns = view right, up, back (towards eye).
+        """
+        try:
+            e = [float(v) / 1000.0 for v in eye_mm]
+            t = [float(v) / 1000.0 for v in target_mm]
+            back = [e[i] - t[i] for i in range(3)]
+            dist = math.sqrt(sum(c * c for c in back))
+            if dist < 1e-9:
+                return False, "eye and target are the same point"
+            back = [c / dist for c in back]
+            up = [float(v) for v in up_vec] if up_vec and len(up_vec) == 3 else [0.0, 1.0, 0.0]
+            if abs(sum(a * b for a, b in zip(up, back))) > 0.999:
+                up = [0.0, 0.0, 1.0]
+            # right = up x back, then re-orthogonalise up = back x right
+            right = [up[1] * back[2] - up[2] * back[1], up[2] * back[0] - up[0] * back[2], up[0] * back[1] - up[1] * back[0]]
+            rn = math.sqrt(sum(c * c for c in right))
+            right = [c / rn for c in right]
+            up = [back[1] * right[2] - back[2] * right[1], back[2] * right[0] - back[0] * right[2], back[0] * right[1] - back[1] * right[0]]
+
+            if view is None:
+                return False, "no active view"
+            xf = view.Orientation3
+            arr = list(xf.ArrayData)
+            # rows i = model axis i, columns = (right, up, back)
+            for i in range(3):
+                arr[3 * i + 0] = right[i]
+                arr[3 * i + 1] = up[i]
+                arr[3 * i + 2] = back[i]
+            xf.ArrayData = win32com.client.VARIANT(pythoncom.VT_ARRAY | pythoncom.VT_R8, [float(v) for v in arr])
+            view.Orientation3 = xf
+            half = max(dist * 0.35, 0.005)
+            doc.ViewZoomTo2(t[0] - half, t[1] - half, t[2] - half, t[0] + half, t[1] + half, t[2] + half)
+            doc.GraphicsRedraw2()
+            return True, ""
+        except Exception as ex:
+            return False, str(ex)
 
     def render_showcase_viewport(
         self,
@@ -1299,22 +1543,18 @@ class InspectionOperations:
                 except Exception:
                     pass
 
+            view_used = "*Isometric"
             if eye_mm and target_mm and len(eye_mm) == 3 and len(target_mm) == 3:
-                try:
-                    # Orient via ShowNamedView2 + zoom to fit first, then adjust camera if available
-                    doc.ShowNamedView2("*Isometric", 7)
-                    doc.ViewZoomtofit2()
-                    cam = getattr(view, "Camera", None) if view else None
-                    if cam is not None:
-                        cam.SetPositionCartesian(eye_mm[0] / 1000.0, eye_mm[1] / 1000.0, eye_mm[2] / 1000.0)
-                        cam.SetTargetPointCartesian(target_mm[0] / 1000.0, target_mm[1] / 1000.0, target_mm[2] / 1000.0)
-                        if up_vec and len(up_vec) == 3:
-                            cam.SetUpVector(up_vec[0], up_vec[1], up_vec[2])
-                except Exception as cam_ex:
-                    logger.debug(f"Camera custom positioning fallback: {cam_ex}")
+                ok_cam, cam_msg = self._orient_view(doc, view, eye_mm, target_mm, up_vec)
+                if not ok_cam:
+                    return self._result(False, f"Could not set the camera from eye/target: {cam_msg}",
+                                        SwErrors.swGeneralError)
+                view_used = "eye/target"
 
-            cap_res = self.capture_viewport(filepath=filepath, view_name="*Isometric")
+            cap_res = self.capture_viewport(
+                filepath=filepath, view_name=None if view_used == "eye/target" else "*Isometric")
             if cap_res.get("success") and isinstance(cap_res.get("data"), dict):
+                cap_res["data"]["view_name"] = view_used
                 cap_res["data"]["display_style"] = style_clean
                 cap_res["data"]["eye_mm"] = eye_mm
                 cap_res["data"]["target_mm"] = target_mm

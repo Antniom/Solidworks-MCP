@@ -151,16 +151,19 @@ class SheetMetalOperations:
             feat = None
             method_used = ""
 
-            # Try native InsertSheetMetalBaseFlange2
+            # Try native InsertSheetMetalBaseFlange2. For a closed profile the 6th argument
+            # (FlipExtruDir) sets the thickness side: True = along the sketch normal (default here),
+            # False = against it. The 2nd argument (ThickenDir) does not change it.
+            flip_extru = not bool(reverse_dir)
             try:
                 custom_allowance = null_dispatch()
                 feat = doc.FeatureManager.InsertSheetMetalBaseFlange2(
                     t_m,
-                    bool(reverse_dir),
+                    False,
                     r_m,
                     0.02,
                     0.02,
-                    False,
+                    flip_extru,
                     0,
                     0,
                     1,
@@ -195,15 +198,57 @@ class SheetMetalOperations:
                     return ext_res
 
             get_attr_or_call(doc, "EditRebuild3")
+
+            # Thickness side (MCP-003): measure where the plate sits relative to the sketch plane.
+            # Default = along the sketch plane normal; reverse_dir = the other side. If it is
+            # wrong, rebuild once with the opposite FlipExtruDir (verified live: that argument
+            # decides the side for a closed profile; ThickenDir, where reverse_dir used to go,
+            # has no effect).
+            side_info = None
+            if feat is not None and method_used == "InsertSheetMetalBaseFlange2":
+                want_side = -1 if reverse_dir else 1
+                side_info = self._plate_side(doc, sketch_name)
+                if side_info is not None and side_info["side"] != want_side:
+                    try:
+                        doc.ClearSelection2(True)
+                        if feat.Select2(False, 0):
+                            doc.Extension.DeleteSelection2(0)  # keep the absorbed sketch
+                        ok_sel2, sketch_name, _ = self._close_and_select_sketch(doc)
+                        feat = doc.FeatureManager.InsertSheetMetalBaseFlange2(
+                            t_m, False, r_m, 0.02, 0.02, not flip_extru, 0, 0, 1, null_dispatch(), False,
+                            0, 0.0005, 0.0005, 0.5, True, False, True, True,
+                        ) if ok_sel2 else None
+                        get_attr_or_call(doc, "EditRebuild3")
+                    except Exception as flip_ex:
+                        logger.warning(f"sheet_metal_face: could not rebuild on the other side: {flip_ex}")
+                    side_info = self._plate_side(doc, sketch_name) if feat is not None else None
+                if feat is None:
+                    return self._result(False, "Base flange could not be rebuilt on the requested side.",
+                                        SwErrors.swFeatureError)
+                if side_info is not None and side_info["side"] != want_side:
+                    return self._result(
+                        False,
+                        f"Base flange {getattr(feat, 'Name', '?')} was created but its thickness lies on the "
+                        f"{'normal' if side_info['side'] > 0 else 'opposite'} side of the sketch plane "
+                        f"(sketch z {side_info['z_min_mm']}..{side_info['z_max_mm']} mm) and could not be flipped.",
+                        SwErrors.swFeatureError,
+                        side_info,
+                    )
+
             vol_after = capture_vol_state(doc)
             suffix, delta_dict = format_vol_delta(pre_state.vol_state, vol_after)
             feat_name = getattr(feat, "Name", "Base-Flange1") if feat else "Base-Flange1"
             # Remember the thickness actually used so flange/cut default to it.
             self._sm_thickness_mm = float(t_mm)
 
+            side_txt = ""
+            if side_info is not None:
+                side_txt = (f", thickness {'along' if side_info['side'] > 0 else 'against'} the sketch normal "
+                            f"(world {side_info['normal_world']}), plate world bbox "
+                            f"{side_info['world_min_mm']}..{side_info['world_max_mm']} mm")
             return self._result(
                 True,
-                f"Sheet metal face ({t_mm}mm thick): {feat_name}{suffix}",
+                f"Sheet metal face ({t_mm}mm thick): {feat_name}{side_txt}{suffix}",
                 SwErrors.swSuccess,
                 {
                     "feature_name": feat_name,
@@ -211,12 +256,46 @@ class SheetMetalOperations:
                     "bend_radius_mm": r_mm,
                     "k_factor": k_val,
                     "method": method_used,
+                    "thickness_side": side_info,
                     "geometry_delta": delta_dict,
                 },
             )
         except Exception as e:
             logger.error(f"sheet_metal_face error: {e}\n{traceback.format_exc()}")
             return self._result(False, f"sheet_metal_face error: {e}", SwErrors.swGeneralError)
+
+    def _plate_side(self, doc, sketch_name: Optional[str]) -> Optional[Dict[str, Any]]:
+        """
+        Which side of its sketch plane the first solid body lies on: +1 along the sketch normal,
+        -1 against it (from the body box corners mapped into sketch coordinates).
+        """
+        try:
+            from ..core.com_compat import transform_point
+            if not sketch_name:
+                return None
+            sk_feat = doc.FeatureByName(sketch_name)
+            sk = get_attr_or_call(sk_feat, "GetSpecificFeature2") if sk_feat is not None else None
+            xf = get_attr_or_call(sk, "ModelToSketchTransform") if sk is not None else None
+            arr = list(get_attr_or_call(xf, "ArrayData")) if xf is not None else None
+            bodies = get_attr_or_call(doc, "GetBodies2", 0, False) or []
+            if not arr or not bodies:
+                return None
+            box = get_attr_or_call(bodies[0], "GetBodyBox")
+            corners = [(x, y, z) for x in (box[0], box[3]) for y in (box[1], box[4]) for z in (box[2], box[5])]
+            zs = [transform_point(arr, c)[2] for c in corners]
+            z_min, z_max = min(zs), max(zs)
+            side = 1 if (z_min + z_max) > 0 else -1
+            return {
+                "side": side,
+                "z_min_mm": round(z_min * 1000.0, 4) + 0.0,
+                "z_max_mm": round(z_max * 1000.0, 4) + 0.0,
+                "normal_world": [round(v, 6) + 0.0 for v in (arr[2], arr[5], arr[8])],
+                "world_min_mm": [round(v * 1000.0, 4) + 0.0 for v in box[0:3]],
+                "world_max_mm": [round(v * 1000.0, 4) + 0.0 for v in box[3:6]],
+            }
+        except Exception as e:
+            logger.debug(f"_plate_side failed: {e}")
+            return None
 
     def flange(
         self,
@@ -226,9 +305,10 @@ class SheetMetalOperations:
         body_index: int = 1,
     ) -> Dict[str, Any]:
         """
-        Add a Sheet Metal Flange of height 'distance' (mm) at bend angle 'angle' (deg)
-        along one or more 1-based body edges (edge_indices).
-        Matches lminventor's flange tool.
+        Add a 90° wall of the sheet thickness, 'distance' mm high, along one or more 1-based body
+        edges (edge_indices). It is built as an extruded wall: square corner, no bend radius, and it
+        does not unfold in a flat pattern. Each wall's added volume is checked against
+        thickness x edge length x height; a wrong wall is removed and reported as an error.
         """
         try:
             doc, err = self.get_active_doc()
@@ -268,6 +348,10 @@ class SheetMetalOperations:
                 logger.debug(f"flange thickness detection failed, using {t_mm} mm: {t_ex}")
             created_names = []
 
+            # Resolve every requested edge to its end points NOW. Edge indices refer to the body as
+            # it was when listed; after the first wall is added the edge list changes, and the old
+            # code then built the second wall on an unrelated edge (MCP-005).
+            targets = []
             for e_idx in edge_indices:
                 if e_idx < 1 or e_idx > len(edges):
                     return self._result(
@@ -275,13 +359,43 @@ class SheetMetalOperations:
                         f"edge_index={e_idx} out of range (1..{len(edges)})",
                         SwErrors.swInvalidParameter,
                     )
-                edge = edges[e_idx - 1]
-                v1 = get_attr_or_call(edge, "GetStartVertex")
-                v2 = get_attr_or_call(edge, "GetEndVertex")
-                pt1 = get_attr_or_call(v1, "GetPoint") if v1 else None
-                pt2 = get_attr_or_call(v2, "GetPoint") if v2 else None
-                if not pt1 or not pt2:
-                    continue
+                e0 = edges[e_idx - 1]
+                a0 = get_attr_or_call(get_attr_or_call(e0, "GetStartVertex"), "GetPoint")
+                b0 = get_attr_or_call(get_attr_or_call(e0, "GetEndVertex"), "GetPoint")
+                if not a0 or not b0:
+                    return self._result(False, f"edge_index={e_idx} is not a straight edge with two vertices.",
+                                        SwErrors.swInvalidParameter)
+                targets.append((e_idx, tuple(a0[:3]), tuple(b0[:3])))
+
+            def _find_edge(a_pt, b_pt):
+                cur = get_attr_or_call(doc, "GetBodies2", 0, False) or []
+                if not cur:
+                    return None
+                for e in (get_attr_or_call(cur[min(body_index - 1, len(cur) - 1)], "GetEdges") or []):
+                    try:
+                        p = get_attr_or_call(get_attr_or_call(e, "GetStartVertex"), "GetPoint")
+                        q = get_attr_or_call(get_attr_or_call(e, "GetEndVertex"), "GetPoint")
+                        if (math.dist(p[:3], a_pt) < 1e-7 and math.dist(q[:3], b_pt) < 1e-7) or \
+                           (math.dist(p[:3], b_pt) < 1e-7 and math.dist(q[:3], a_pt) < 1e-7):
+                            return e
+                    except Exception:
+                        continue
+                return None
+
+            from ..core.sketch_guard import direct_sketch
+
+            for e_idx, a_pt, b_pt in targets:
+                edge = _find_edge(a_pt, b_pt)
+                if edge is None:
+                    return self._result(
+                        False,
+                        f"flange: edge {e_idx} ({[round(c * 1000, 3) for c in a_pt]} -> "
+                        f"{[round(c * 1000, 3) for c in b_pt]} mm) no longer exists after the previous flange(s)"
+                        + (f"; created so far: {', '.join(created_names)}" if created_names else ""),
+                        SwErrors.swFeatureError,
+                    )
+                pt1, pt2 = a_pt, b_pt
+                vol_edge_before = capture_vol_state(doc)
 
                 # Find adjacent planar face normal and edge tangent to build flange wall
                 adj_faces = get_attr_or_call(edge, "GetTwoAdjacentFaces2") or []
@@ -349,20 +463,45 @@ class SheetMetalOperations:
                 p3 = (sx2 + nx * t_m, sy2 + ny * t_m)
                 p4 = (sx1 + nx * t_m, sy1 + ny * t_m)
 
-                doc.SketchManager.CreateLine(p1[0], p1[1], 0.0, p2[0], p2[1], 0.0)
-                doc.SketchManager.CreateLine(p2[0], p2[1], 0.0, p3[0], p3[1], 0.0)
-                doc.SketchManager.CreateLine(p3[0], p3[1], 0.0, p4[0], p4[1], 0.0)
-                doc.SketchManager.CreateLine(p4[0], p4[1], 0.0, p1[0], p1[1], 0.0)
+                with direct_sketch(doc):  # exact corners: snapping produced slivers (MCP-005/007)
+                    doc.SketchManager.CreateLine(p1[0], p1[1], 0.0, p2[0], p2[1], 0.0)
+                    doc.SketchManager.CreateLine(p2[0], p2[1], 0.0, p3[0], p3[1], 0.0)
+                    doc.SketchManager.CreateLine(p3[0], p3[1], 0.0, p4[0], p4[1], 0.0)
+                    doc.SketchManager.CreateLine(p4[0], p4[1], 0.0, p1[0], p1[1], 0.0)
                 doc.InsertSketch2(True)
 
                 ext_res = self.extrude_sketch(depth=float(distance), both_directions=False, reverse_dir=False, unit="mm")
-                if ext_res.get("success"):
-                    created_names.append(ext_res.get("data", {}).get("feature_name", "Flange"))
-                # Re-fetch body & edges after topology change
-                bodies = get_attr_or_call(doc, "GetBodies2", 0, False) or []
-                if bodies:
-                    body = bodies[min(body_index - 1, len(bodies) - 1)]
-                    edges = get_attr_or_call(body, "GetEdges") or []
+                if not ext_res.get("success"):
+                    return self._result(
+                        False,
+                        f"flange: wall on edge {e_idx} failed: {ext_res.get('message')}"
+                        + (f"; created so far: {', '.join(created_names)}" if created_names else ""),
+                        SwErrors.swFeatureError,
+                    )
+                wall_name = ext_res.get("data", {}).get("feature_name", "Flange")
+
+                # The wall must add exactly thickness x edge length x height; anything else means it
+                # went the wrong way or merged with other geometry. Remove it and stop.
+                expected = t_mm * seg_len * 1000.0 * float(distance)
+                vol_edge_after = capture_vol_state(doc)
+                added = (vol_edge_after[0] - vol_edge_before[0]) if (vol_edge_after and vol_edge_before) else None
+                if added is not None and abs(added - expected) > max(0.02 * expected, 0.5):
+                    try:
+                        doc.ClearSelection2(True)
+                        wf = doc.FeatureByName(wall_name)
+                        if wf is not None and wf.Select2(False, 0):
+                            doc.Extension.DeleteSelection2(1)  # with its sketch
+                    except Exception:
+                        pass
+                    return self._result(
+                        False,
+                        f"flange: the wall on edge {e_idx} added {added:.1f} mm³ instead of {expected:.1f} mm³ "
+                        f"(t {t_mm:g} x L {seg_len * 1000:.2f} x H {distance:g} mm); it was removed."
+                        + (f" Created so far: {', '.join(created_names)}" if created_names else ""),
+                        SwErrors.swFeatureError,
+                        {"edge_index": e_idx, "added_mm3": round(added, 2), "expected_mm3": round(expected, 2)},
+                    )
+                created_names.append(wall_name)
 
             get_attr_or_call(doc, "EditRebuild3")
             vol_after = capture_vol_state(doc)

@@ -13,8 +13,17 @@ import win32com.client
 import pythoncom
 
 from ..constants import SwErrors, SwPlanes
+from ..core.sketch_guard import (
+    TOL_M, arc_center_radius, axis_note, close, delete_segments, direct_sketch, line_points,
+    mm, sketch_frame, sketch_to_world_mm,
+)
 
 logger = logging.getLogger(__name__)
+
+_NOT_CREATED = (
+    "SolidWorks did not create the {what} (the API returned nothing). With snapping disabled this "
+    "usually means degenerate geometry (zero length/size) or that the sketch is not editable."
+)
 
 
 class SketchOperations:
@@ -69,12 +78,7 @@ class SketchOperations:
                 doc.ClearSelection2(True)
                 faces[face_index - 1].Select2(False, 0)
                 doc.InsertSketch2(True)
-                return self._result(
-                    True,
-                    f"Sketch created on face [{face_index}]",
-                    SwErrors.swSuccess,
-                    {"face_index": face_index, "sketch_active": True},
-                )
+                return self._sketch_created_result(doc, f"face [{face_index}]", {"face_index": face_index})
 
             plane_map = {
                 "front": "Front Plane",
@@ -106,6 +110,7 @@ class SketchOperations:
                 return self._result(False, f"Could not select {plane_name}", SwErrors.swSelectionError)
 
             # Optional offset plane creation
+            ref_plane = None
             if abs(float(offset or 0.0)) > 1e-9:
                 unit_str = unit or self._units.default_unit.value
                 offset_m = abs(self._units.to_meters(float(offset), unit))
@@ -148,18 +153,43 @@ class SketchOperations:
                     f"Post-condition failed: Active sketch mode was not entered on {target_plane_label}",
                     SwErrors.swSketchError,
                 )
-            
-            return self._result(
-                True,
-                f"Sketch created on {target_plane_label}",
-                SwErrors.swSuccess,
-                {"plane": target_plane_label, "offset": offset, "sketch_active": True},
-            )
+
+            extra = {"plane": target_plane_label, "offset": offset}
+            if ref_plane is not None:
+                # The auto-created plane is drawn larger than the part and zoom-to-fit included it,
+                # so later sketch work ran at mm-per-pixel scale (MCP-008). Hide it.
+                try:
+                    doc.ClearSelection2(True)
+                    if ref_plane.Select2(False, 0):
+                        doc.BlankRefGeom()
+                    doc.ClearSelection2(True)
+                    extra["offset_plane"] = getattr(ref_plane, "Name", None)
+                    extra["offset_plane_hidden"] = True
+                except Exception as hide_ex:
+                    logger.debug(f"could not hide offset plane: {hide_ex}")
+            return self._sketch_created_result(doc, target_plane_label, extra)
             
         except Exception as e:
             logger.error(f"Create sketch error: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Error: {e}", SwErrors.swSketchError)
     
+    def _sketch_created_result(self, doc, label: str, extra: Dict) -> Dict:
+        """Success result for a new sketch, including where its axes point in world coordinates."""
+        data = dict(extra)
+        data["sketch_active"] = True
+        frame = sketch_frame(doc)
+        msg = f"Sketch created on {label}"
+        if frame:
+            data["sketch_frame"] = frame
+            note = axis_note(frame)
+            data["sketch_axes"] = note
+            # Draw tools take sketch-local x/y. Say so loudly when that differs from world X/Y.
+            if frame["x_axis_world"] != [1.0, 0.0, 0.0] or frame["y_axis_world"] != [0.0, 1.0, 0.0]:
+                msg += f". Draw coordinates are sketch-local: {note}"
+            if any(abs(c) > 1e-6 for c in frame["origin_mm"]):
+                msg += f"; sketch origin at world {frame['origin_mm']} mm"
+        return self._result(True, msg, SwErrors.swSuccess, data)
+
     def create_sketch_on_face(self, x: float = 0, y: float = 0, z: float = 0,
                               unit: str = None) -> Dict:
         """
@@ -186,17 +216,37 @@ class SketchOperations:
             
             # Clear any selection
             doc.ClearSelection2(True)
-            
-            # Select face at the given coordinates
-            empty_callout = win32com.client.VARIANT(pythoncom.VT_DISPATCH, None)
-            selected = doc.Extension.SelectByID2(
-                "", "FACE", x_m, y_m, z_m, False, 0, empty_callout, 0
-            )
-            
+
+            # Find the face geometrically: the face whose closest point to (x, y, z) is within
+            # 0.01 mm. SelectByID2 with a point is a screen pick and missed a point lying exactly
+            # on a 1 mm plate's face (MCP-006); prefer planar faces on ties.
+            from ..core.com_compat import get_attr_or_call
+            best, best_d, best_planar = None, None, False
+            for body in (get_attr_or_call(doc, "GetBodies2", 0, False) or []):
+                for f in (get_attr_or_call(body, "GetFaces") or []):
+                    try:
+                        cp = f.GetClosestPointOn(x_m, y_m, z_m)
+                        if not cp or len(cp) < 3:
+                            continue
+                        d = math.dist((cp[0], cp[1], cp[2]), (x_m, y_m, z_m))
+                        if d > 1e-5:
+                            continue
+                        surf = get_attr_or_call(f, "GetSurface")
+                        planar = bool(get_attr_or_call(surf, "IsPlane")) if surf is not None else False
+                        if best is None or d < best_d - 1e-9 or (abs(d - best_d) <= 1e-9 and planar and not best_planar):
+                            best, best_d, best_planar = f, d, planar
+                    except Exception:
+                        continue
+            selected = bool(best.Select2(False, 0)) if best is not None else False
+            if not selected:
+                # Fall back to the old screen pick (works for surfaces not on solid bodies).
+                empty_callout = win32com.client.VARIANT(pythoncom.VT_DISPATCH, None)
+                selected = doc.Extension.SelectByID2("", "FACE", x_m, y_m, z_m, False, 0, empty_callout, 0)
+
             if not selected:
                 return self._result(False,
                     f"No face found at ({x}{unit_str}, {y}{unit_str}, {z}{unit_str}). "
-                    f"Coordinates must be on an existing body face.",
+                    f"Coordinates must be on an existing body face (within 0.01 mm).",
                     SwErrors.swSelectionError)
             
             # Insert sketch on the selected face
@@ -225,10 +275,9 @@ class SketchOperations:
                     SwErrors.swSketchError,
                 )
             
-            return self._result(True,
-                f"Sketch created on face at ({x}, {y}, {z}) {unit_str}",
-                SwErrors.swSuccess,
-                {"face_point": {"x": x, "y": y, "z": z}, "unit": unit_str, "sketch_active": True})
+            return self._sketch_created_result(
+                doc, f"face at ({x}, {y}, {z}) {unit_str}",
+                {"face_point": {"x": x, "y": y, "z": z}, "unit": unit_str})
             
         except Exception as e:
             logger.error(f"Create sketch on face error: {e}\n{traceback.format_exc()}")
@@ -318,13 +367,23 @@ class SketchOperations:
             x2_m = self._units.to_meters(x2, unit)
             y2_m = self._units.to_meters(y2, unit)
             
-            # Draw line
-            line = doc.SketchManager.CreateLine(x1_m, y1_m, 0, x2_m, y2_m, 0)
-            
+            # Draw line (no snapping: AddToDB)
+            with direct_sketch(doc):
+                line = doc.SketchManager.CreateLine(x1_m, y1_m, 0, x2_m, y2_m, 0)
+
             if line is None:
-                return self._result(False, "Failed - ensure sketch is active",
-                                  SwErrors.swSketchError)
-            
+                return self._result(False, _NOT_CREATED.format(what="line"), SwErrors.swSketchError)
+
+            got = line_points(line)
+            if got is not None and not (close(got[0], (x1_m, y1_m)) and close(got[1], (x2_m, y2_m))):
+                delete_segments(doc, [line])
+                return self._result(
+                    False,
+                    f"Line was created at ({mm(got[0][0])}, {mm(got[0][1])})->({mm(got[1][0])}, {mm(got[1][1])}) mm "
+                    "instead of the requested points; it was removed.",
+                    SwErrors.swSketchError,
+                )
+
             if construction:
                 try:
                     line.ConstructionGeometry = True
@@ -378,22 +437,31 @@ class SketchOperations:
             y_m = self._units.to_meters(y, unit)
             radius_m = self._units.to_meters(radius, unit)
             
-            # Draw circle (center point and edge point)
-            circle = doc.SketchManager.CreateCircle(
-                x_m, y_m, 0,              # Center
-                x_m + radius_m, y_m, 0    # Edge point
-            )
-            
+            # Centre + radius (no edge point that could snap), no inference (AddToDB)
+            with direct_sketch(doc):
+                circle = doc.SketchManager.CreateCircleByRadius(x_m, y_m, 0, radius_m)
+
             if circle is None:
-                return self._result(False, "Failed - ensure sketch is active",
-                                  SwErrors.swSketchError)
-            
+                return self._result(False, _NOT_CREATED.format(what="circle"), SwErrors.swSketchError)
+
+            got = arc_center_radius(circle)
+            if got is not None and not (close(got[0], (x_m, y_m)) and abs(got[1] - radius_m) <= TOL_M):
+                delete_segments(doc, [circle])
+                return self._result(
+                    False,
+                    f"Circle was created at ({mm(got[0][0])}, {mm(got[0][1])}) r={mm(got[1])} mm instead of "
+                    f"({x}, {y}) r={radius}; it was removed.",
+                    SwErrors.swSketchError,
+                )
+
             unit_str = unit or self._units.default_unit.value
-            
-            return self._result(True, f"Circle: r={radius}{unit_str}",
-                              SwErrors.swSuccess,
-                              {"radius": radius, "unit": unit_str,
-                               "center_x": x, "center_y": y})
+            data = {"radius": radius, "unit": unit_str, "center_x": x, "center_y": y,
+                    "verified": got is not None}
+            frame = sketch_frame(doc)
+            if frame:
+                data["center_world_mm"] = sketch_to_world_mm(
+                    frame, self._units.from_meters(x_m, "mm"), self._units.from_meters(y_m, "mm"))
+            return self._result(True, f"Circle: r={radius}{unit_str}", SwErrors.swSuccess, data)
             
         except Exception as e:
             logger.error(f"Draw circle error: {e}\n{traceback.format_exc()}")
@@ -434,22 +502,41 @@ class SketchOperations:
             x2_m = self._units.to_meters(x2, unit)
             y2_m = self._units.to_meters(y2, unit)
             
-            # Draw rectangle
-            rect = doc.SketchManager.CreateCornerRectangle(
-                x1_m, y1_m, 0, x2_m, y2_m, 0
-            )
-            
-            if rect is None:
-                return self._result(False, "Failed - ensure sketch is active",
-                                  SwErrors.swSketchError)
-            
+            # Draw rectangle (no snapping: AddToDB)
+            with direct_sketch(doc):
+                rect = doc.SketchManager.CreateCornerRectangle(x1_m, y1_m, 0, x2_m, y2_m, 0)
+
+            segs = list(rect) if rect is not None else []
+            if not segs:
+                return self._result(False, _NOT_CREATED.format(what="rectangle"), SwErrors.swSketchError)
+
+            # Read back the four corners and compare with the requested box.
+            want = (min(x1_m, x2_m), min(y1_m, y2_m), max(x1_m, x2_m), max(y1_m, y2_m))
+            pts = [p for s in segs for p in (line_points(s) or ())]
+            if pts:
+                got = (min(p[0] for p in pts), min(p[1] for p in pts), max(p[0] for p in pts), max(p[1] for p in pts))
+                if len(segs) != 4 or any(abs(g - w) > TOL_M for g, w in zip(got, want)):
+                    delete_segments(doc, segs)
+                    return self._result(
+                        False,
+                        f"Rectangle was created as x {mm(got[0])}..{mm(got[2])}, y {mm(got[1])}..{mm(got[3])} mm "
+                        f"({len(segs)} segments) instead of the requested corners; it was removed.",
+                        SwErrors.swSketchError,
+                    )
+
             width = abs(x2 - x1)
             height = abs(y2 - y1)
             unit_str = unit or self._units.default_unit.value
-            
-            return self._result(True, f"Rectangle: {width}x{height}{unit_str}",
-                              SwErrors.swSuccess,
-                              {"width": width, "height": height, "unit": unit_str})
+            data = {"width": width, "height": height, "unit": unit_str, "verified": bool(pts)}
+            frame = sketch_frame(doc)
+            if frame:
+                to_mm = lambda v: self._units.from_meters(v, "mm")  # noqa: E731
+                c1 = sketch_to_world_mm(frame, to_mm(want[0]), to_mm(want[1]))
+                c2 = sketch_to_world_mm(frame, to_mm(want[2]), to_mm(want[3]))
+                data["world_bbox_mm"] = {"min": [min(a, b) for a, b in zip(c1, c2)],
+                                         "max": [max(a, b) for a, b in zip(c1, c2)]}
+                data["sketch_axes"] = axis_note(frame)
+            return self._result(True, f"Rectangle: {width}x{height}{unit_str}", SwErrors.swSuccess, data)
             
         except Exception as e:
             logger.error(f"Draw rectangle error: {e}\n{traceback.format_exc()}")
@@ -513,17 +600,27 @@ class SketchOperations:
             x2 = cx_m + radius_m * math.cos(end_rad)
             y2 = cy_m + radius_m * math.sin(end_rad)
             
-            # Draw arc (center, start, end, direction)
-            arc = doc.SketchManager.CreateArc(
-                cx_m, cy_m, 0,   # Center
-                x1, y1, 0,       # Start
-                x2, y2, 0,       # End
-                1                # Direction (1 = counter-clockwise)
-            )
-            
+            # Draw arc (center, start, end, direction), no snapping (AddToDB)
+            with direct_sketch(doc):
+                arc = doc.SketchManager.CreateArc(
+                    cx_m, cy_m, 0,   # Center
+                    x1, y1, 0,       # Start
+                    x2, y2, 0,       # End
+                    1                # Direction (1 = counter-clockwise)
+                )
+
             if arc is None:
-                return self._result(False, "Failed - ensure sketch is active",
-                                  SwErrors.swSketchError)
+                return self._result(False, _NOT_CREATED.format(what="arc"), SwErrors.swSketchError)
+
+            got = arc_center_radius(arc)
+            if got is not None and not (close(got[0], (cx_m, cy_m)) and abs(got[1] - radius_m) <= TOL_M):
+                delete_segments(doc, [arc])
+                return self._result(
+                    False,
+                    f"Arc was created at ({mm(got[0][0])}, {mm(got[0][1])}) r={mm(got[1])} mm instead of the "
+                    "requested centre/radius; it was removed.",
+                    SwErrors.swSketchError,
+                )
             
             unit_str = unit or self._units.default_unit.value
             arc_angle = abs(end_angle - start_angle)
@@ -576,17 +673,17 @@ class SketchOperations:
             cy_m = self._units.to_meters(cy, unit)
             radius_m = self._units.to_meters(radius, unit)
             
-            # Draw polygon
-            polygon = doc.SketchManager.CreatePolygon(
-                cx_m, cy_m, 0,               # Center
-                cx_m + radius_m, cy_m, 0,    # Vertex
-                sides,                        # Number of sides
-                False                         # Inscribed (False = circumscribed)
-            )
-            
+            # Draw polygon, no snapping (AddToDB)
+            with direct_sketch(doc):
+                polygon = doc.SketchManager.CreatePolygon(
+                    cx_m, cy_m, 0,               # Center
+                    cx_m + radius_m, cy_m, 0,    # Vertex
+                    sides,                        # Number of sides
+                    False                         # Inscribed (False = circumscribed)
+                )
+
             if polygon is None:
-                return self._result(False, "Failed - ensure sketch is active",
-                                  SwErrors.swSketchError)
+                return self._result(False, _NOT_CREATED.format(what="polygon"), SwErrors.swSketchError)
             
             unit_str = unit or self._units.default_unit.value
             
@@ -626,12 +723,12 @@ class SketchOperations:
             x2_m = self._units.to_meters(x2, unit)
             y2_m = self._units.to_meters(y2, unit)
             
-            # Draw centerline
-            line = doc.SketchManager.CreateCenterLine(x1_m, y1_m, 0, x2_m, y2_m, 0)
-            
+            # Draw centerline, no snapping (AddToDB)
+            with direct_sketch(doc):
+                line = doc.SketchManager.CreateCenterLine(x1_m, y1_m, 0, x2_m, y2_m, 0)
+
             if line is None:
-                return self._result(False, "Failed - ensure sketch is active",
-                                  SwErrors.swSketchError)
+                return self._result(False, _NOT_CREATED.format(what="centerline"), SwErrors.swSketchError)
             
             return self._result(True, "Centerline created",
                               SwErrors.swSuccess)
@@ -776,21 +873,35 @@ class SketchOperations:
                 for pt in points
             ]
 
-            created_lines = 0
+            # One segment per consecutive pair (closing back to the first point).
             n = len(pts_m)
-            for i in range(n):
-                x1_m, y1_m = pts_m[i]
-                x2_m, y2_m = pts_m[(i + 1) % n]
-                if abs(x1_m - x2_m) < 1e-9 and abs(y1_m - y2_m) < 1e-9:
-                    continue
-                seg = doc.SketchManager.CreateLine(x1_m, y1_m, 0.0, x2_m, y2_m, 0.0)
-                if seg is not None:
-                    created_lines += 1
+            pairs = [(pts_m[i], pts_m[(i + 1) % n]) for i in range(n)
+                     if not (abs(pts_m[i][0] - pts_m[(i + 1) % n][0]) < 1e-9 and abs(pts_m[i][1] - pts_m[(i + 1) % n][1]) < 1e-9)]
+            created = []
+            bad = []
+            with direct_sketch(doc):  # no snapping: corners used to merge and leave open profiles
+                for (ax, ay), (bx, by) in pairs:
+                    seg = doc.SketchManager.CreateLine(ax, ay, 0.0, bx, by, 0.0)
+                    if seg is None:
+                        bad.append(((ax, ay), (bx, by), None))
+                        continue
+                    created.append(seg)
+                    got = line_points(seg)
+                    if got is not None and not (close(got[0], (ax, ay)) and close(got[1], (bx, by))):
+                        bad.append(((ax, ay), (bx, by), got))
+            created_lines = len(created)
 
-            if created_lines < 3:
+            if bad or created_lines != len(pairs) or created_lines < 3:
+                delete_segments(doc, created)
+                detail = "; ".join(
+                    f"({mm(a[0])}, {mm(a[1])})->({mm(b[0])}, {mm(b[1])}) " + ("not created" if g is None else
+                    f"created as ({mm(g[0][0])}, {mm(g[0][1])})->({mm(g[1][0])}, {mm(g[1][1])})")
+                    for a, b, g in bad[:4]
+                )
                 return self._result(
                     False,
-                    f"Failed to create closed profile (only {created_lines} line segments created).",
+                    f"Closed profile not created: {created_lines} of {len(pairs)} segments were made correctly"
+                    + (f" ({detail})" if detail else "") + ". Nothing was left in the sketch.",
                     SwErrors.swSketchError,
                 )
 

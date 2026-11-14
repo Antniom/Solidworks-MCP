@@ -149,7 +149,9 @@ def _build_tools() -> List[Tool]:
             name="create_sketch",
             description=(
                 "Create a new sketch on a reference plane (optionally offset), on a body face by 1-based face_index, "
-                "or on the body face found at face_point. Sketch on faces rather than planes for cuts into existing geometry."
+                "or on the body face found at face_point. Sketch on faces rather than planes for cuts into existing geometry. "
+                "Draw coordinates are sketch-local: the result reports sketch_frame (origin and world directions of sketch X/Y) "
+                "and warns when they differ from world X/Y. Offset planes are hidden after creation."
             ),
             inputSchema={
                 "type": "object",
@@ -285,7 +287,7 @@ def _build_tools() -> List[Tool]:
                 "type": "object",
                 "properties": {
                     "depth": {"type": "number", "default": 10, "description": "Extrusion depth"},
-                    "both_directions": {"type": "boolean", "default": False, "description": "Extrude in both directions"},
+                    "both_directions": {"type": "boolean", "default": False, "description": "Mid-plane extrude: depth is the TOTAL thickness (depth/2 each side)"},
                     "reverse_dir": {"type": "boolean", "default": False, "description": "Reverse extrusion direction (extrude backward)"},
                     "unit": {"type": "string", "description": "Unit"}
                 },
@@ -294,13 +296,17 @@ def _build_tools() -> List[Tool]:
         ),
         Tool(
             name="cut_extrude",
-            description="Cut extrude to remove material.",
+            description=(
+                "Cut extrude the active/last sketch to remove material. Fails if no material is removed. "
+                "Without reverse_dir both directions are tried and the one that removes material is kept."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "depth": {"type": "number", "default": 10, "description": "Cut depth"},
                     "through_all": {"type": "boolean", "default": False, "description": "Cut through all"},
-                    "both_directions": {"type": "boolean", "default": False, "description": "Cut both directions"},
+                    "both_directions": {"type": "boolean", "default": False, "description": "Mid-plane cut (depth is the total, depth/2 each side); with through_all, through all on both sides"},
+                    "reverse_dir": {"type": "boolean", "description": "Force the cut direction: false = against the sketch normal (into the face for a face sketch), true = along the normal. Omit to try both and keep the one that removes material"},
                     "unit": {"type": "string", "description": "Unit"}
                 },
                 "required": []
@@ -384,13 +390,16 @@ def _build_tools() -> List[Tool]:
         ),
         Tool(
             name="manage_feature",
-            description="Manage feature tree operations: suppress, unsuppress, rename, delete, reorder, set_color.",
+            description=(
+                "Manage feature tree operations: suppress, unsuppress, rename, delete, reorder, set_color, and hide/show "
+                "(visibility of reference geometry such as planes, axes and sketches, or of a solid body feature)."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["suppress", "unsuppress", "rename", "delete", "reorder", "set_color"],
+                        "enum": ["suppress", "unsuppress", "rename", "delete", "reorder", "set_color", "hide", "show"],
                         "description": "Feature operation action"
                     },
                     "feature_name": {"type": "string", "description": "Target feature name"},
@@ -651,6 +660,8 @@ def _build_tools() -> List[Tool]:
                     "midpoint": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3, "description": "geometry: edge midpoint [x, y, z]"},
                     "bbox_min": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3, "description": "geometry: bounding box minimum [xmin, ymin, zmin]"},
                     "bbox_max": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3, "description": "geometry: bounding box maximum [xmax, ymax, zmax]"},
+                    "max_results": {"type": "integer", "default": 200, "minimum": 1, "description": "geometry: stop after this many matches (result says PARTIAL)"},
+                    "time_budget_s": {"type": "number", "default": 40.0, "description": "geometry: stop scanning after this many seconds and return the partial result; on large assemblies pass component, bbox or point to prune"},
                     "mark": {"type": "integer", "default": 0, "description": "Selection mark"},
                     "append": {"type": "boolean", "default": False, "description": "Add to the current selection instead of replacing it"},
                     "unit": {"type": "string", "enum": ["mm", "inch", "m", "cm"], "description": "Unit for name/point/geometry coordinates"}
@@ -670,7 +681,7 @@ def _build_tools() -> List[Tool]:
                 "properties": {
                     "mode": {"type": "string", "enum": ["view", "overview", "showcase"], "default": "view", "description": "Capture mode"},
                     "filepath": {"type": "string", "description": "view/showcase: output image path (optional)"},
-                    "view_name": {"type": "string", "default": "*Isometric", "description": "view: named view orientation"},
+                    "view_name": {"type": "string", "default": "*Isometric", "description": "view: named view orientation; 'current' keeps the present camera"},
                     "save_dir": {"type": "string", "description": "overview: directory for overview_<ts>.png and detail_<ts>.png"},
                     "eye_mm": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3, "description": "showcase: camera eye position [x, y, z] in mm"},
                     "target_mm": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3, "description": "showcase: camera target point [x, y, z] in mm"},
@@ -1245,7 +1256,7 @@ def _build_tools() -> List[Tool]:
                     "ref2_value": {"type": "number", "description": "Coordinate (mm) of second reference edge"},
                     "dist2": {"type": "number", "description": "Distance (mm) from second reference edge"},
                     "diameter": {"type": "number", "default": 5.5, "description": "Hole diameter in mm"},
-                    "depth": {"type": "number", "default": 0.0, "description": "Hole depth in mm (0 = through-all)"},
+                    "depth": {"type": "number", "default": 0.0, "description": "Hole depth in mm (0 = through the whole part on both sides of the face; the result reports walls_pierced and verifies the hole radius)"},
                     "tapped": {"type": "boolean", "default": False, "description": "Whether hole is tapped"},
                     "cbore_diameter": {"type": "number", "default": 0.0, "description": "Counterbore diameter in mm (0 = none)"},
                     "cbore_depth": {"type": "number", "default": 0.0, "description": "Counterbore depth in mm"}
@@ -1310,14 +1321,17 @@ def _build_tools() -> List[Tool]:
                 "properties": {
                     "thickness_mm": {"type": "number", "description": "Optional override thickness in mm"},
                     "bend_radius_mm": {"type": "number", "description": "Optional override bend radius in mm"},
-                    "reverse_dir": {"type": "boolean", "default": False, "description": "Reverse thickness direction"}
+                    "reverse_dir": {"type": "boolean", "default": False, "description": "Thickness grows along the sketch normal by default; true puts it on the opposite side. Verified after creation (thickness_side)"}
                 },
                 "required": []
             }
         ),
         Tool(
             name="flange",
-            description="Add a Sheet Metal Flange of height 'distance' (mm) at bend 'angle' (deg) on 1-based edge_indices.",
+            description=(
+                "Add a 90-degree wall of height 'distance' (mm) on 1-based edge_indices, built as a thickness-wide extruded "
+                "wall (no bend region, no flat-pattern bend). Each wall's added volume is verified; other angles are rejected."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -1425,7 +1439,12 @@ def _build_tools() -> List[Tool]:
         ),
         Tool(
             name="apply_material_appearance",
-            description="Apply a named material appearance ('Gold', 'Smooth - White', 'Clear Glass', 'Aluminum - Polished', etc.) or custom RGB/reflectivity/transparency.",
+            description=(
+                "Apply a named appearance ('Gold', 'Smooth - White', 'Clear Glass', 'Aluminum - Polished', etc.) or custom "
+                "RGB/reflectivity/transparency. An unknown name needs color_rgb (it then becomes a custom label). The colour is "
+                "read back and features with their own colour that hide a part-level colour are listed. This is visual only: "
+                "use set_material for the engineering material (density, mass)."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -1443,6 +1462,23 @@ def _build_tools() -> List[Tool]:
                     "target_name": {"type": "string", "description": "Feature or component name when target_type != 'part'"}
                 },
                 "required": []
+            }
+        ),
+        Tool(
+            name="set_material",
+            description=(
+                "Assign an engineering material from a SolidWorks material database to the active part (sets density "
+                "and mechanical properties used for mass and simulation), e.g. 'AISI 304', '6061-T6 (SS)', 'ABS'. "
+                "The assignment is read back; mass is reported."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "material_name": {"type": "string", "description": "Material name exactly as in the database"},
+                    "database": {"type": "string", "default": "SOLIDWORKS Materials", "description": "Material database name"},
+                    "configuration": {"type": "string", "default": "", "description": "Configuration name ('' = active)"}
+                },
+                "required": ["material_name"]
             }
         ),
         Tool(
