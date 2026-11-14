@@ -120,11 +120,19 @@ class SheetMetalOperations:
         thickness_mm: Optional[float] = None,
         bend_radius_mm: Optional[float] = None,
         reverse_dir: bool = False,
+        depth: Optional[float] = None,
+        both_directions: bool = False,
+        reverse_extrude: bool = False,
     ) -> Dict[str, Any]:
         """
-        Create a base sheet-metal Face (Base-Flange) from the active or last closed sketch profile.
+        Create a base sheet-metal Base-Flange from the active or last sketch.
+
+        Closed profile: a flat plate; reverse_dir puts the thickness against the sketch normal.
+        Open profile (a line chain such as an L, U, Z or hat section): the chain is extruded by
+        `depth` mm (mid-plane total with both_directions; reverse_extrude flips the extrude side)
+        and SolidWorks adds a bend at every corner, giving a real flat pattern. reverse_dir moves
+        the thickness to the other side of the drawn lines.
         Uses the thickness configured via set_sheet_metal_thickness unless overridden.
-        Matches lminventor's sheet_metal_face tool.
         """
         try:
             doc, err = self.get_active_doc()
@@ -147,6 +155,18 @@ class SheetMetalOperations:
                     f"sheet_metal_face failed: {err_msg}",
                     SwErrors.swFeatureError,
                 )
+
+            profile = self._profile_kind(doc, sketch_name)
+            if profile.get("kind") == "open":
+                return self._open_profile_base_flange(
+                    doc, sketch_name, profile, pre_state, t_mm, r_mm, k_val, depth,
+                    bool(both_directions), bool(reverse_dir), bool(reverse_extrude))
+            if profile.get("kind") == "mixed":
+                return self._result(
+                    False,
+                    f"Sketch '{sketch_name}' mixes open and closed geometry ({profile.get('detail')}). A base flange "
+                    "needs either one closed profile (flat plate) or one open line chain (bent section).",
+                    SwErrors.swSketchError, profile)
 
             feat = None
             method_used = ""
@@ -263,6 +283,168 @@ class SheetMetalOperations:
         except Exception as e:
             logger.error(f"sheet_metal_face error: {e}\n{traceback.format_exc()}")
             return self._result(False, f"sheet_metal_face error: {e}", SwErrors.swGeneralError)
+
+    def _profile_kind(self, doc, sketch_name: Optional[str]) -> Dict[str, Any]:
+        """
+        Classify the (non-construction) geometry of a sketch: 'closed' (only closed loops),
+        'open' (exactly one unbranched open chain) or 'mixed'. 'unknown' when it cannot be read;
+        callers then keep the old closed-profile behaviour.
+        """
+        try:
+            sk_feat = doc.FeatureByName(sketch_name) if sketch_name else None
+            sk = get_attr_or_call(sk_feat, "GetSpecificFeature2") if sk_feat is not None else None
+            segs = list(get_attr_or_call(sk, "GetSketchSegments") or []) if sk is not None else []
+            key = lambda p: (round(float(p.X), 7), round(float(p.Y), 7))  # noqa: E731
+            parent: Dict[Any, Any] = {}
+
+            def find(a):
+                while parent.setdefault(a, a) != a:
+                    a = parent[a]
+                return a
+
+            degree: Dict[Any, int] = {}
+            length_m = 0.0
+            n = 0
+            for seg in segs:
+                if bool(get_attr_or_call(seg, "ConstructionGeometry")):
+                    continue
+                n += 1
+                try:
+                    length_m += float(get_attr_or_call(seg, "GetLength"))
+                except Exception:
+                    pass
+                a = key(get_attr_or_call(seg, "GetStartPoint2"))
+                b = key(get_attr_or_call(seg, "GetEndPoint2"))
+                if a == b:  # full circle / closed spline: a loop by itself
+                    find(a)
+                    continue
+                degree[a] = degree.get(a, 0) + 1
+                degree[b] = degree.get(b, 0) + 1
+                parent[find(a)] = find(b)
+            if n == 0:
+                return {"kind": "unknown", "detail": "no sketch segments"}
+            ends = [p for p, d in degree.items() if d == 1]
+            branches = [p for p, d in degree.items() if d > 2]
+            comps = {find(p) for p in parent}
+            info = {"segments": n, "open_ends": len(ends), "components": len(comps),
+                    "length_mm": round(length_m * 1000.0, 4)}
+            if not ends and not branches:
+                return {"kind": "closed", **info}
+            if len(ends) == 2 and not branches and len(comps) == 1:
+                return {"kind": "open", **info}
+            return {"kind": "mixed", "detail": f"{len(ends)} open end(s), {len(branches)} branch point(s), "
+                                               f"{len(comps)} separate piece(s)", **info}
+        except Exception as e:
+            logger.debug(f"_profile_kind failed: {e}")
+            return {"kind": "unknown", "detail": str(e)}
+
+    def _open_profile_base_flange(self, doc, sketch_name, profile, pre_state, t_mm, r_mm, k_val,
+                                  depth, both_directions, reverse_dir, reverse_extrude) -> Dict[str, Any]:
+        """Base flange from an open line chain: extruded by depth, bends added at the corners."""
+        if depth is None or float(depth) <= 0:
+            return self._result(
+                False,
+                f"Sketch '{sketch_name}' is an open profile ({profile.get('segments')} segment(s), "
+                f"{profile.get('length_mm')} mm long): pass depth (mm) - how far the bent section is extruded.",
+                SwErrors.swInvalidInput, profile)
+        depth_mm = float(depth)
+        t_m, r_m, d_m = t_mm / 1000.0, r_mm / 1000.0, depth_mm / 1000.0
+        end_cond = 6 if both_directions else 0  # swEndCondMidPlane: depth is the total
+        feat = None
+        try:
+            # ThickenDir (2nd) sets which side of the lines the thickness goes for an open profile;
+            # FlipExtruDir (6th) flips the extrude direction.
+            feat = doc.FeatureManager.InsertSheetMetalBaseFlange2(
+                t_m, bool(reverse_dir), r_m, d_m, 0.0, bool(reverse_extrude), end_cond, 0, 1, null_dispatch(),
+                False, 0, 0.0005, 0.0005, 0.5, True, False, True, True)
+        except Exception as e:
+            logger.debug(f"open-profile InsertSheetMetalBaseFlange2 failed: {e}")
+        if feat is None:
+            return self._result(
+                False,
+                f"Base flange from open profile '{sketch_name}' failed. Check that segments meet end to end, no "
+                f"segment is shorter than the bend radius ({r_mm} mm), and the profile does not cross itself.",
+                SwErrors.swFeatureError, profile)
+        get_attr_or_call(doc, "EditRebuild3")
+        feat_name = getattr(feat, "Name", "Base-Flange1")
+
+        # Extrude extent along the sketch normal must equal depth.
+        side = self._plate_side(doc, sketch_name)
+        extent_ok = True
+        if side is not None:
+            extent = side["z_max_mm"] - side["z_min_mm"]
+            extent_ok = abs(extent - depth_mm) <= 0.01
+        # Bends SolidWorks generated.
+        bends = []
+        try:
+            sub = get_attr_or_call(feat, "GetFirstSubFeature")
+            while sub is not None:
+                tname = str(get_attr_or_call(sub, "GetTypeName2") or "")
+                if "Bend" in tname:
+                    bends.append(str(getattr(sub, "Name", tname)))
+                sub = get_attr_or_call(sub, "GetNextSubFeature")
+        except Exception:
+            pass
+        # Flat pattern size (flatten, measure, fold back) and volume consistency.
+        vol_after = capture_vol_state(doc)
+        suffix, delta_dict = format_vol_delta(pre_state.vol_state, vol_after)
+        flat = self._flat_pattern_size(doc)
+        vol_ok = True
+        if flat is not None and delta_dict and delta_dict.get("volume_delta_mm3") is not None:
+            expected = flat["length_mm"] * flat["width_mm"] * t_mm
+            vol_ok = abs(delta_dict["volume_delta_mm3"] - expected) <= max(0.01 * expected, 1.0)
+        self._sm_thickness_mm = float(t_mm)
+        data = {
+            "feature_name": feat_name, "profile": "open", "thickness_mm": t_mm, "bend_radius_mm": r_mm,
+            "k_factor": k_val, "depth_mm": depth_mm, "both_directions": both_directions,
+            "bends": bends, "flat_pattern_mm": flat, "sketch_extent": side, "geometry_delta": delta_dict,
+            "segments": profile.get("segments"), "profile_length_mm": profile.get("length_mm"),
+        }
+        if not extent_ok or not vol_ok:
+            return self._result(
+                False,
+                f"{feat_name} was created but does not match the request (extent "
+                f"{'ok' if extent_ok else 'wrong: ' + str(side)}; volume vs flat pattern {'ok' if vol_ok else 'mismatch'}).",
+                SwErrors.swFeatureError, data)
+        flat_txt = (f", flat pattern {flat['length_mm']} x {flat['width_mm']} mm" if flat else "")
+        ext_txt = f"{depth_mm} mm total, mid-plane" if both_directions else f"{depth_mm} mm"
+        return self._result(
+            True,
+            f"Sheet metal base flange from open profile ({t_mm}mm thick, extruded {ext_txt}): {feat_name} with "
+            f"{len(bends)} bend(s){flat_txt}{suffix}",
+            SwErrors.swSuccess, data)
+
+    def _flat_pattern_size(self, doc) -> Optional[Dict[str, float]]:
+        """Unsuppress the Flat-Pattern, read the flat body box, and fold the part back."""
+        fp = None
+        try:
+            f = get_attr_or_call(doc, "FirstFeature")
+            while f is not None:
+                if str(get_attr_or_call(f, "GetTypeName2") or "") == "FlatPattern":
+                    fp = f
+                f = get_attr_or_call(f, "GetNextFeature")
+        except Exception:
+            return None
+        if fp is None:
+            return None
+        try:
+            fp.SetSuppression2(1, 2, null_dispatch())  # unsuppress = flattened
+            get_attr_or_call(doc, "EditRebuild3")
+            bodies = get_attr_or_call(doc, "GetBodies2", 0, False) or []
+            box = get_attr_or_call(bodies[0], "GetBodyBox") if bodies else None
+            if not box:
+                return None
+            dims = sorted((abs(box[i + 3] - box[i]) * 1000.0 for i in range(3)), reverse=True)
+            return {"length_mm": round(dims[0], 3), "width_mm": round(dims[1], 3), "thickness_mm": round(dims[2], 3)}
+        except Exception as e:
+            logger.debug(f"flat pattern size failed: {e}")
+            return None
+        finally:
+            try:
+                fp.SetSuppression2(0, 2, null_dispatch())  # fold back
+                get_attr_or_call(doc, "EditRebuild3")
+            except Exception:
+                pass
 
     def _plate_side(self, doc, sketch_name: Optional[str]) -> Optional[Dict[str, Any]]:
         """

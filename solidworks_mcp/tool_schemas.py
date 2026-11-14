@@ -1315,13 +1315,22 @@ def _build_tools() -> List[Tool]:
         ),
         Tool(
             name="sheet_metal_face",
-            description="Create a base sheet-metal Face (Base-Flange) from the active or last closed sketch profile.",
+            description=(
+                "Create a native sheet-metal Base-Flange from the active or last sketch. Closed profile: a flat plate. "
+                "Open profile (one line chain, e.g. an L, U, Z or hat cross-section drawn with draw_line): extruded by "
+                "`depth` with a real bend at every corner and a flat pattern; the result reports the bends and the "
+                "flat-pattern size and checks volume against it. Segments must meet end to end and be longer than "
+                "the bend radius."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "thickness_mm": {"type": "number", "description": "Optional override thickness in mm"},
                     "bend_radius_mm": {"type": "number", "description": "Optional override bend radius in mm"},
-                    "reverse_dir": {"type": "boolean", "default": False, "description": "Thickness grows along the sketch normal by default; true puts it on the opposite side. Verified after creation (thickness_side)"}
+                    "reverse_dir": {"type": "boolean", "default": False, "description": "Closed profile: thickness grows along the sketch normal by default, true = opposite side (verified, thickness_side). Open profile: moves the thickness to the other side of the drawn lines"},
+                    "depth": {"type": "number", "description": "Open profile only (required there): extrude length in mm"},
+                    "both_directions": {"type": "boolean", "default": False, "description": "Open profile: mid-plane extrude, depth is the total"},
+                    "reverse_extrude": {"type": "boolean", "default": False, "description": "Open profile: extrude to the other side of the sketch plane"}
                 },
                 "required": []
             }
