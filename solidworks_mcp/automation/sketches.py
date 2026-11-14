@@ -395,9 +395,13 @@ class SketchOperations:
             length_display = self._units.from_meters(length_m, unit)
             unit_str = unit or self._units.default_unit.value
             
-            return self._result(True, f"Line: {length_display:.2f}{unit_str}",
-                              SwErrors.swSuccess,
-                              {"length": length_display, "unit": unit_str})
+            data = {"length": length_display, "unit": unit_str, "verified": got is not None,
+                    "construction": bool(construction)}
+            frame = sketch_frame(doc)
+            if frame:
+                data["world_mm"] = [sketch_to_world_mm(frame, x1_m * 1000.0, y1_m * 1000.0),
+                                    sketch_to_world_mm(frame, x2_m * 1000.0, y2_m * 1000.0)]
+            return self._result(True, f"Line: {length_display:.2f}{unit_str}", SwErrors.swSuccess, data)
             
         except Exception as e:
             logger.error(f"Draw line error: {e}\n{traceback.format_exc()}")
@@ -634,15 +638,95 @@ class SketchOperations:
             logger.error(f"Draw arc error: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Error: {e}", SwErrors.swSketchError)
     
+    def world_point_to_sketch(self, point, unit: str = None) -> Tuple[float, float]:
+        """
+        Convert a world/model point [x, y, z] (in `unit`) to the active sketch's local (x, y) in `unit`.
+        Raises ValueError when there is no active sketch or the point is not on the sketch plane.
+        """
+        doc, err = self.get_active_doc()
+        if err:
+            raise ValueError(err.get("message", "No active document"))
+        frame = sketch_frame(doc)
+        if not frame:
+            raise ValueError("World coordinates need an active sketch (call create_sketch first).")
+        if not isinstance(point, (list, tuple)) or len(point) != 3:
+            raise ValueError(f"A world point must be [x, y, z]; got {point!r}.")
+        p_mm = [self._units.to_meters(float(c), unit) * 1000.0 for c in point]
+        d = [p_mm[i] - frame["origin_mm"][i] for i in range(3)]
+        dot = lambda v: sum(d[i] * v[i] for i in range(3))  # noqa: E731
+        off = dot(frame["normal_world"])
+        if abs(off) > 0.01:
+            n = frame["normal_world"]
+            plane_pos = sum(frame["origin_mm"][i] * n[i] for i in range(3))
+            raise ValueError(
+                f"World point {list(point)} is {abs(off):.4f} mm off the active sketch plane "
+                f"(plane: normal {n}, at {plane_pos:.4f} mm along it; {axis_note(frame)}). "
+                "Give a point that lies on the sketch plane.")
+        return (self._units.from_meters(dot(frame["x_axis_world"]) / 1000.0, unit),
+                self._units.from_meters(dot(frame["y_axis_world"]) / 1000.0, unit))
+
+    def draw_arc_3pt(self, start, mid, end, unit: str = None) -> Dict:
+        """Arc from `start` to `end` passing through `mid` (sketch-local [x, y] points)."""
+        try:
+            doc, err = self.get_active_doc()
+            if err:
+                return err
+            sk_err = self._require_active_sketch_in_3d(doc)
+            if sk_err:
+                return sk_err
+            (x1, y1), (x2, y2), (x3, y3) = [
+                (self._units.to_meters(float(p[0]), unit), self._units.to_meters(float(p[1]), unit))
+                for p in (start, mid, end)]
+            det = 2.0 * (x1 * (y2 - y3) + x2 * (y3 - y1) + x3 * (y1 - y2))
+            if abs(det) < 1e-14:
+                return self._result(False, "The three arc points are collinear or coincident.",
+                                    SwErrors.swInvalidParameter)
+            s1, s2, s3 = x1 * x1 + y1 * y1, x2 * x2 + y2 * y2, x3 * x3 + y3 * y3
+            cx = (s1 * (y2 - y3) + s2 * (y3 - y1) + s3 * (y1 - y2)) / det
+            cy = (s1 * (x3 - x2) + s2 * (x1 - x3) + s3 * (x2 - x1)) / det
+            r = math.hypot(x1 - cx, y1 - cy)
+            # Counter-clockwise from start to end when `mid` lies to the left of start->end is false.
+            cross = (x2 - x1) * (y3 - y1) - (y2 - y1) * (x3 - x1)
+            direction = 1 if cross > 0 else -1
+            with direct_sketch(doc):
+                arc = doc.SketchManager.CreateArc(cx, cy, 0, x1, y1, 0, x3, y3, 0, direction)
+            if arc is None:
+                return self._result(False, _NOT_CREATED.format(what="arc"), SwErrors.swSketchError)
+            got = arc_center_radius(arc)
+            ends = line_points(arc)
+            wrong = (got is not None and not (close(got[0], (cx, cy), 1e-6) and abs(got[1] - r) <= 1e-6)) or (
+                ends is not None and not (
+                    (close(ends[0], (x1, y1), 1e-6) and close(ends[1], (x3, y3), 1e-6))
+                    or (close(ends[0], (x3, y3), 1e-6) and close(ends[1], (x1, y1), 1e-6))))
+            if wrong:
+                delete_segments(doc, [arc])
+                return self._result(False, "Arc was not created through the requested points; it was removed.",
+                                    SwErrors.swSketchError)
+            sweep = math.degrees((math.atan2(y3 - cy, x3 - cx) - math.atan2(y1 - cy, x1 - cx)) * direction) % 360.0
+            unit_str = unit or self._units.default_unit.value
+            data = {"radius": round(self._units.from_meters(r, unit), 6),
+                    "center": [round(self._units.from_meters(cx, unit), 6), round(self._units.from_meters(cy, unit), 6)],
+                    "sweep_deg": round(sweep, 4), "unit": unit_str, "verified": got is not None}
+            frame = sketch_frame(doc)
+            if frame:
+                data["center_world_mm"] = sketch_to_world_mm(frame, cx * 1000.0, cy * 1000.0)
+            return self._result(True, f"Arc through 3 points: r={data['radius']}{unit_str}, {data['sweep_deg']}°",
+                                SwErrors.swSuccess, data)
+        except Exception as e:
+            logger.error(f"Draw 3-point arc error: {e}\n{traceback.format_exc()}")
+            return self._result(False, f"Error: {e}", SwErrors.swSketchError)
+
     def draw_polygon(self, cx: float = 0, cy: float = 0, radius: float = 25,
-                     sides: int = 6, unit: str = None) -> Dict:
+                     sides: int = 6, unit: str = None, rotation: float = 0.0,
+                     flats: bool = False) -> Dict:
         """
         Draw a regular polygon
-        
+
         Args:
             cx, cy: Center point
-            radius: Circumscribed radius
+            radius: Radius to the vertices, or to the flats (inscribed circle) when flats=True
             sides: Number of sides (3-100)
+            rotation: Angle in degrees of the first vertex (flats=True: of the first flat's normal) from sketch +X
             unit: Unit for radius
         
         Returns:
@@ -673,23 +757,46 @@ class SketchOperations:
             cy_m = self._units.to_meters(cy, unit)
             radius_m = self._units.to_meters(radius, unit)
             
-            # Draw polygon, no snapping (AddToDB)
+            # CreatePolygon returns nothing while AddToDB is on (and snaps when it is off), so the
+            # polygon is built from exact line segments instead.
+            sides = int(sides)
+            r_vertex = radius_m / math.cos(math.pi / sides) if flats else radius_m
+            a0 = math.radians(float(rotation or 0.0)) + (math.pi / sides if flats else 0.0)
+            verts = [(cx_m + r_vertex * math.cos(a0 + 2 * math.pi * i / sides),
+                      cy_m + r_vertex * math.sin(a0 + 2 * math.pi * i / sides)) for i in range(sides)]
+            created, bad = [], 0
             with direct_sketch(doc):
-                polygon = doc.SketchManager.CreatePolygon(
-                    cx_m, cy_m, 0,               # Center
-                    cx_m + radius_m, cy_m, 0,    # Vertex
-                    sides,                        # Number of sides
-                    False                         # Inscribed (False = circumscribed)
-                )
+                for i in range(sides):
+                    (ax, ay), (bx, by) = verts[i], verts[(i + 1) % sides]
+                    seg = doc.SketchManager.CreateLine(ax, ay, 0.0, bx, by, 0.0)
+                    if seg is None:
+                        bad += 1
+                        continue
+                    created.append(seg)
+                    got = line_points(seg)
+                    if got is not None and not (close(got[0], (ax, ay)) and close(got[1], (bx, by))):
+                        bad += 1
 
-            if polygon is None:
-                return self._result(False, _NOT_CREATED.format(what="polygon"), SwErrors.swSketchError)
-            
+            if bad or len(created) != sides:
+                delete_segments(doc, created)
+                return self._result(
+                    False,
+                    f"Polygon not created: {len(created) - bad} of {sides} sides were made correctly. "
+                    "Nothing was left in the sketch.",
+                    SwErrors.swSketchError)
+
             unit_str = unit or self._units.default_unit.value
-            
-            return self._result(True, f"{sides}-sided polygon: r={radius}{unit_str}",
-                              SwErrors.swSuccess,
-                              {"sides": sides, "radius": radius, "unit": unit_str})
+            data = {"sides": sides, "radius": radius, "radius_to": "flats" if flats else "vertices",
+                    "vertex_radius": round(self._units.from_meters(r_vertex, unit), 6),
+                    "across_flats": round(self._units.from_meters(2 * r_vertex * math.cos(math.pi / sides), unit), 6),
+                    "rotation_deg": float(rotation or 0.0), "unit": unit_str, "verified": True}
+            frame = sketch_frame(doc)
+            if frame:
+                data["center_world_mm"] = sketch_to_world_mm(
+                    frame, self._units.from_meters(cx_m, "mm"), self._units.from_meters(cy_m, "mm"))
+            return self._result(True, f"{sides}-sided polygon: r={radius}{unit_str} to the "
+                                      f"{'flats' if flats else 'vertices'}",
+                                SwErrors.swSuccess, data)
             
         except Exception as e:
             logger.error(f"Draw polygon error: {e}\n{traceback.format_exc()}")
@@ -905,11 +1012,18 @@ class SketchOperations:
                     SwErrors.swSketchError,
                 )
 
+            data = {"point_count": len(points), "line_count": created_lines, "unit": unit_str, "verified": True}
+            frame = sketch_frame(doc)
+            if frame:
+                wpts = [sketch_to_world_mm(frame, x * 1000.0, y * 1000.0) for x, y in pts_m]
+                data["world_bbox_mm"] = {"min": [min(p[i] for p in wpts) for i in range(3)],
+                                         "max": [max(p[i] for p in wpts) for i in range(3)]}
+                data["sketch_axes"] = axis_note(frame)
             return self._result(
                 True,
                 f"Closed profile with {len(points)} points ({created_lines} lines, unit={unit_str})",
                 SwErrors.swSuccess,
-                {"point_count": len(points), "line_count": created_lines, "unit": unit_str},
+                data,
             )
         except Exception as e:
             logger.error(f"draw_closed_profile error: {e}\n{traceback.format_exc()}")

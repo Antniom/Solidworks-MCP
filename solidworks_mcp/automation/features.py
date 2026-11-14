@@ -1646,10 +1646,12 @@ class FeatureOperations:
         thickness: float = 1.0,
         outward: bool = False,
         unit: str = "mm",
+        face_indices: Optional[List[int]] = None,
+        body_index: int = 1,
     ) -> Dict:
         """
         Create a shell feature on active part (IModelDoc2.InsertFeatureShell).
-        Uses currently selected face(s) as faces to remove (or open cavity).
+        Faces to remove (open): face_indices (1-based, list_topology) or the currently selected face(s).
         """
         try:
             doc, err = self.get_active_doc()
@@ -1664,6 +1666,26 @@ class FeatureOperations:
                 return self._result(False, f"Invalid shell thickness {thickness}: thickness must be greater than 0.", SwErrors.swInvalidParameter)
 
             thick_m = self._units.to_meters(thickness, unit)
+            bodies = list(doc.GetBodies2(0, False) or ())
+            if face_indices:
+                if not (1 <= int(body_index) <= len(bodies)):
+                    return self._result(False, f"body_index {body_index} out of range (1..{len(bodies)}).",
+                                        SwErrors.swInvalidInput)
+                faces = list(get_attr_or_call(bodies[int(body_index) - 1], "GetFaces") or ())
+                bad = [i for i in face_indices if not (1 <= int(i) <= len(faces))]
+                if bad:
+                    return self._result(False, f"face_indices {bad} out of range (1..{len(faces)}).",
+                                        SwErrors.swInvalidInput)
+                doc.ClearSelection2(True)
+                for i in face_indices:
+                    faces[int(i) - 1].Select2(True, 0)
+            n_sel = 0
+            try:
+                sel_mgr = doc.SelectionManager
+                n_sel = sum(1 for i in range(1, sel_mgr.GetSelectedObjectCount2(-1) + 1)
+                            if int(sel_mgr.GetSelectedObjectType3(i, -1)) == 2)  # swSelFACES
+            except Exception:
+                pass
             pre_state = capture_pre_mutation_state(doc)
 
             doc.InsertFeatureShell(thick_m, bool(outward))
@@ -1679,14 +1701,25 @@ class FeatureOperations:
 
             ok, post_msg, post_diag = verify_mutation_post_condition(doc, feat, pre_state, "feature" if feat else "general")
             if not ok:
-                return self._result(False, f"create_shell failed post-condition verification: {post_msg}", SwErrors.swFeatureError, post_diag)
+                why = []
+                if n_sel == 0:
+                    why.append("no face was selected: pass face_indices (from list_topology) or select the "
+                               "face(s) to open first")
+                if len(bodies) > 1:
+                    why.append(f"the part has {len(bodies)} solid bodies and a shell works on one body (the "
+                               "one owning the selected faces)")
+                why.append(f"thickness {thickness}{unit} may be larger than the smallest radius or wall it must offset")
+                return self._result(
+                    False,
+                    f"Shell was not created ({post_msg}). Likely cause: " + "; ".join(why) + ".",
+                    SwErrors.swFeatureError, post_diag)
 
             feat_name = getattr(feat, "Name", "Shell1") if feat else "Shell1"
             return self._result(
                 True,
-                f"Successfully created shell (thickness={thickness}{unit})",
+                f"Successfully created shell (thickness={thickness}{unit}, {n_sel} face(s) removed)",
                 SwErrors.swSuccess,
-                {"feature_name": feat_name, "thickness": thickness, "unit": unit},
+                {"feature_name": feat_name, "thickness": thickness, "unit": unit, "faces_removed": n_sel},
             )
         except Exception as e:
             logger.error(f"create_shell error: {e}\n{traceback.format_exc()}")
@@ -1705,9 +1738,13 @@ class FeatureOperations:
         angle: float = 360.0,
         equal_spacing: bool = True,
         unit: str = "mm",
+        direction1: Optional[str] = None,
+        direction2: Optional[str] = None,
+        mirror_plane: Optional[str] = None,
     ) -> Dict:
         """
         Create a linear or circular pattern feature (IFeatureManager.FeatureLinearPattern4 / FeatureCircularPattern4).
+        direction1/direction2 ('+x', '-y', 'z', ...) make a linear pattern run along world axes, verified.
         """
         import math
         try:
@@ -1717,6 +1754,15 @@ class FeatureOperations:
 
             ptype = str(pattern_type).strip().lower()
             pre_state = capture_pre_mutation_state(doc)
+
+            if ptype == "mirror":
+                return self._mirror_about_plane(doc, pre_state, feature_name, mirror_plane)
+
+            if ptype == "linear" and direction1:
+                return self._linear_pattern_along_axes(
+                    doc, pre_state, feature_name, int(num1), self._units.to_meters(spacing1, unit),
+                    direction1, int(num2), self._units.to_meters(spacing2, unit) if int(num2) > 1 else 0.0,
+                    direction2)
 
             if ptype == "linear":
                 num1_val = int(num1)
@@ -1926,6 +1972,203 @@ class FeatureOperations:
             logger.error(f"create_pattern error: {e}\n{traceback.format_exc()}")
             return self._result(False, f"create_pattern error: {e}", SwErrors.swGeneralError)
 
+    @staticmethod
+    def _parse_axis(text: Optional[str]):
+        """'+x' / '-Y' / 'z' -> (axis index, sign). None when not a world-axis spec."""
+        t = str(text or "").strip().lower()
+        sign = -1.0 if t.startswith("-") else 1.0
+        t = t.lstrip("+-")
+        return ({"x": 0, "y": 1, "z": 2}[t], sign) if t in ("x", "y", "z") else None
+
+    def _axis_reference(self, doc, axis_i: int):
+        """A reference entity whose direction is the world axis: a reference plane normal to it."""
+        feat = get_attr_or_call(doc, "FirstFeature")
+        while feat is not None:
+            try:
+                if get_attr_or_call(feat, "GetTypeName2") == "RefPlane":
+                    plane = get_attr_or_call(feat, "GetSpecificFeature2")
+                    a = get_attr_or_call(get_attr_or_call(plane, "Transform"), "ArrayData")
+                    normal = [float(a[6]), float(a[7]), float(a[8])]
+                    if abs(abs(normal[axis_i]) - 1.0) < 1e-9:
+                        return feat
+            except Exception:
+                pass
+            feat = get_attr_or_call(feat, "GetNextFeature")
+        return None
+
+    def _mirror_about_plane(self, doc, pre_state, feature_name, mirror_plane) -> Dict:
+        """
+        Mirror features (feature_name, comma-separated for several) or, without feature_name, every
+        solid body about a plane: 'Right' (world YZ, flips X), 'Top' (XZ, flips Y), 'Front' (XY,
+        flips Z) or the name of any reference plane.
+        """
+        key = str(mirror_plane or "").strip()
+        if not key:
+            return self._result(False, "mirror needs mirror_plane: 'Right', 'Top', 'Front' or a plane name.",
+                                SwErrors.swInvalidInput)
+        std = {"right": 0, "yz": 0, "x": 0, "right plane": 0, "top": 1, "xz": 1, "y": 1, "top plane": 1,
+               "front": 2, "xy": 2, "z": 2, "front plane": 2}
+        plane = None
+        if key.lower() in std:
+            plane = self._axis_reference(doc, std[key.lower()])
+        if plane is None:
+            plane = doc.FeatureByName(key)
+        if plane is None:
+            return self._result(False, f"Mirror plane '{mirror_plane}' not found.", SwErrors.swSelectionFailed)
+
+        seeds = []
+        for nm in [s.strip() for s in str(feature_name or "").split(",") if s.strip()]:
+            f = doc.FeatureByName(nm)
+            if f is None:
+                return self._result(False, f"Feature '{nm}' not found.", SwErrors.swSelectionFailed)
+            seeds.append(f)
+        mirror_body = not seeds
+
+        doc.ClearSelection2(True)
+        plane.Select2(False, 2)
+        if mirror_body:
+            # Bodies are selected by name: IBody2.Select2 needs a SelectData object, which cannot be
+            # created under late binding ("Member not found").
+            n_bodies = 0
+            for b in (doc.GetBodies2(0, False) or ()):
+                if doc.Extension.SelectByID2(str(b.Name), "SOLIDBODY", 0, 0, 0, True, 256, null_dispatch(), 0):
+                    n_bodies += 1
+            if not n_bodies:
+                return self._result(False, "Mirror: no solid body could be selected.", SwErrors.swSelectionFailed)
+        else:
+            for f in seeds:
+                f.Select2(True, 1)
+        feat = None
+        try:
+            # InsertMirrorFeature2(MirrorBody, GeometryPattern, Merge, Knit, ScopeOptions)
+            feat = doc.FeatureManager.InsertMirrorFeature2(mirror_body, False, True, False, 0)
+        except Exception as ex:
+            logger.debug(f"InsertMirrorFeature2 failed: {ex}")
+            try:
+                feat = doc.FeatureManager.InsertMirrorFeature(mirror_body, False, True, False)
+            except Exception as ex2:
+                return self._result(False, f"Mirror failed: {ex2}", SwErrors.swFeatureError)
+        get_attr_or_call(doc, "EditRebuild3")
+        if not feat:
+            return self._result(
+                False,
+                "Mirror was not created (SolidWorks returned no feature). The mirrored copy must touch or "
+                "overlap the body it merges with, and mirrored features must land on the body.",
+                SwErrors.swFeatureError)
+        ok, post_msg, post_diag = verify_mutation_post_condition(doc, feat, pre_state, "feature")
+        if not ok:
+            return self._result(False, f"Mirror failed post-condition verification: {post_msg}",
+                                SwErrors.swFeatureError, post_diag)
+        what = "all solid bodies" if mirror_body else ", ".join(f.Name for f in seeds)
+        return self._result(True, f"Mirrored {what} about '{plane.Name}'", SwErrors.swSuccess,
+                            {"feature_name": feat.Name, "pattern_type": "mirror", "mirror_plane": plane.Name,
+                             "mirrored": what})
+
+    def _linear_pattern_along_axes(self, doc, pre_state, feature_name, n1, s1_m, direction1, n2, s2_m, direction2) -> Dict:
+        """Linear pattern along world axes, with the resulting direction checked (and flipped if needed)."""
+        d1 = self._parse_axis(direction1)
+        d2 = self._parse_axis(direction2) if (n2 > 1 and direction2) else None
+        if d1 is None or (n2 > 1 and d2 is None):
+            return self._result(
+                False, "direction1 (and direction2 when num2 > 1) must be one of x, y, z, +x, -x, +y, -y, +z, -z.",
+                SwErrors.swInvalidInput)
+        if not feature_name:
+            return self._result(False, "feature_name (the seed feature) is required with direction1.",
+                                SwErrors.swInvalidInput)
+        seed = doc.FeatureByName(feature_name.strip())
+        if seed is None:
+            return self._result(False, f"Seed feature '{feature_name}' not found.", SwErrors.swSelectionFailed)
+        ref1 = self._axis_reference(doc, d1[0])
+        ref2 = self._axis_reference(doc, d2[0]) if d2 else None
+        if ref1 is None or (d2 and ref2 is None):
+            return self._result(False, "No reference plane normal to the requested world axis was found.",
+                                SwErrors.swSelectionFailed)
+
+        def mass():
+            try:
+                mp = get_attr_or_call(doc, "GetMassProperties")
+                return [float(mp[0]), float(mp[1]), float(mp[2])], float(mp[3])
+            except Exception:
+                return None, None
+
+        def seed_center():
+            lo, hi = [float("inf")] * 3, [float("-inf")] * 3
+            try:
+                for f in (get_attr_or_call(seed, "GetFaces") or ()):
+                    b = get_attr_or_call(f, "GetBox")
+                    for i in range(3):
+                        lo[i], hi[i] = min(lo[i], b[i]), max(hi[i], b[i + 3])
+            except Exception:
+                return None
+            return None if lo[0] == float("inf") else [(lo[i] + hi[i]) / 2.0 for i in range(3)]
+
+        c_seed = seed_center()
+        com0, v0 = mass()
+
+        def build(flip1: bool, flip2: bool):
+            doc.ClearSelection2(True)
+            ref1.Select2(False, 1)
+            if ref2 is not None:
+                ref2.Select2(True, 2)
+            seed.Select2(True, 4)
+            try:
+                return doc.FeatureManager.FeatureLinearPattern2(
+                    n1, s1_m, n2, s2_m, flip1, flip2, "", "", False)
+            except Exception:
+                return doc.FeatureManager.FeatureLinearPattern(n1, s1_m, n2, s2_m, flip1, flip2, "", "")
+
+        def measured_signs():
+            """Sign of the pattern along each requested axis, from where the volume change happened."""
+            com1, v1 = mass()
+            if c_seed is None or com0 is None or com1 is None or abs(v1 - v0) < 1e-13:
+                return None
+            change_c = [(v1 * com1[i] - v0 * com0[i]) / (v1 - v0) for i in range(3)]
+            return [change_c[i] - c_seed[i] for i in range(3)]
+
+        flip1 = flip2 = False
+        feat = None
+        verified = False
+        for _attempt in range(3):
+            feat = build(flip1, flip2)
+            if not feat:
+                break
+            get_attr_or_call(doc, "EditRebuild3")
+            off = measured_signs()
+            if off is None:
+                break
+            wrong1 = off[d1[0]] * d1[1] < -1e-7
+            wrong2 = bool(d2) and off[d2[0]] * d2[1] < -1e-7
+            if not wrong1 and not wrong2:
+                verified = True
+                break
+            # Wrong side: remove and rebuild flipped.
+            doc.ClearSelection2(True)
+            feat.Select2(False, 0)
+            doc.Extension.DeleteSelection2(0)
+            feat = None
+            flip1, flip2 = flip1 != wrong1, flip2 != wrong2
+        if not feat:
+            return self._result(
+                False,
+                f"Linear pattern of '{feature_name}' along {direction1}"
+                + (f" / {direction2}" if d2 else "") + " could not be created (SolidWorks returned no feature). "
+                "Check that the instances stay on the body.",
+                SwErrors.swFeatureError)
+        ok, post_msg, post_diag = verify_mutation_post_condition(doc, feat, pre_state, "feature")
+        if not ok:
+            return self._result(False, f"create_pattern failed post-condition verification: {post_msg}",
+                                SwErrors.swFeatureError, post_diag)
+        names = "+X +Y +Z".split(), "-X -Y -Z".split()
+        lab = lambda d: (names[0] if d[1] > 0 else names[1])[d[0]]  # noqa: E731
+        return self._result(
+            True,
+            f"Linear pattern of '{feature_name}': {n1} x {round(s1_m * 1000.0, 4)} mm along world {lab(d1)}"
+            + (f", {n2} x {round(s2_m * 1000.0, 4)} mm along world {lab(d2)}" if d2 else "")
+            + ("" if verified else " (direction could not be verified: no volume change measured)"),
+            SwErrors.swSuccess,
+            {"feature_name": feat.Name, "pattern_type": "linear", "count": n1 * max(n2, 1),
+             "direction1": lab(d1), "direction2": lab(d2) if d2 else None, "direction_verified": verified})
+
     def create_hole_wizard(
         self,
         hole_type: str = "counterbore",
@@ -2069,7 +2312,13 @@ class FeatureOperations:
 
             ok, post_msg, post_diag = verify_mutation_post_condition(doc, feat, pre_state, "feature")
             if not ok:
-                return self._result(False, f"create_hole_wizard failed post-condition verification: {post_msg}", SwErrors.swFeatureError, post_diag)
+                return self._result(
+                    False,
+                    f"Hole Wizard hole was not created ({post_msg}). It is placed at a point picked on a planar "
+                    "face: first call select {\"by\": \"point\", \"target_type\": \"face\", \"point\": [x, y, z]} with "
+                    "the hole centre on the face, then create_hole_wizard. For plain, counterbored or tapped-size "
+                    "holes at exact coordinates, hole_linear is simpler and verifies the result.",
+                    SwErrors.swFeatureError, post_diag)
 
             # HoleWizard5 ignores the thread depth for tapped holes (it keeps the standard 2xD, deeper
             # than a short tap drill, leaving a full-diameter bore with an island). Fix it on the

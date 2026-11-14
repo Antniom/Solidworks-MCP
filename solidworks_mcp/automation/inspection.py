@@ -174,6 +174,64 @@ class InspectionOperations:
             logger.error(f"Verify model error: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Verification error: {e}", SwErrors.swGeneralError)
 
+    def _fit_view_to_model(self, doc, margin: float = 0.04) -> bool:
+        """
+        Frame the solid geometry tightly in the current view orientation. ViewZoomtofit2 also frames
+        reference planes and sketches, which left a 100 mm part a few hundred pixels wide.
+        """
+        try:
+            if self.get_document_type(doc) == "Assembly":
+                box = doc.GetBox(0)
+            else:
+                box = doc.GetPartBox(True)
+            box = [float(v) for v in box[:6]] if box and len(box) >= 6 else None
+            view = getattr(doc, "ActiveView", None)
+            if not box or view is None or all(abs(box[i + 3] - box[i]) < 1e-9 for i in range(3)):
+                doc.ViewZoomtofit2()
+                return False
+            a = [float(v) for v in get_attr_or_call(get_attr_or_call(view, "Orientation3"), "ArrayData")]
+            # model -> view (row vectors): v = p . R
+            to_view = lambda p: (p[0] * a[0] + p[1] * a[3] + p[2] * a[6],   # noqa: E731
+                                 p[0] * a[1] + p[1] * a[4] + p[2] * a[7],
+                                 p[0] * a[2] + p[1] * a[5] + p[2] * a[8])
+            corners = [to_view((box[i], box[j], box[k])) for i in (0, 3) for j in (1, 4) for k in (2, 5)]
+            xs, ys, zs = [c[0] for c in corners], [c[1] for c in corners], [c[2] for c in corners]
+            pad = margin * max(max(xs) - min(xs), max(ys) - min(ys), 1e-6)
+            x0, x1, y0, y1 = min(xs) - pad, max(xs) + pad, min(ys) - pad, max(ys) + pad
+            # ViewZoomTo2 fits the rectangle's width: widen/heighten it to the window's aspect ratio
+            # so nothing is cropped.
+            aspect = 2.0
+            try:
+                vb = get_attr_or_call(view, "GetVisibleBox")  # [left, top, right, bottom] px
+                w_px, h_px = abs(float(vb[2]) - float(vb[0])), abs(float(vb[3]) - float(vb[1]))
+                if w_px > 10 and h_px > 10:
+                    aspect = w_px / h_px
+            except Exception:
+                pass
+            w, h = x1 - x0, y1 - y0
+            if w / h < aspect:
+                grow = (h * aspect - w) / 2.0
+                x0, x1 = x0 - grow, x1 + grow
+            else:
+                grow = (w / aspect - h) / 2.0
+                y0, y1 = y0 - grow, y1 + grow
+            xs, ys, pad = [x0, x1], [y0, y1], 0.0
+            zc = (min(zs) + max(zs)) / 2.0
+            to_model = lambda v: (v[0] * a[0] + v[1] * a[1] + v[2] * a[2],  # noqa: E731
+                                  v[0] * a[3] + v[1] * a[4] + v[2] * a[5],
+                                  v[0] * a[6] + v[1] * a[7] + v[2] * a[8])
+            p1 = to_model((min(xs) - pad, min(ys) - pad, zc))
+            p2 = to_model((max(xs) + pad, max(ys) + pad, zc))
+            doc.ViewZoomTo2(p1[0], p1[1], p1[2], p2[0], p2[1], p2[2])
+            return True
+        except Exception as e:
+            logger.debug(f"_fit_view_to_model failed, using zoom-to-fit: {e}")
+            try:
+                doc.ViewZoomtofit2()
+            except Exception:
+                pass
+            return False
+
     def capture_viewport(
         self,
         filepath: Optional[str] = None,
@@ -222,7 +280,7 @@ class InspectionOperations:
                     view_id = standard_views.get(view_name.strip().lstrip("*").lower(), -1)
 
                     doc.ShowNamedView2(view_name, view_id)
-                    doc.ViewZoomtofit2()
+                    self._fit_view_to_model(doc)
                 except Exception as e:
                     logger.debug(f"View adjustment warning: {e}")
             try:
@@ -985,7 +1043,7 @@ class InspectionOperations:
                 True,
                 table_str,
                 SwErrors.swSuccess,
-                {"table": table_str, "count": len(items), "faces": items},
+                {"count": len(items)},  # the table in the message carries every value once
             )
         except Exception as e:
             logger.error(f"list_faces error: {e}")
@@ -1070,7 +1128,7 @@ class InspectionOperations:
                 True,
                 table_str,
                 SwErrors.swSuccess,
-                {"table": table_str, "count": len(items), "edges": items},
+                {"count": len(items)},  # the table in the message carries every value once
             )
         except Exception as e:
             logger.error(f"list_edges error: {e}")
@@ -1326,6 +1384,33 @@ class InspectionOperations:
         except Exception as e:
             return self._result(False, f"set_material failed: {e}", SwErrors.swOperationFailed)
 
+    def _use_plain_colour_appearance(self, doc) -> Optional[str]:
+        """
+        A material (set_material) brings its own appearance, e.g. 'polished steel': a mirror finish that
+        a part colour only tints, so a beige part rendered dark (MCP-014/016). Swap such a part-level
+        appearance for the plain 'color' appearance. Returns the replaced appearance name, if any.
+        """
+        try:
+            ext = doc.Extension
+            rms = ext.GetRenderMaterials2(1, None) or ()  # 1 = swThisDisplayState
+            current = [os.path.basename(str(rm.FileName)) for rm in rms]
+            if not current or all(n.lower() == "color.p2m" for n in current):
+                return None
+            exe = str(get_attr_or_call(self._sw_app, "GetExecutablePath") or "")
+            plain = os.path.join(exe, "data", "graphics", "materials", "color.p2m")
+            if not os.path.exists(plain):
+                return None
+            rm = ext.CreateRenderMaterial(plain)
+            if rm is None or not rm.AddEntity(doc):
+                return None
+            id1 = win32com.client.VARIANT(pythoncom.VT_BYREF | pythoncom.VT_I4, 0)
+            id2 = win32com.client.VARIANT(pythoncom.VT_BYREF | pythoncom.VT_I4, 0)
+            if ext.AddDisplayStateSpecificRenderMaterial(rm, 1, None, id1, id2):
+                return os.path.splitext(current[0])[0]
+        except Exception as e:
+            logger.debug(f"_use_plain_colour_appearance: {e}")
+        return None
+
     def apply_material_appearance(
         self,
         appearance_name: str = "Smooth - White",
@@ -1366,18 +1451,19 @@ class InspectionOperations:
                 preset = ([200, 205, 210], 0.45, 0.6, 0.0)
 
             rgb = color_rgb if (color_rgb and len(color_rgb) == 3) else preset[0]
-            ambient = preset[1]
             spec = float(reflectivity) if reflectivity is not None else preset[2]
             transp = float(transparency) if transparency is not None else preset[3]
 
             # SolidWorks MaterialPropertyValues:
             # [R, G, B, Ambient, Diffuse, Specular, Shininess, Transparency, Emission]
+            # Ambient/diffuse 1.0 are the SolidWorks defaults; the lower values used before rendered
+            # every colour at about half brightness (beige looked dark brown).
             mat_vals = [
                 max(0.0, min(1.0, rgb[0] / 255.0)),
                 max(0.0, min(1.0, rgb[1] / 255.0)),
                 max(0.0, min(1.0, rgb[2] / 255.0)),
-                ambient,
-                0.8,
+                1.0,
+                1.0,
                 max(0.0, min(1.0, spec)),
                 max(0.1, min(1.0, spec)),
                 max(0.0, min(1.0, transp)),
@@ -1393,6 +1479,7 @@ class InspectionOperations:
             ttype = (target_type or "part").strip().lower()
             readback = None
             overridden_by = []
+            replaced_appearance = None
             if ttype == "feature" and target_name:
                 feat = doc.FeatureByName(target_name)
                 if feat is None:
@@ -1411,6 +1498,7 @@ class InspectionOperations:
                 target_comp.MaterialPropertyValues = mat_arr
                 readback = get_attr_or_call(target_comp, "MaterialPropertyValues")
             else:
+                replaced_appearance = self._use_plain_colour_appearance(doc)
                 doc.MaterialPropertyValues = mat_arr
                 readback = get_attr_or_call(doc, "MaterialPropertyValues")
                 # Colours set on features/faces win over the part colour; say which ones do.
@@ -1441,6 +1529,9 @@ class InspectionOperations:
 
             msg = (f"Applied {'custom colour labelled ' if custom_label else 'appearance '}'{appearance_name}' "
                    f"(RGB={list(rgb)}, specular={spec:.2f}, transparency={transp:.2f}) to {ttype}")
+            if replaced_appearance:
+                msg += (f". The '{replaced_appearance}' appearance that came with the material was replaced by a "
+                        "plain colour appearance (the material itself is unchanged)")
             if overridden_by:
                 msg += (f". Note: feature colours on {', '.join(overridden_by[:6])}"
                         f"{'…' if len(overridden_by) > 6 else ''} override the part colour on their faces")

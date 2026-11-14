@@ -267,6 +267,81 @@ def _create_sketch(arguments: dict) -> Dict[str, Any]:
     )
 
 
+def _world_draw(build: Callable[[dict, Callable[[str], Optional[Tuple[float, float]]]], Dict[str, Any]]):
+    """
+    Wrap a draw handler so [x, y, z] world/model points (start, end, center, corner1, ...) are
+    converted to the active sketch's local x/y. A point off the sketch plane is an error.
+    """
+    def handler(arguments: dict) -> Dict[str, Any]:
+        def local(key: str) -> Optional[Tuple[float, float]]:
+            pt = arguments.get(key)
+            if pt is None:
+                return None
+            return sw_automation.world_point_to_sketch(pt, arguments.get("unit"))
+        try:
+            return build(arguments, local)
+        except ValueError as exc:
+            return sw_automation._result(False, str(exc), SwErrors.swInvalidInput)
+    return handler
+
+
+def _draw_line(a: dict, local) -> Dict[str, Any]:
+    s, e = local("start"), local("end")
+    if (s is None) != (e is None):
+        raise ValueError("draw_line: give both 'start' and 'end' world points, or neither.")
+    x1, y1 = s if s else (a.get("x1", 0), a.get("y1", 0))
+    x2, y2 = e if e else (a.get("x2", 100), a.get("y2", 0))
+    return sw_automation.draw_line(x1=x1, y1=y1, x2=x2, y2=y2, unit=a.get("unit"),
+                                   construction=a.get("construction", False))
+
+
+def _draw_circle(a: dict, local) -> Dict[str, Any]:
+    c = local("center")
+    x, y = c if c else (a.get("x", 0), a.get("y", 0))
+    return sw_automation.draw_circle(x=x, y=y, radius=a.get("radius", 25), unit=a.get("unit"))
+
+
+def _draw_rectangle(a: dict, local) -> Dict[str, Any]:
+    c1, c2 = local("corner1"), local("corner2")
+    if (c1 is None) != (c2 is None):
+        raise ValueError("draw_rectangle: give both 'corner1' and 'corner2' world points, or neither.")
+    x1, y1 = c1 if c1 else (a.get("x1", -50), a.get("y1", -25))
+    x2, y2 = c2 if c2 else (a.get("x2", 50), a.get("y2", 25))
+    return sw_automation.draw_rectangle(x1=x1, y1=y1, x2=x2, y2=y2, unit=a.get("unit"))
+
+
+def _draw_arc(a: dict, local) -> Dict[str, Any]:
+    pts = [local(k) for k in ("start", "mid", "end")]
+    if any(p is not None for p in pts):
+        if any(p is None for p in pts):
+            raise ValueError("draw_arc: the 3-point form needs 'start', 'mid' and 'end' world points.")
+        return sw_automation.draw_arc_3pt(start=pts[0], mid=pts[1], end=pts[2], unit=a.get("unit"))
+    c = local("center")
+    cx, cy = c if c else (a.get("cx", 0), a.get("cy", 0))
+    return sw_automation.draw_arc_center(cx=cx, cy=cy, radius=a.get("radius", 25),
+                                         start_angle=a.get("start_angle", 0), end_angle=a.get("end_angle", 90),
+                                         unit=a.get("unit"))
+
+
+def _draw_polygon(a: dict, local) -> Dict[str, Any]:
+    c = local("center")
+    cx, cy = c if c else (a.get("cx", 0), a.get("cy", 0))
+    return sw_automation.draw_polygon(cx=cx, cy=cy, radius=a.get("radius", 25), sides=a.get("sides", 6),
+                                      unit=a.get("unit"), rotation=a.get("rotation", 0.0),
+                                      flats=a.get("flats", False))
+
+
+def _draw_closed_profile(a: dict, local) -> Dict[str, Any]:
+    wpts = a.get("world_points")
+    if wpts:
+        if a.get("points"):
+            raise ValueError("draw_closed_profile: give 'points' (sketch x/y) or 'world_points', not both.")
+        pts = [list(sw_automation.world_point_to_sketch(p, a.get("unit"))) for p in wpts]
+    else:
+        pts = a.get("points", [])
+    return sw_automation.draw_closed_profile(points=pts, unit=a.get("unit"))
+
+
 def _select_entity(arguments: dict) -> Dict[str, Any]:
     return sw_automation.select_entity(
         target_type=arguments.get("target_type", "face"),
@@ -718,11 +793,11 @@ _TOOL_HANDLERS: Dict[str, Callable[[dict], Dict[str, Any]]] = {
     'list_open_documents': _auto('list_open_documents'),
     'manage_configuration': _auto('manage_configuration', ('action', 'list'), 'name', 'new_name', 'description', 'comment'),
     'manage_custom_properties': _auto('manage_custom_properties', ('action', 'list'), 'name', 'value', ('property_type', 'text'), ('configuration', '')),
-    'draw_line': _auto('draw_line', ('x1', 0), ('y1', 0), ('x2', 100), ('y2', 0), 'unit', ('construction', False)),
-    'draw_circle': _auto('draw_circle', ('x', 0), ('y', 0), ('radius', 25), 'unit'),
-    'draw_rectangle': _auto('draw_rectangle', ('x1', -50), ('y1', -25), ('x2', 50), ('y2', 25), 'unit'),
-    'draw_arc': _auto('draw_arc_center', ('cx', 0), ('cy', 0), ('radius', 25), ('start_angle', 0), ('end_angle', 90), 'unit'),
-    'draw_polygon': _auto('draw_polygon', ('cx', 0), ('cy', 0), ('radius', 25), ('sides', 6), 'unit'),
+    'draw_line': _world_draw(_draw_line),
+    'draw_circle': _world_draw(_draw_circle),
+    'draw_rectangle': _world_draw(_draw_rectangle),
+    'draw_arc': _world_draw(_draw_arc),
+    'draw_polygon': _world_draw(_draw_polygon),
     'draw_text': _auto('draw_text', ('text', ''), ('x', 0.0), ('y', 0.0), ('height', 12.0), ('font_name', 'Segoe UI'), ('bold', True), ('italic', False), ('angle', 0.0), ('center', False), 'unit'),
     'extrude_sketch': _auto('extrude_sketch', ('depth', 10), ('both_directions', False), ('reverse_dir', False), 'unit'),
     'cut_extrude': _auto('cut_extrude', ('depth', 10), ('through_all', False), ('both_directions', False), 'unit', 'reverse_dir'),
@@ -732,12 +807,12 @@ _TOOL_HANDLERS: Dict[str, Callable[[dict], Dict[str, Any]]] = {
     'set_dimension': _auto('set_dimension', 'name', 'value', 'units', ('config_scope', 'this_configuration')),
     'manage_feature': _auto('manage_feature', ('action', 'suppress'), ('feature_name', ''), 'new_name', 'target_feature', ('move_location', 'after'), ('delete_absorbed', True), ('delete_children', False), ('config_scope', 1), 'color_rgb'),
     'revolve_sketch': _auto('revolve_sketch', ('angle', 360.0), ('reverse_dir', False), ('is_thin', False), ('thin_thickness', 1.0), ('is_cut', False), 'axis_name', 'unit'),
-    'create_shell': _auto('create_shell', ('thickness', 1.0), ('outward', False), 'unit'),
-    'create_pattern': _auto('create_pattern', ('pattern_type', 'linear'), 'feature_name', ('num1', 2), ('spacing1', 10.0), ('flip_dir1', False), ('num2', 1), ('spacing2', 0.0), ('flip_dir2', False), ('angle', 360.0), ('equal_spacing', True), 'unit'),
+    'create_shell': _auto('create_shell', ('thickness', 1.0), ('outward', False), 'unit', 'face_indices', ('body_index', 1)),
+    'create_pattern': _auto('create_pattern', ('pattern_type', 'linear'), 'feature_name', ('num1', 2), ('spacing1', 10.0), ('flip_dir1', False), ('num2', 1), ('spacing2', 0.0), ('flip_dir2', False), ('angle', 360.0), ('equal_spacing', True), 'unit', 'direction1', 'direction2', 'mirror_plane'),
     'create_hole_wizard': _auto('create_hole_wizard', ('hole_type', 'counterbore'), ('standard', 'ISO'), ('fastener_type', 'Hex Bolt'), ('size', 'M6'), ('end_condition', 'through_all'), 'depth', 'diameter', 'unit'),
     'inspect_model': _auto('inspect_model'),
     'verify_model': _auto('verify_model', 'expected_dx', 'expected_dy', 'expected_dz', ('expected_bodies', 1), ('tolerance_mm', 0.2)),
-    'add_component': _auto('add_component', ('component_path', ''), ('x', 0.0), ('y', 0.0), ('z', 0.0), 'unit'),
+    'add_component': _auto('add_component', ('component_path', ''), ('x', 0.0), ('y', 0.0), ('z', 0.0), 'unit', 'rotation_deg', 'fixed'),
     'add_mate': _auto('add_mate', ('mate_type', 'coincident'), ('entity1', ''), ('entity2', ''), 'comp1', 'comp2', ('align', 0), ('flip', False), ('distance', 0.0), ('angle', 0.0), 'min_limit', 'max_limit', 'unit', ('use_selection', False)),
     'check_interference': _auto('check_interference', ('treat_coincidence_as_interference', False)),
     'list_components': _auto('list_components'),
@@ -757,7 +832,7 @@ _TOOL_HANDLERS: Dict[str, Callable[[dict], Dict[str, Any]]] = {
     'dismiss_dialog': _auto('dismiss_dialog', 'hwnd', ('action', 'OK'), ('force_close', False)),
     'load_addin': _auto('load_addin', ('name_or_path', 'name', '')),
     'inspect_rebuild_errors': _auto('inspect_rebuild_errors'),
-    'draw_closed_profile': _auto('draw_closed_profile', ('points', []), 'unit'),
+    'draw_closed_profile': _world_draw(_draw_closed_profile),
     'hole_linear': _auto('hole_linear', ('face_axis', 'z'), ('face_value', 0.0), ('ref1_axis', 'x'), ('ref1_value', 0.0), ('dist1', 5.0), ('ref2_axis', 'y'), ('ref2_value', 0.0), ('dist2', 5.0), ('diameter', 5.5), ('depth', 0.0), ('tapped', False), ('cbore_diameter', 0.0), ('cbore_depth', 0.0)),
     'set_sheet_metal_thickness': _auto('set_sheet_metal_thickness', ('thickness_mm', 1.5), 'bend_radius_mm', ('k_factor', 0.5)),
     'sheet_metal_face': _auto('sheet_metal_face', 'thickness_mm', 'bend_radius_mm', ('reverse_dir', False), 'depth', ('both_directions', False), ('reverse_extrude', False)),
@@ -953,8 +1028,18 @@ def _execute_tool_on_sta(name: str, arguments: dict) -> Tuple[Dict[str, Any], Op
     return result, sw_ver, act_doc, tid
 
 
-def get_tool_timeout(tool_name: str, cfg: Any) -> float:
-    """Get per-operation timeout based on configuration."""
+_NEUTRAL_EXTS = (".step", ".stp", ".iges", ".igs", ".x_t", ".x_b", ".sat", ".stl")
+
+
+def get_tool_timeout(tool_name: str, cfg: Any, arguments: Optional[dict] = None) -> float:
+    """Get per-operation timeout based on configuration (and, for file tools, on the file)."""
+    if tool_name in ("open_document", "add_component") and arguments:
+        path = str(arguments.get("filepath") or arguments.get("component_path") or "")
+        if path.lower().endswith(_NEUTRAL_EXTS):
+            # Translating a multi-megabyte STEP assembly takes minutes.
+            return float(getattr(cfg, "import_timeout", 900.0))
+        if tool_name == "add_component":
+            return float(getattr(cfg, "open_save_timeout", 120.0)) * 2
     if tool_name in (
         "open_document",
         "save_document",
@@ -1026,7 +1111,7 @@ async def call_tool(
             act_doc = None
             tid = new_worker.thread_id
         else:
-            timeout = get_tool_timeout(name, cfg)
+            timeout = get_tool_timeout(name, cfg, arguments)
             watchdog_timeout = float(getattr(cfg, "watchdog_timeout", 4.0))
             sta = get_sta_worker()
             result, sw_ver, act_doc, tid = await sta.run_async(
@@ -1657,12 +1742,28 @@ def _list_features_fixed() -> Dict:
             except Exception:
                 break
         
+        # One line per feature; the empty system folders every document has are only counted.
+        system_types = {
+            "CommentsFolder", "FavoriteFolder", "HistoryFolder", "SelectionSetFolder", "SensorFolder",
+            "DocsFolder", "DetailCabinet", "InkMarkupFolder", "SurfaceBodyFolder", "SolidBodyFolder",
+            "EnvFolder", "EqnFolder", "ConfigTableFolder", "AmbientLight", "DirectionLight",
+        }
+        shown = [f for f in features
+                 if f["type"] not in system_types and f.get("parent") not in ("Lights and Cameras",)]
+        lines = []
+        for f in shown:
+            line = f"{'  ' if f.get('parent') else ''}{f['name']} [{f['type']}]"
+            if f.get("suppressed"):
+                line += " (suppressed)"
+            lines.append(line)
+        hidden = len(features) - len(shown)
         return {
             "success": True,
-            "message": f"{len(features)} features found",
+            "message": f"{len(shown)} features (plus {hidden} standard system folders/lights not listed; "
+                       "indented = sub-feature of the one above):\n" + "\n".join(lines),
             "error_code": 0,
             "error_name": "swSuccess",
-            "data": {"features": features, "count": len(features)}
+            "data": {"count": len(shown), "system_features_hidden": hidden}
         }
         
     except Exception as e:

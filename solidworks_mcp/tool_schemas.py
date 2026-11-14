@@ -16,6 +16,12 @@ _NON_LENGTH_UNIT_TOOLS = {"add_study_load", "set_units", "drive_kinematic_motion
 _LENGTH_UNIT_HINT = "Length unit (mm, inch, m, cm). Defaults to the unit chosen with set_units (mm initially)."
 
 
+def _WORLD_POINT(description: str) -> Dict[str, Any]:
+    """Schema of a world/model point [x, y, z] accepted by the sketch draw tools."""
+    return {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3,
+            "description": description + ". Must lie on the active sketch plane (0.01 mm)."}
+
+
 def _build_tools() -> List[Tool]:
     tools = [
         # Connection Tools
@@ -51,11 +57,15 @@ def _build_tools() -> List[Tool]:
         ),
         Tool(
             name="open_document",
-            description="Open an existing SolidWorks document.",
+            description=(
+                "Open an existing SolidWorks document (.SLDPRT/.SLDASM/.SLDDRW), or import a STEP/IGES/Parasolid/"
+                "STL file as a new unsaved document (save it with save_document to keep a native copy). To put a "
+                "STEP file into an assembly, call add_component with the STEP path directly."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "filepath": {"type": "string", "description": "Path to file"}
+                    "filepath": {"type": "string", "description": "Path to the file"}
                 },
                 "required": ["filepath"]
             }
@@ -184,14 +194,20 @@ def _build_tools() -> List[Tool]:
         ),
         Tool(
             name="draw_line",
-            description="Draw a line in the active sketch.",
+            description=(
+                "Draw a line in the active sketch. Give sketch-local x1/y1/x2/y2, or world/model points "
+                "start/end as [x, y, z] (they must lie on the sketch plane; converted exactly, so no sign "
+                "mistakes on planes whose axes differ from world X/Y). The result reports the world end points."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "x1": {"type": "number", "default": 0, "description": "Start X"},
-                    "y1": {"type": "number", "default": 0, "description": "Start Y"},
-                    "x2": {"type": "number", "default": 100, "description": "End X"},
-                    "y2": {"type": "number", "default": 0, "description": "End Y"},
+                    "x1": {"type": "number", "default": 0, "description": "Start X (sketch-local)"},
+                    "y1": {"type": "number", "default": 0, "description": "Start Y (sketch-local)"},
+                    "x2": {"type": "number", "default": 100, "description": "End X (sketch-local)"},
+                    "y2": {"type": "number", "default": 0, "description": "End Y (sketch-local)"},
+                    "start": _WORLD_POINT("Start as a world point [x, y, z] instead of x1/y1"),
+                    "end": _WORLD_POINT("End as a world point [x, y, z] instead of x2/y2"),
                     "unit": {"type": "string", "description": "Unit (mm, inch, m)"},
                     "construction": {"type": "boolean", "default": False, "description": "Draw as construction geometry (centerline)"}
                 },
@@ -200,12 +216,16 @@ def _build_tools() -> List[Tool]:
         ),
         Tool(
             name="draw_circle",
-            description="Draw a circle in the active sketch.",
+            description=(
+                "Draw a circle in the active sketch. Centre as sketch-local x/y, or `center` as a world "
+                "point [x, y, z] on the sketch plane."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "x": {"type": "number", "default": 0, "description": "Center X"},
-                    "y": {"type": "number", "default": 0, "description": "Center Y"},
+                    "x": {"type": "number", "default": 0, "description": "Center X (sketch-local)"},
+                    "y": {"type": "number", "default": 0, "description": "Center Y (sketch-local)"},
+                    "center": _WORLD_POINT("Centre as a world point [x, y, z] instead of x/y"),
                     "radius": {"type": "number", "default": 25, "description": "Radius"},
                     "unit": {"type": "string", "description": "Unit (mm, inch, m)"}
                 },
@@ -214,14 +234,19 @@ def _build_tools() -> List[Tool]:
         ),
         Tool(
             name="draw_rectangle",
-            description="Draw a rectangle in the active sketch.",
+            description=(
+                "Draw a rectangle (sides along the sketch axes) in the active sketch. Opposite corners as "
+                "sketch-local x1/y1/x2/y2, or as world points corner1/corner2 [x, y, z] on the sketch plane."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "x1": {"type": "number", "default": -50, "description": "First corner X"},
-                    "y1": {"type": "number", "default": -25, "description": "First corner Y"},
-                    "x2": {"type": "number", "default": 50, "description": "Second corner X"},
-                    "y2": {"type": "number", "default": 25, "description": "Second corner Y"},
+                    "x1": {"type": "number", "default": -50, "description": "First corner X (sketch-local)"},
+                    "y1": {"type": "number", "default": -25, "description": "First corner Y (sketch-local)"},
+                    "x2": {"type": "number", "default": 50, "description": "Second corner X (sketch-local)"},
+                    "y2": {"type": "number", "default": 25, "description": "Second corner Y (sketch-local)"},
+                    "corner1": _WORLD_POINT("First corner as a world point [x, y, z] instead of x1/y1"),
+                    "corner2": _WORLD_POINT("Opposite corner as a world point [x, y, z] instead of x2/y2"),
                     "unit": {"type": "string", "description": "Unit (mm, inch, m)"}
                 },
                 "required": []
@@ -229,15 +254,24 @@ def _build_tools() -> List[Tool]:
         ),
         Tool(
             name="draw_arc",
-            description="Draw an arc by center and angles.",
+            description=(
+                "Draw an arc in the active sketch. Either centre + radius + angles (sketch-local, degrees "
+                "counter-clockwise from sketch +X as seen along the sketch normal; `center` may be a world "
+                "point), or three world points start/mid/end [x, y, z] on the sketch plane (arc from start "
+                "to end through mid; needs no knowledge of the sketch axes)."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "cx": {"type": "number", "default": 0, "description": "Center X"},
-                    "cy": {"type": "number", "default": 0, "description": "Center Y"},
+                    "cx": {"type": "number", "default": 0, "description": "Center X (sketch-local)"},
+                    "cy": {"type": "number", "default": 0, "description": "Center Y (sketch-local)"},
+                    "center": _WORLD_POINT("Centre as a world point [x, y, z] instead of cx/cy"),
                     "radius": {"type": "number", "default": 25, "description": "Radius"},
                     "start_angle": {"type": "number", "default": 0, "description": "Start angle (degrees)"},
                     "end_angle": {"type": "number", "default": 90, "description": "End angle (degrees)"},
+                    "start": _WORLD_POINT("3-point form: arc start as a world point [x, y, z]"),
+                    "mid": _WORLD_POINT("3-point form: any point on the arc between start and end, world [x, y, z]"),
+                    "end": _WORLD_POINT("3-point form: arc end as a world point [x, y, z]"),
                     "unit": {"type": "string", "description": "Unit for radius"}
                 },
                 "required": []
@@ -245,14 +279,20 @@ def _build_tools() -> List[Tool]:
         ),
         Tool(
             name="draw_polygon",
-            description="Draw a regular polygon.",
+            description=(
+                "Draw a regular polygon (exact line segments) in the active sketch. `radius` is measured to "
+                "the vertices, or to the flats when flats=true (hexagon across-flats = 2 x radius)."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "cx": {"type": "number", "default": 0, "description": "Center X"},
-                    "cy": {"type": "number", "default": 0, "description": "Center Y"},
-                    "radius": {"type": "number", "default": 25, "description": "Radius"},
-                    "sides": {"type": "integer", "default": 6, "description": "Number of sides (3-100)"},
+                    "cx": {"type": "number", "default": 0, "description": "Center X (sketch-local)"},
+                    "cy": {"type": "number", "default": 0, "description": "Center Y (sketch-local)"},
+                    "center": _WORLD_POINT("Centre as a world point [x, y, z] instead of cx/cy"),
+                    "radius": {"type": "number", "default": 25, "description": "Radius to the vertices (or to the flats with flats=true)"},
+                    "sides": {"type": "integer", "default": 6, "minimum": 3, "maximum": 100, "description": "Number of sides (3-100)"},
+                    "flats": {"type": "boolean", "default": False, "description": "true: radius is the inscribed radius (centre to flat)"},
+                    "rotation": {"type": "number", "default": 0.0, "description": "Degrees from sketch +X to the first vertex (flats=true: to the first flat's normal)"},
                     "unit": {"type": "string", "description": "Unit"}
                 },
                 "required": []
@@ -455,11 +495,18 @@ def _build_tools() -> List[Tool]:
         ),
         Tool(
             name="create_shell",
-            description="Create a shell feature hollowing out the part with specified wall thickness (IModelDoc2.InsertFeatureShell).",
+            description=(
+                "Hollow the part to a wall thickness (shell). The faces to remove (open sides) are given by "
+                "face_indices (1-based, from list_topology kind='faces') or by the faces currently selected "
+                "with `select`."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "thickness": {"type": "number", "default": 1.0, "description": "Shell wall thickness"},
+                    "face_indices": {"type": "array", "items": {"type": "integer", "minimum": 1},
+                                     "description": "1-based indices (list_topology) of the faces to remove; replaces the current selection"},
+                    "body_index": {"type": "integer", "default": 1, "minimum": 1, "description": "Body that face_indices refer to"},
                     "outward": {"type": "boolean", "default": False, "description": "Shell outward from body"},
                     "unit": {"type": "string", "default": "mm", "enum": ["mm", "inch", "m", "cm"], "description": "Thickness unit"}
                 },
@@ -468,17 +515,31 @@ def _build_tools() -> List[Tool]:
         ),
         Tool(
             name="create_pattern",
-            description="Create a linear or circular pattern feature (IFeatureManager.FeatureLinearPattern4 / FeatureCircularPattern4).",
+            description=(
+                "Create a linear or circular pattern, or a mirror. Mirror (pattern_type='mirror'): mirror_plane "
+                "'Right' (flips X), 'Top' (flips Y), 'Front' (flips Z) or a plane name; with feature_name (one, or "
+                "several comma-separated) those features are mirrored, without it every solid body is mirrored and "
+                "merged; num1/spacing1 are ignored. Linear: pass direction1 (and direction2 for a "
+                "grid) as a world axis such as '+x' or '-z'; the instances are checked to run that way and the "
+                "pattern is flipped if not. Without direction1 the direction is the entity pre-selected with "
+                "select(..., mark=1), else an arbitrary straight edge (flip_dir1 then sets the side). Circular: "
+                "pre-select the axis (cylindrical face, edge or axis) or the largest cylindrical face is used."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "pattern_type": {
                         "type": "string",
                         "default": "linear",
-                        "enum": ["linear", "circular"],
+                        "enum": ["linear", "circular", "mirror"],
                         "description": "Pattern type"
                     },
-                    "feature_name": {"type": "string", "description": "Name of feature to pattern (seed feature)"},
+                    "feature_name": {"type": "string", "description": "Name of feature to pattern (seed feature); mirror: one or several comma-separated, or omit to mirror the bodies"},
+                    "mirror_plane": {"type": "string", "description": "mirror: 'Right', 'Top', 'Front' or the name of a reference plane"},
+                    "direction1": {"type": "string", "enum": ["x", "y", "z", "+x", "-x", "+y", "-y", "+z", "-z"],
+                                   "description": "linear: world axis (with sign) for direction 1"},
+                    "direction2": {"type": "string", "enum": ["x", "y", "z", "+x", "-x", "+y", "-y", "+z", "-z"],
+                                   "description": "linear: world axis (with sign) for direction 2 (needs num2 > 1)"},
                     "num1": {"type": "integer", "default": 2, "description": "Number of instances in direction 1 (including seed)"},
                     "spacing1": {"type": "number", "default": 10.0, "description": "Spacing in direction 1"},
                     "flip_dir1": {"type": "boolean", "default": False, "description": "Flip direction 1"},
@@ -489,7 +550,7 @@ def _build_tools() -> List[Tool]:
                     "equal_spacing": {"type": "boolean", "default": True, "description": "Equal spacing for circular pattern"},
                     "unit": {"type": "string", "default": "mm", "enum": ["mm", "inch", "m", "cm"], "description": "Length unit"}
                 },
-                "required": ["num1", "spacing1"]
+                "required": []
             }
         ),
         Tool(
@@ -763,14 +824,24 @@ def _build_tools() -> List[Tool]:
         # Assembly Tools (Phase 3)
         Tool(
             name="add_component",
-            description="Insert a component (part or subassembly) into the active assembly with 3D translation.",
+            description=(
+                "Insert a component (part or subassembly) into the active assembly with its ORIGIN at (x, y, z), "
+                "optionally rotated and fixed. For parts modelled in assembly/global coordinates use x=y=z=0 with "
+                "fixed=true. A STEP/IGES/Parasolid path (.step/.stp/.igs/.x_t ...) is imported once and a native "
+                ".SLDPRT/.SLDASM copy with the same name is saved next to it and reused on later calls (large "
+                "files can take minutes the first time). The result reports the origin, axes, fixed state and "
+                "the space the component occupies in the assembly."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "component_path": {"type": "string", "description": "Absolute or relative path to component model"},
-                    "x": {"type": "number", "default": 0.0, "description": "X coordinate"},
-                    "y": {"type": "number", "default": 0.0, "description": "Y coordinate"},
-                    "z": {"type": "number", "default": 0.0, "description": "Z coordinate"},
+                    "component_path": {"type": "string", "description": "Path to the component: .SLDPRT/.SLDASM, or a STEP/IGES/Parasolid file"},
+                    "x": {"type": "number", "default": 0.0, "description": "X of the component origin in the assembly"},
+                    "y": {"type": "number", "default": 0.0, "description": "Y of the component origin in the assembly"},
+                    "z": {"type": "number", "default": 0.0, "description": "Z of the component origin in the assembly"},
+                    "rotation_deg": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3,
+                                     "description": "[rx, ry, rz] degrees: rotate about the assembly X axis, then Y, then Z, through the component origin (right-hand rule)"},
+                    "fixed": {"type": "boolean", "description": "true = fix the component in place, false = leave it floating (for mates). Omitted: SolidWorks default (first component fixed), or fixed when rotation_deg is given"},
                     "unit": {"type": "string", "default": "mm", "enum": ["mm", "inch", "m", "cm"], "description": "Coordinate unit"}
                 },
                 "required": ["component_path"]
@@ -1214,7 +1285,10 @@ def _build_tools() -> List[Tool]:
         # lminventor Parity Tools: Sketch, Holes, Parameters, Compact Topology, Sheet Metal, Kinematics, Supervisor
         Tool(
             name="draw_closed_profile",
-            description="Draw a closed polygon/profile loop from a list of [x, y] points in a single call.",
+            description=(
+                "Draw a closed polygon/profile loop from a list of points in a single call: `points` as "
+                "sketch-local [x, y], or `world_points` as world/model [x, y, z] lying on the sketch plane."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -1227,7 +1301,18 @@ def _build_tools() -> List[Tool]:
                             "maxItems": 2
                         },
                         "minItems": 3,
-                        "description": "Ordered list of [x, y] coordinates forming a closed loop"
+                        "description": "Ordered list of sketch-local [x, y] coordinates forming a closed loop"
+                    },
+                    "world_points": {
+                        "type": "array",
+                        "items": {
+                            "type": "array",
+                            "items": {"type": "number"},
+                            "minItems": 3,
+                            "maxItems": 3
+                        },
+                        "minItems": 3,
+                        "description": "Alternative to points: ordered world [x, y, z] points on the sketch plane"
                     },
                     "unit": {
                         "type": "string",
@@ -1235,7 +1320,7 @@ def _build_tools() -> List[Tool]:
                         "description": "Coordinate unit (default: active unit, usually mm)"
                     }
                 },
-                "required": ["points"]
+                "required": []
             }
         ),
         Tool(

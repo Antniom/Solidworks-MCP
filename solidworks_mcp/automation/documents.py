@@ -204,6 +204,82 @@ class DocumentOperations:
             logger.error(f"Create drawing error: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Error: {e}", SwErrors.swFileLoadError)
     
+    NEUTRAL_IMPORT_EXTENSIONS = {".step", ".stp", ".stl", ".iges", ".igs", ".x_t", ".x_b", ".sat"}
+
+    def _import_neutral_file(self, filepath: str):
+        """
+        Import a STEP/IGES/Parasolid/... file as a new unsaved document (ISldWorks.LoadFile4).
+        Returns (doc, None) or (None, error message).
+        """
+        import_data = None
+        try:
+            import_data = self._sw_app.GetImportFileData(filepath)
+        except Exception as ex:
+            logger.debug(f"GetImportFileData failed: {ex}")
+        if import_data is None:
+            import_data = win32com.client.VARIANT(pythoncom.VT_DISPATCH, None)
+        errors = byref_int(0)
+        try:
+            doc = self._sw_app.LoadFile4(filepath, "r", import_data, errors)
+        except Exception as ex:
+            return None, f"Import of '{filepath}' failed: {ex}"
+        if doc is None:
+            code = int(getattr(errors, "value", 0) or 0)
+            hint = ""
+            try:
+                with open(filepath, "r", errors="ignore") as fh:
+                    head = fh.read(400000)
+                if "GEOMETRICALLY_BOUNDED_WIREFRAME" in head and "MANIFOLD_SOLID_BREP" not in head \
+                        and "ADVANCED_FACE" not in head:
+                    hint = (" The file contains only wireframe curves (no solid or surface bodies), so there "
+                            "is nothing SolidWorks can import as a part.")
+            except Exception:
+                pass
+            return None, (
+                f"SolidWorks could not import '{os.path.basename(filepath)}' (LoadFile4 error {code}"
+                f"{' = swGenericError' if code == 1 else ''}): the translator read no usable geometry.{hint}")
+        return doc, None
+
+    def native_copy_of_neutral_file(self, filepath: str) -> Dict:
+        """
+        Make (or reuse) a native .SLDPRT/.SLDASM copy of a STEP/IGES/... file, saved next to it with
+        the same base name. Returns a result whose data has native_path, created and type.
+        """
+        folder, base = os.path.split(filepath)
+        stem = os.path.splitext(base)[0]
+        for ext in (".SLDPRT", ".SLDASM"):
+            cand = os.path.join(folder, stem + ext)
+            if os.path.exists(cand) and os.path.getmtime(cand) >= os.path.getmtime(filepath):
+                return self._result(True, f"Using existing native copy '{cand}'", SwErrors.swSuccess,
+                                    {"native_path": cand, "created": False,
+                                     "type": "Assembly" if ext == ".SLDASM" else "Part"})
+        doc, import_err = self._import_neutral_file(filepath)
+        if doc is None:
+            return self._result(False, import_err, SwErrors.swFileLoadError)
+        dtype = self.get_document_type(doc)
+        native = os.path.join(folder, stem + (".SLDASM" if dtype == "Assembly" else ".SLDPRT"))
+        errors = byref_int(0)
+        warnings = byref_int(0)
+        ok = False
+        detail = ""
+        try:
+            null = win32com.client.VARIANT(pythoncom.VT_DISPATCH, None)
+            ok = bool(doc.Extension.SaveAs3(native, 0, 1, null, null, errors, warnings))  # 1 = silent
+        except Exception as ex:
+            detail = str(ex)
+            try:
+                ok = bool(doc.SaveAs3(native, 0, 1) == 0) and os.path.exists(native)
+            except Exception as ex2:
+                detail += f"; {ex2}"
+        if not ok or not os.path.exists(native):
+            return self._result(
+                False,
+                f"Imported '{base}' but could not save the native copy '{native}' "
+                f"(errors={getattr(errors, 'value', '?')}). {detail}".strip(),
+                SwErrors.swFileSaveError)
+        return self._result(True, f"Imported '{base}' and saved native copy '{native}'", SwErrors.swSuccess,
+                            {"native_path": native, "created": True, "type": dtype})
+
     def open_document(self, filepath: str) -> Dict:
         """
         Open an existing document
@@ -235,22 +311,22 @@ class DocumentOperations:
             
             # Determine document type from extension
             ext = os.path.splitext(filepath)[1].lower()
-            import_extensions = {".step", ".stp", ".stl", ".iges", ".igs", ".x_t", ".x_b"}
-            
+
             doc = None
-            if ext in import_extensions:
-                # Use LoadFile4 with import data to suppress modal dialogs (B6)
-                try:
-                    import_data = None
-                    try:
-                        import_data = self._sw_app.GetImportFileData(filepath)
-                    except Exception as ex:
-                        logger.debug(f"GetImportFileData failed: {ex}")
-                    
-                    errors = byref_int(0)
-                    doc = self._sw_app.LoadFile4(filepath, "", import_data, errors)
-                except Exception as ex:
-                    logger.debug(f"LoadFile4 failed: {ex}")
+            if ext in self.NEUTRAL_IMPORT_EXTENSIONS:
+                doc, import_err = self._import_neutral_file(filepath)
+                if doc is None:
+                    # OpenDoc6 cannot read these formats; falling back to it only hid the real reason.
+                    return self._result(False, import_err, SwErrors.swFileLoadError)
+                title = self._get_doc_title(doc)
+                dtype = self.get_document_type(doc)
+                native_ext = ".SLDASM" if dtype == "Assembly" else ".SLDPRT"
+                return self._result(
+                    True,
+                    f"Imported {ext} file as a new unsaved {dtype} '{title}'. It has no file yet: call "
+                    f"save_document with a {native_ext} path to keep a native copy.",
+                    SwErrors.swSuccess,
+                    {"name": title, "path": filepath, "imported": True, "type": dtype, "saved": False})
 
             if doc is None:
                 type_map = {

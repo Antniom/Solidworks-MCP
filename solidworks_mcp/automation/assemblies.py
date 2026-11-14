@@ -43,15 +43,20 @@ class AssemblyOperations:
         y: float = 0.0,
         z: float = 0.0,
         unit: str = "mm",
+        rotation_deg: Optional[List[float]] = None,
+        fixed: Optional[bool] = None,
     ) -> Dict:
         """
-        Insert a component (part or subassembly) into the active assembly.
-        Pre-loads the referenced document to ensure reliable AddComponent4 resolution.
+        Insert a component (part or subassembly) into the active assembly so that its origin lands on
+        (x, y, z), optionally rotated (rotation_deg = [rx, ry, rz] about the assembly X, then Y, then Z
+        axes, through the component origin) and fixed in place.
+        STEP/IGES/Parasolid files are imported once to a native copy saved next to them.
         """
         try:
             doc, err = self.get_active_doc()
             if err:
                 return err
+            import_note = ""
 
             doc_type_active = get_attr_or_call(doc, "GetType")
             if doc_type_active != SwDocumentTypes.swDocASSEMBLY:
@@ -70,6 +75,29 @@ class AssemblyOperations:
                     SwErrors.swFileNotFoundError,
                 )
             component_path = canonical
+
+            if rotation_deg is not None and (not isinstance(rotation_deg, (list, tuple)) or len(rotation_deg) != 3):
+                return self._result(False, "rotation_deg must be [rx, ry, rz] in degrees.", SwErrors.swInvalidInput)
+
+            # Neutral formats cannot be inserted directly: import once to a native copy next to the file.
+            if os.path.splitext(component_path)[1].lower() in self.NEUTRAL_IMPORT_EXTENSIONS:
+                asm_title = get_attr_or_call(doc, "GetTitle")
+                conv = self.native_copy_of_neutral_file(component_path)
+                try:
+                    self._sw_app.ActivateDoc3(asm_title, False, 2, byref_int(0))
+                except Exception:
+                    pass
+                if not conv.get("success"):
+                    return conv
+                import_note = (f" (imported from {os.path.basename(component_path)}; native copy "
+                               f"{'created' if conv['data']['created'] else 'reused'}: {conv['data']['native_path']})")
+                component_path = conv["data"]["native_path"]
+                doc, err = self.get_active_doc()
+                if err:
+                    return err
+                if get_attr_or_call(doc, "GetType") != SwDocumentTypes.swDocASSEMBLY:
+                    return self._result(False, "The assembly is no longer the active document after the import.",
+                                        SwErrors.swInvalidDocumentType)
 
             # Convert translation to meters
             x_m = self._units.to_meters(x, unit)
@@ -127,38 +155,138 @@ class AssemblyOperations:
 
             comp_name = comp.Name2
 
-            # Verify the component origin landed on the requested point.
+            import math
+
+            def is_fixed() -> Optional[bool]:
+                try:
+                    return bool(get_attr_or_call(comp, "IsFixed"))
+                except Exception:
+                    return None
+
+            def set_fixed(want: bool) -> None:
+                if is_fixed() == want:
+                    return
+                doc.ClearSelection2(True)
+                comp.Select2(False, 0)
+                if want:
+                    doc.FixComponent()
+                else:
+                    doc.UnfixComponent()
+                doc.ClearSelection2(True)
+
+            # Exact pose: rotation about assembly X, then Y, then Z, through the component origin.
+            rot = [float(v) for v in (rotation_deg or [0.0, 0.0, 0.0])]
+            want_fixed = fixed if fixed is not None else (True if any(abs(v) > 1e-12 for v in rot) else None)
+            pose_err = None
+            arr = None
+            try:
+                rx, ry, rz = (math.radians(v) for v in rot)
+                cx_, sx_, cy_, sy_, cz_, sz_ = math.cos(rx), math.sin(rx), math.cos(ry), math.sin(ry), math.cos(rz), math.sin(rz)
+                # R = Rz * Ry * Rx (column-vector convention)
+                R = [
+                    [cz_ * cy_, cz_ * sy_ * sx_ - sz_ * cx_, cz_ * sy_ * cx_ + sz_ * sx_],
+                    [sz_ * cy_, sz_ * sy_ * sx_ + cz_ * cx_, sz_ * sy_ * cx_ - cz_ * sx_],
+                    [-sy_, cy_ * sx_, cy_ * cx_],
+                ]
+                # SolidWorks stores the transposed rotation (rows = images of the component axes).
+                arr = [R[0][0], R[1][0], R[2][0], R[0][1], R[1][1], R[2][1], R[0][2], R[1][2], R[2][2],
+                       x_m, y_m, z_m, 1.0, 0.0, 0.0, 0.0]
+                import pythoncom
+                import win32com.client
+                # Edit the component's own transform in place: creating a MathTransform through
+                # IMathUtility fails under late binding ("Member not found").
+                was_fixed = is_fixed()
+                if was_fixed:
+                    set_fixed(False)
+                xf = get_attr_or_call(comp, "Transform2")
+                xf.ArrayData = win32com.client.VARIANT(pythoncom.VT_ARRAY | pythoncom.VT_R8, arr)
+                try:
+                    comp.Transform2 = xf
+                except Exception:
+                    comp.SetTransformAndSolve2(xf)
+                if want_fixed is None:
+                    if was_fixed:
+                        set_fixed(True)
+                else:
+                    set_fixed(bool(want_fixed))
+                get_attr_or_call(doc, "EditRebuild3")
+            except Exception as pose_ex:
+                pose_err = str(pose_ex)
+                logger.warning(f"add_component: could not set pose of '{comp_name}': {pose_ex}")
+
+            # Verify the component origin (and axes) landed where requested.
             origin_mm = None
+            axes = None
             try:
                 got = get_attr_or_call(get_attr_or_call(comp, "Transform2"), "ArrayData")
                 origin_mm = [round(float(got[i]) * 1000.0, 3) for i in (9, 10, 11)]
+                axes = {"x": [round(float(got[i]), 6) + 0.0 for i in (0, 1, 2)],
+                        "y": [round(float(got[i]), 6) + 0.0 for i in (3, 4, 5)],
+                        "z": [round(float(got[i]), 6) + 0.0 for i in (6, 7, 8)]}
             except Exception:
                 origin_mm = None
             target_mm = [round(x_m * 1000.0, 3), round(y_m * 1000.0, 3), round(z_m * 1000.0, 3)]
-            if origin_mm is None or any(abs(a - b) > 0.01 for a, b in zip(origin_mm, target_mm)):
+            box_mm = None
+            try:
+                bx = get_attr_or_call(comp, "GetBox", False, False)
+                if bx and len(bx) >= 6:
+                    box_mm = {"min": [round(float(v) * 1000.0, 3) for v in bx[:3]],
+                              "max": [round(float(v) * 1000.0, 3) for v in bx[3:6]]}
+            except Exception:
+                pass
+            data = {"name": comp_name, "path": component_path, "origin_mm": origin_mm, "requested_mm": target_mm,
+                    "rotation_deg": rot, "component_axes_in_assembly": axes, "fixed": is_fixed(),
+                    "bbox_in_assembly_mm": box_mm, "position_m": [x_m, y_m, z_m], "unit": unit, "inserted": True}
+            wrong_rot = False
+            if pose_err and any(abs(v) > 1e-12 for v in rot):
+                wrong_rot = True
+            elif axes is not None and arr is not None and any(abs(v) > 1e-12 for v in rot):
+                want_rows = [arr[0:3], arr[3:6], arr[6:9]]
+                got_rows = [axes["x"], axes["y"], axes["z"]]
+                wrong_rot = any(abs(a - b) > 1e-5 for wr, gr in zip(want_rows, got_rows) for a, b in zip(wr, gr))
+            if origin_mm is None or any(abs(a - b) > 0.01 for a, b in zip(origin_mm, target_mm)) or wrong_rot:
                 # Report but keep the component (it was inserted); include where it actually is.
                 return self._result(
                     False,
-                    f"Component '{comp_name}' was inserted, but its origin is at {origin_mm} mm, not at the "
-                    f"requested {target_mm} mm. It is still in the assembly.",
+                    f"Component '{comp_name}' was inserted{import_note}, but its pose is not the requested one: "
+                    f"origin at {origin_mm} mm (requested {target_mm} mm), axes {axes}"
+                    + (f"; pose error: {pose_err}" if pose_err else "") + ". It is still in the assembly.",
                     SwErrors.swGeneralError,
-                    {"name": comp_name, "origin_mm": origin_mm, "requested_mm": target_mm, "inserted": True},
+                    data,
                 )
 
-            return self._result(
-                True,
-                f"Component '{comp_name}' inserted into assembly",
-                SwErrors.swSuccess,
-                {
-                    "name": comp_name,
-                    "path": component_path,
-                    "position_m": [x_m, y_m, z_m],
-                    "unit": unit,
-                },
-            )
+            msg = f"Component '{comp_name}' inserted with its origin at {origin_mm} mm"
+            if any(abs(v) > 1e-12 for v in rot):
+                msg += f", rotated {rot} deg (X, then Y, then Z)"
+            msg += f", {'fixed' if data['fixed'] else 'floating'}"
+            if box_mm:
+                msg += (f"; occupies X {box_mm['min'][0]}..{box_mm['max'][0]}, Y {box_mm['min'][1]}..{box_mm['max'][1]}, "
+                        f"Z {box_mm['min'][2]}..{box_mm['max'][2]} mm")
+            return self._result(True, msg + import_note, SwErrors.swSuccess, data)
         except Exception as e:
             logger.error(f"add_component error: {e}")
             return self._result(False, f"Add component error: {e}", SwErrors.swGeneralError)
+
+    @staticmethod
+    def _component_poses(doc) -> Dict[str, Any]:
+        """name -> (origin_mm, bbox in assembly space) of every top-level component."""
+        poses: Dict[str, Any] = {}
+        try:
+            for c in (doc.GetComponents(True) or ()):
+                try:
+                    a = get_attr_or_call(get_attr_or_call(c, "Transform2"), "ArrayData")
+                    origin = [round(float(a[i]) * 1000.0, 3) for i in (9, 10, 11)]
+                    box = None
+                    bx = get_attr_or_call(c, "GetBox", False, False)
+                    if bx and len(bx) >= 6:
+                        box = {"min": [round(float(v) * 1000.0, 3) for v in bx[:3]],
+                               "max": [round(float(v) * 1000.0, 3) for v in bx[3:6]]}
+                    poses[str(c.Name2)] = (origin, box)
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        return poses
 
     def add_mate(
         self,
@@ -316,6 +444,7 @@ class AssemblyOperations:
 
             # Capture pre-state for post-condition verification (F3)
             pre_state = capture_pre_mutation_state(doc)
+            poses_before = self._component_poses(doc)
 
             mate_err = byref_int(0)
             mate_feat = doc.AddMate3(
@@ -371,15 +500,38 @@ class AssemblyOperations:
                 )
 
             mate_name = mate_feat.Name if hasattr(mate_feat, "Name") else "Mate"
+            # Say where the mate put things: a distance/angle mate can solve to either side.
+            moved = []
+            poses_after = self._component_poses(doc)
+            for cname, (o_after, box_after) in poses_after.items():
+                o_before = (poses_before.get(cname) or (None, None))[0]
+                if o_before is None or any(abs(a - b) > 1e-3 for a, b in zip(o_before, o_after)) or \
+                        (poses_before[cname][1] != box_after):
+                    moved.append({"name": cname, "origin_before_mm": o_before, "origin_after_mm": o_after,
+                                  "bbox_in_assembly_mm": box_after})
+            msg = f"Created {mate_type} mate '{mate_name}'"
+            if moved:
+                parts = []
+                for m in moved[:4]:
+                    b = m["bbox_in_assembly_mm"]
+                    where = (f", now occupies X {b['min'][0]}..{b['max'][0]}, Y {b['min'][1]}..{b['max'][1]}, "
+                             f"Z {b['min'][2]}..{b['max'][2]} mm") if b else ""
+                    parts.append(f"{m['name']} moved: origin {m['origin_before_mm']} -> {m['origin_after_mm']} mm{where}")
+                msg += ". " + "; ".join(parts)
+                if mate_type_lower in ("distance", "angle"):
+                    msg += ". If it solved to the wrong side, delete the mate and re-create it with flip=true"
+            else:
+                msg += " (no component moved)"
             return self._result(
                 True,
-                f"Created {mate_type} mate '{mate_name}'",
+                msg,
                 SwErrors.swSuccess,
                 {
                     "mate_name": mate_name,
                     "mate_type": mate_type,
                     "align": align,
                     "flip": flip,
+                    "moved_components": moved,
                 },
             )
         except Exception as e:
