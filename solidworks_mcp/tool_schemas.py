@@ -1424,8 +1424,17 @@ def _build_tools() -> List[Tool]:
         Tool(
             name="flange",
             description=(
-                "Add a 90-degree wall of height 'distance' (mm) on 1-based edge_indices, built as a thickness-wide extruded "
-                "wall (no bend region, no flat-pattern bend). Each wall's added volume is verified; other angles are rejected."
+                "Add a real sheet-metal Edge-Flange (bend with the sheet's bend radius, unfolds in the flat pattern) "
+                "on straight edges of a sheet-metal part, given by 1-based edge_indices from list_topology kind='edges'. "
+                "The wall rises from the sheet face the picked edge belongs to, along that face's normal: pick the edge "
+                "on the top face to bend up, the edge on the bottom face to bend down. 'distance' is the height from "
+                "that face to the wall's end (inner virtual sharp). `position` sets where the wall sits relative to the "
+                "original edge: material_inside (wall's outer face flush with the old edge, overall size unchanged), "
+                "material_outside (inner face at the old edge) or bend_outside (bend starts at the old edge). The result "
+                "reports the part's bounding box before and after and the flat-pattern size: check them. One feature per "
+                "edge; a flange trims the sheet at its ends, so list the edges again before flanging a neighbouring edge. "
+                "plain_wall=true instead extrudes a thickness-wide 90-degree wall with a square corner and no bend (not "
+                "in the flat pattern), from the edge toward the inside of the adjacent large face. No hem or miter tool yet."
             ),
             inputSchema={
                 "type": "object",
@@ -1436,7 +1445,10 @@ def _build_tools() -> List[Tool]:
                         "description": "1-based edge indices on body"
                     },
                     "distance": {"type": "number", "default": 25.0, "description": "Flange height in mm"},
-                    "angle": {"type": "number", "default": 90.0, "description": "Bend angle in degrees"},
+                    "angle": {"type": "number", "default": 90.0, "description": "Bend angle in degrees (plain_wall: 90 only)"},
+                    "position": {"type": "string", "enum": ["material_inside", "material_outside", "bend_outside"],
+                                 "default": "material_inside", "description": "Where the flange sits relative to the original edge"},
+                    "plain_wall": {"type": "boolean", "default": False, "description": "true = simple extruded wall without a bend instead of a sheet-metal edge flange"},
                     "body_index": {"type": "integer", "default": 1, "minimum": 1, "description": "1-based body index"}
                 },
                 "required": ["edge_indices"]

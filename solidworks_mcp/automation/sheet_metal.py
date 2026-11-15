@@ -11,6 +11,9 @@ import logging
 import traceback
 from typing import Any, Dict, List, Optional
 
+import pythoncom
+import win32com.client
+
 from ..constants import SwErrors
 from ..core.com_compat import get_attr_or_call, null_dispatch
 from ..core.post_conditions import (
@@ -479,23 +482,203 @@ class SheetMetalOperations:
             logger.debug(f"_plate_side failed: {e}")
             return None
 
+    def _edge_flange(self, doc, edge_indices, height_mm: float, angle_deg: float, body_index: int,
+                     position: str) -> Dict[str, Any]:
+        """
+        Real sheet-metal edge flange(s): IModelDoc2.InsertSketchForEdgeFlange + a closed rectangular
+        profile + IFeatureManager.InsertSheetMetalEdgeFlange2 (typed SAFEARRAYs of the edge and the
+        sketch feature). An open 3-line profile creates a feature that adds no material, and untyped
+        arrays make the call return nothing: both were why this "never worked" before (MCP-005/022).
+        """
+        from ..core.com_compat import transform_point
+        pos_map = {"material_inside": 1, "material_outside": 2, "bend_outside": 3}
+        pos_key = str(position or "material_inside").strip().lower()
+        if pos_key not in pos_map:
+            return self._result(False, f"position must be one of {list(pos_map)}.", SwErrors.swInvalidParameter)
+        if not (0.0 < angle_deg < 180.0):
+            return self._result(False, "angle must be between 0 and 180 degrees.", SwErrors.swInvalidParameter)
+        if height_mm <= 0:
+            return self._result(False, "distance (flange height) must be greater than 0.", SwErrors.swInvalidParameter)
+
+        def body_edges():
+            cur = get_attr_or_call(doc, "GetBodies2", 0, False) or []
+            if not cur or body_index < 1 or body_index > len(cur):
+                return []
+            return list(get_attr_or_call(cur[body_index - 1], "GetEdges") or [])
+
+        def ends(e):
+            a = get_attr_or_call(get_attr_or_call(e, "GetStartVertex"), "GetPoint")
+            b = get_attr_or_call(get_attr_or_call(e, "GetEndVertex"), "GetPoint")
+            return (tuple(a[:3]), tuple(b[:3])) if a and b else None
+
+        def bbox_mm():
+            try:
+                b = doc.GetPartBox(True)
+                return {"min": [round(v * 1000.0, 3) for v in b[:3]], "max": [round(v * 1000.0, 3) for v in b[3:6]]}
+            except Exception:
+                return None
+
+        edges = body_edges()
+        if not edges:
+            return self._result(False, "No solid body found for flange.", SwErrors.swInvalidParameter)
+        targets = []
+        for e_idx in edge_indices:
+            if e_idx < 1 or e_idx > len(edges):
+                return self._result(False, f"edge_index={e_idx} out of range (1..{len(edges)})",
+                                    SwErrors.swInvalidParameter)
+            pts = ends(edges[e_idx - 1])
+            if not pts:
+                return self._result(False, f"edge_index={e_idx} is not a straight edge with two vertices.",
+                                    SwErrors.swInvalidParameter)
+            targets.append((e_idx, pts[0], pts[1]))
+
+        V = win32com.client.VARIANT
+        vol_before = capture_vol_state(doc)
+        box_before = bbox_mm()
+        created = []
+        for e_idx, a_pt, b_pt in targets:
+            edge = None
+            for e in body_edges():
+                pts = ends(e)
+                if pts and ((math.dist(pts[0], a_pt) < 1e-7 and math.dist(pts[1], b_pt) < 1e-7) or
+                            (math.dist(pts[0], b_pt) < 1e-7 and math.dist(pts[1], a_pt) < 1e-7)):
+                    edge = e
+                    break
+            done = (f" Created so far: {', '.join(c['feature'] for c in created)}." if created else "")
+            if edge is None:
+                return self._result(
+                    False,
+                    f"flange: edge {e_idx} ({[round(c * 1000, 3) for c in a_pt]} -> {[round(c * 1000, 3) for c in b_pt]} mm) "
+                    "no longer exists after the previous flange(s) (a flange trims the sheet at its ends); list the "
+                    f"edges again and call flange for the remaining ones.{done}",
+                    SwErrors.swFeatureError)
+
+            # The wall rises from the large sheet face the edge belongs to, along that face's normal.
+            face_n = None
+            best_area = -1.0
+            for af in (get_attr_or_call(edge, "GetTwoAdjacentFaces2") or []):
+                if af is None:
+                    continue
+                area = float(get_attr_or_call(af, "GetArea") or 0.0)
+                if area > best_area:
+                    best_area = area
+                    face_n = [float(v) for v in get_attr_or_call(af, "Normal")[:3]]
+            vol0 = capture_vol_state(doc)
+            doc.ClearSelection2(True)
+            edge.Select2(False, 0)
+            skf = doc.InsertSketchForEdgeFlange(edge, math.radians(angle_deg), False)
+            if skf is None:
+                return self._result(
+                    False,
+                    f"flange: SolidWorks would not start an edge flange on edge {e_idx}. The part must be sheet "
+                    f"metal (sheet_metal_face first) and the edge a straight edge of a flat sheet face.{done}",
+                    SwErrors.swFeatureError)
+            sketch_name = str(skf.Name)
+            feat = None
+            try:
+                doc.ClearSelection2(True)
+                skf.Select2(False, 0)
+                doc.EditSketch()
+                sk = get_attr_or_call(doc, "GetActiveSketch2")
+                xf = list(get_attr_or_call(get_attr_or_call(sk, "ModelToSketchTransform"), "ArrayData"))
+                s1 = transform_point(xf, a_pt)
+                s2 = transform_point(xf, b_pt)
+                dx, dy = s2[0] - s1[0], s2[1] - s1[1]
+                seg = math.hypot(dx, dy)
+                nx, ny = -dy / seg, dx / seg
+                if face_n is not None:
+                    # face normal expressed in sketch axes (rotation part of model->sketch)
+                    fx = face_n[0] * xf[0] + face_n[1] * xf[3] + face_n[2] * xf[6]
+                    fy = face_n[0] * xf[1] + face_n[1] * xf[4] + face_n[2] * xf[7]
+                    if fx * nx + fy * ny < 0:
+                        nx, ny = -nx, -ny
+                h = height_mm / 1000.0
+                sm = doc.SketchManager
+                from ..core.sketch_guard import direct_sketch
+                with direct_sketch(doc):
+                    sm.CreateLine(s1[0], s1[1], 0, s1[0] + nx * h, s1[1] + ny * h, 0)
+                    sm.CreateLine(s1[0] + nx * h, s1[1] + ny * h, 0, s2[0] + nx * h, s2[1] + ny * h, 0)
+                    sm.CreateLine(s2[0] + nx * h, s2[1] + ny * h, 0, s2[0], s2[1], 0)
+                    sm.CreateLine(s2[0], s2[1], 0, s1[0], s1[1], 0)  # closed: an open profile adds nothing
+                doc.InsertSketch2(True)
+                feat = doc.FeatureManager.InsertSheetMetalEdgeFlange2(
+                    V(pythoncom.VT_ARRAY | pythoncom.VT_DISPATCH, [edge]),
+                    V(pythoncom.VT_ARRAY | pythoncom.VT_DISPATCH, [skf]),
+                    1 | 128,                 # default bend radius + default relief
+                    math.radians(angle_deg), 0.001, pos_map[pos_key], 0.0,
+                    4, 0.5, 0.001, 0.001,    # no relief
+                    2,                       # height measured to the inner virtual sharp
+                    V(pythoncom.VT_DISPATCH, None))
+                get_attr_or_call(doc, "EditRebuild3")
+            except Exception as ex:
+                logger.debug(f"edge flange on edge {e_idx} failed: {ex}\n{traceback.format_exc()}")
+                try:
+                    if get_attr_or_call(doc, "GetActiveSketch2") is not None:
+                        doc.InsertSketch2(True)
+                except Exception:
+                    pass
+            vol1 = capture_vol_state(doc)
+            added = (vol1[0] - vol0[0]) if (vol0 and vol1) else None
+            if feat is None or (added is not None and added < 1e-3):
+                for nm in ([str(feat.Name)] if feat is not None else []) + [sketch_name]:
+                    try:
+                        f_del = doc.FeatureByName(nm)
+                        if f_del is not None:
+                            doc.ClearSelection2(True)
+                            f_del.Select2(False, 0)
+                            doc.Extension.DeleteSelection2(1)
+                    except Exception:
+                        pass
+                return self._result(
+                    False,
+                    f"flange: no edge flange could be built on edge {e_idx} (nothing was left behind). The edge "
+                    "must be a straight outer edge of a flat sheet-metal face with room for the bend; pick the "
+                    "edge on the sheet face the flange should rise from. plain_wall=true builds a simple extruded "
+                    f"wall instead.{done}",
+                    SwErrors.swFeatureError)
+            created.append({"feature": str(feat.Name), "edge_index": e_idx,
+                            "added_mm3": round(added, 2) if added is not None else None})
+
+        vol_after = capture_vol_state(doc)
+        suffix, delta_dict = format_vol_delta(vol_before, vol_after)
+        box_after = bbox_mm()
+        flat = None
+        try:
+            flat = self._flat_pattern_size(doc)
+        except Exception:
+            pass
+        msg = (f"Edge flange {height_mm:g} mm @ {angle_deg:g}° ({pos_key}) on {len(created)} edge(s): "
+               + ", ".join(c["feature"] for c in created))
+        if box_after:
+            msg += (f"; part now X {box_after['min'][0]:g}..{box_after['max'][0]:g}, "
+                    f"Y {box_after['min'][1]:g}..{box_after['max'][1]:g}, Z {box_after['min'][2]:g}..{box_after['max'][2]:g} mm")
+        return self._result(True, msg + suffix, SwErrors.swSuccess, {
+            "features": [c["feature"] for c in created], "walls": created, "kind": "sheet_metal_edge_flange",
+            "distance_mm": height_mm, "angle_deg": angle_deg, "position": pos_key,
+            "bbox_before_mm": box_before, "bbox_after_mm": box_after, "flat_pattern_mm": flat,
+            "geometry_delta": delta_dict})
+
     def flange(
         self,
         edge_indices: Optional[List[int]] = None,
         distance: float = 25.0,
         angle: float = 90.0,
         body_index: int = 1,
+        position: str = "material_inside",
+        plain_wall: bool = False,
     ) -> Dict[str, Any]:
         """
-        Add a 90° wall of the sheet thickness, 'distance' mm high, along one or more 1-based body
-        edges (edge_indices). It is built as an extruded wall: square corner, no bend radius, and it
-        does not unfold in a flat pattern. Each wall's added volume is checked against
-        thickness x edge length x height; a wrong wall is removed and reported as an error.
+        Add a flange 'distance' mm high along one or more 1-based body edges (edge_indices).
+        Default: a real sheet-metal Edge-Flange (bend radius, unfolds in the flat pattern).
+        plain_wall=True: a thickness-wide extruded 90° wall with a square corner and no bend.
         """
         try:
             doc, err = self.get_active_doc()
             if err:
                 return err
+            if not plain_wall:
+                return self._edge_flange(doc, edge_indices or [1], float(distance), float(angle),
+                                         int(body_index), position)
 
             bodies = get_attr_or_call(doc, "GetBodies2", 0, False) or []
             if not bodies or body_index < 1 or body_index > len(bodies):
@@ -667,12 +850,19 @@ class SheetMetalOperations:
                 expected = t_mm * seg_len * 1000.0 * float(distance)
                 vol_edge_after = capture_vol_state(doc)
                 added = (vol_edge_after[0] - vol_edge_before[0]) if (vol_edge_after and vol_edge_before) else None
-                if added is not None and abs(added - expected) > max(0.02 * expected, 0.5):
+                # A wall that runs into existing walls at its ends merges with them and adds less
+                # (corner overlap, MCP-021): that is correct. Only more than expected, or far less, is wrong.
+                tol = max(0.02 * expected, 0.5)
+                wrong = added is not None and (added > expected + tol or added < 0.5 * expected)
+                if wrong:
                     try:
                         doc.ClearSelection2(True)
                         wf = doc.FeatureByName(wall_name)
                         if wf is not None and wf.Select2(False, 0):
                             doc.Extension.DeleteSelection2(1)  # with its sketch
+                        orphan = doc.FeatureByName(str(ext_res.get("data", {}).get("sketch_name") or ""))
+                        if orphan is not None and orphan.Select2(False, 0):
+                            doc.Extension.DeleteSelection2(0)
                     except Exception:
                         pass
                     return self._result(
