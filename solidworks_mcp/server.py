@@ -799,7 +799,8 @@ _TOOL_HANDLERS: Dict[str, Callable[[dict], Dict[str, Any]]] = {
     'draw_arc': _world_draw(_draw_arc),
     'draw_polygon': _world_draw(_draw_polygon),
     'draw_text': _auto('draw_text', ('text', ''), ('x', 0.0), ('y', 0.0), ('height', 12.0), ('font_name', 'Segoe UI'), ('bold', True), ('italic', False), ('angle', 0.0), ('center', False), 'unit'),
-    'extrude_sketch': _auto('extrude_sketch', ('depth', 10), ('both_directions', False), ('reverse_dir', False), 'unit'),
+    'extrude_sketch': _auto('extrude_sketch', ('depth', 10), ('both_directions', False), ('reverse_dir', False), 'unit', ('draft_angle', 0.0), ('draft_outward', False), ('merge', True)),
+    'combine_bodies': _auto('combine_bodies', ('operation', 'add'), 'main_body', 'tool_bodies'),
     'cut_extrude': _auto('cut_extrude', ('depth', 10), ('through_all', False), ('both_directions', False), 'unit', 'reverse_dir'),
     'fillet_edges': _auto('fillet_edges', ('radius', 2), 'unit'),
     'chamfer_edges': _auto('chamfer_edges', ('distance', 2), ('angle', 45), 'unit'),
@@ -869,6 +870,7 @@ _TOOL_HANDLERS: Dict[str, Callable[[dict], Dict[str, Any]]] = {
     'list_topology': _route('kind', {
         'faces': _auto('list_faces', ('body_index', 1), ('min_area', 'min_size', 0.0), ('max_count', 60)),
         'edges': _auto('list_edges', ('body_index', 1), ('min_length', 'min_size', 0.0), ('max_count', 60)),
+        'bodies': _auto('list_bodies'),
     }),
     'inspect_topology': _inspect_topology,
     'capture_viewport': _route('mode', {
@@ -949,6 +951,7 @@ def _dispatch_dialog_tool(name: str, arguments: dict) -> Dict[str, Any]:
 
 _PART_MUTATING_TOOLS = {
     "extrude_sketch",
+    "combine_bodies",
     "cut_extrude",
     "revolve_sketch",
     "fillet_edges",

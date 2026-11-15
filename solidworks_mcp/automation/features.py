@@ -16,6 +16,7 @@ Fixes v4.0.0:
 """
 
 import logging
+import math
 import traceback
 from typing import Optional, Dict, Any, List
 
@@ -187,7 +188,9 @@ class FeatureOperations:
     # ========================================================================
     
     def extrude_sketch(self, depth: float = 10, both_directions: bool = False,
-                       reverse_dir: bool = False, unit: str = None) -> Dict:
+                       reverse_dir: bool = False, unit: str = None,
+                       draft_angle: float = 0.0, draft_outward: bool = False,
+                       merge: bool = True) -> Dict:
         """
         Extrude the active sketch (Boss-Extrude)
         FIXED v4.0: Properly closes sketch, selects it, uses 23-param FeatureExtrusion2
@@ -235,6 +238,10 @@ class FeatureOperations:
 
             # Step 2: Determine end condition
             end_cond = 6 if both_directions else 0  # 6=MidPlane, 0=Blind
+            draft_on = abs(float(draft_angle or 0.0)) > 1e-9
+            draft_rad = math.radians(abs(float(draft_angle or 0.0)))
+            if draft_on and not (0.0 < abs(float(draft_angle)) < 89.0):
+                return self._result(False, "draft_angle must be between 0 and 89 degrees.", SwErrors.swInvalidParameter)
             
             # Step 3: Try extrusion methods
             feat = None
@@ -250,17 +257,17 @@ class FeatureOperations:
                     0,              # T2 - end condition 2
                     depth_m,        # D1 - depth
                     depth_m,        # D2 - depth 2
-                    False,          # Dchk1 - draft on/off
-                    False,          # Dchk2 - draft on/off 2
-                    False,          # Ddir1 - draft outward
-                    False,          # Ddir2 - draft outward 2
-                    0.0,            # Dang1 - draft angle (radians)
-                    0.0,            # Dang2 - draft angle 2
+                    draft_on,       # Dchk1 - draft on/off
+                    draft_on,       # Dchk2 - draft on/off 2
+                    bool(draft_outward),  # Ddir1 - draft outward
+                    bool(draft_outward),  # Ddir2 - draft outward 2
+                    draft_rad,      # Dang1 - draft angle (radians)
+                    draft_rad,      # Dang2 - draft angle 2
                     False,          # OffsetReverse1
                     False,          # OffsetReverse2
                     False,          # TranslateSurface1
                     False,          # TranslateSurface2
-                    True,           # Merge - merge result
+                    bool(merge),    # Merge - merge result
                     True,           # UseFeatScope
                     True,           # UseAutoSelect
                     0,              # T0 - start condition
@@ -278,10 +285,10 @@ class FeatureOperations:
                     feat = doc.FeatureManager.FeatureExtrusion3(
                         True, False, bool(reverse_dir), end_cond, 0,
                         depth_m, depth_m,
+                        draft_on, draft_on, bool(draft_outward), bool(draft_outward),
+                        draft_rad, draft_rad,
                         False, False, False, False,
-                        0.0, 0.0,
-                        False, False, False, False,
-                        True, True, True,
+                        bool(merge), True, True,
                         0, 0.0, False
                     )
                     if feat:
@@ -2645,6 +2652,113 @@ class FeatureOperations:
                 except Exception:
                     continue
         return out
+
+    # ========================================================================
+    # Multi-body parts: list and combine solid bodies
+    # ========================================================================
+
+    def _solid_bodies(self, doc):
+        """[(index, body, name, box_mm, volume_mm3)] for every solid body of the active part."""
+        out = []
+        for i, b in enumerate(doc.GetBodies2(0, False) or (), start=1):
+            box = None
+            vol = None
+            try:
+                bx = get_attr_or_call(b, "GetBodyBox")
+                box = {"min": [round(float(v) * 1000.0, 3) for v in bx[:3]],
+                       "max": [round(float(v) * 1000.0, 3) for v in bx[3:6]]}
+            except Exception:
+                pass
+            try:
+                mp = b.GetMassProperties(1.0)
+                vol = round(float(mp[3]) * 1e9, 2)
+            except Exception:
+                pass
+            out.append((i, b, str(b.Name), box, vol))
+        return out
+
+    def list_bodies(self) -> Dict:
+        """One line per solid body: index, name, bounding box, volume."""
+        try:
+            doc, err = self.get_active_doc()
+            if err:
+                return err
+            if self.get_document_type(doc) != "Part":
+                return self._result(False, "Bodies can be listed in a Part document only.", SwErrors.swInvalidDocumentType)
+            rows = self._solid_bodies(doc)
+            lines = []
+            for i, _b, name, box, vol in rows:
+                span = (f"X {box['min'][0]:g}..{box['max'][0]:g} Y {box['min'][1]:g}..{box['max'][1]:g} "
+                        f"Z {box['min'][2]:g}..{box['max'][2]:g}") if box else "box ?"
+                lines.append(f"[{i}] {name}  {span}  V={vol if vol is not None else '?'} mm3")
+            return self._result(True, (f"{len(rows)} solid bod{'y' if len(rows) == 1 else 'ies'}:\n" + "\n".join(lines))
+                                if rows else "No solid bodies.", SwErrors.swSuccess, {"count": len(rows)})
+        except Exception as e:
+            return self._result(False, f"list_bodies error: {e}", SwErrors.swGeneralError)
+
+    def combine_bodies(self, operation: str = "add", main_body: Optional[int] = None,
+                       tool_bodies: Optional[List[int]] = None) -> Dict:
+        """
+        Boolean of solid bodies in a multi-body part (Insert > Features > Combine).
+        add: union of tool_bodies (and main_body); subtract: main_body minus tool_bodies (the tool
+        bodies are consumed); intersect: common volume of main_body and tool_bodies.
+        Bodies are 1-based indices from list_topology kind='bodies'.
+        """
+        try:
+            doc, err = self.get_active_doc()
+            if err:
+                return err
+            if self.get_document_type(doc) != "Part":
+                return self._result(False, "combine_bodies needs a Part document.", SwErrors.swInvalidDocumentType)
+            op = str(operation or "").strip().lower()
+            op_code = {"add": 15903, "subtract": 15902, "intersect": 15901}.get(op)
+            if op_code is None:
+                return self._result(False, "operation must be add, subtract or intersect.", SwErrors.swInvalidInput)
+            rows = self._solid_bodies(doc)
+            by_idx = {r[0]: r[1] for r in rows}
+            tools = [int(t) for t in (tool_bodies or [])]
+            ids = tools + ([int(main_body)] if main_body is not None else [])
+            bad = [i for i in ids if i not in by_idx]
+            if bad or len(set(ids)) != len(ids):
+                return self._result(False, f"Body index/indices {bad or ids} not valid or repeated; the part has "
+                                           f"{len(rows)} solid bodies (list_topology kind='bodies').", SwErrors.swInvalidInput)
+            if op_code == 15902 and (main_body is None or not tools):
+                return self._result(False, "subtract needs main_body and at least one tool body.", SwErrors.swInvalidInput)
+            if op_code != 15902 and len(ids) < 2:
+                return self._result(False, f"{op} needs at least two bodies.", SwErrors.swInvalidInput)
+
+            pre_state = capture_pre_mutation_state(doc)
+            before = {r[2]: r[4] for r in rows}
+            V = win32com.client.VARIANT
+            if op_code == 15902:
+                feat = doc.FeatureManager.InsertCombineFeature(
+                    op_code, by_idx[int(main_body)],
+                    V(pythoncom.VT_ARRAY | pythoncom.VT_DISPATCH, [by_idx[t] for t in tools]))
+            else:
+                feat = doc.FeatureManager.InsertCombineFeature(
+                    op_code, null_dispatch(),
+                    V(pythoncom.VT_ARRAY | pythoncom.VT_DISPATCH, [by_idx[i] for i in ids]))
+            get_attr_or_call(doc, "EditRebuild3")
+            if not feat:
+                return self._result(
+                    False,
+                    f"Combine ({op}) was not created. For add the bodies must touch or overlap; for subtract and "
+                    "intersect the bodies must overlap.", SwErrors.swFeatureError)
+            ok, post_msg, post_diag = verify_mutation_post_condition(doc, feat, pre_state, "feature")
+            if not ok:
+                return self._result(False, f"Combine failed post-condition verification: {post_msg}",
+                                    SwErrors.swFeatureError, post_diag)
+            after = self._solid_bodies(doc)
+            lines = [f"[{r[0]}] {r[2]} V={r[4]} mm3" for r in after]
+            return self._result(
+                True,
+                f"Combine ({op}) '{feat.Name}': {len(rows)} -> {len(after)} bodies. Now: " + "; ".join(lines),
+                SwErrors.swSuccess,
+                {"feature_name": feat.Name, "operation": op, "bodies_before": len(rows), "bodies_after": len(after),
+                 "volumes_before_mm3": before})
+        except Exception as e:
+            logger.error(f"combine_bodies error: {e}\n{traceback.format_exc()}")
+            return self._result(False, f"combine_bodies error: {e}", SwErrors.swGeneralError)
 
     # ========================================================================
     # Global Variables & Equations (IEquationMgr + Model Dimensions)

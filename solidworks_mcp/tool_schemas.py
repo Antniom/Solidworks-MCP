@@ -322,13 +322,18 @@ def _build_tools() -> List[Tool]:
         # Feature Tools
         Tool(
             name="extrude_sketch",
-            description="Extrude the active sketch (Boss-Extrude).",
+            description=("Extrude the active sketch (Boss-Extrude). Optional draft (tapered walls, e.g. moulded or "
+                         "thermoformed parts) and merge=false to keep the result as a separate solid body "
+                         "(multi-body part; see combine_bodies)."),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "depth": {"type": "number", "default": 10, "description": "Extrusion depth"},
                     "both_directions": {"type": "boolean", "default": False, "description": "Mid-plane extrude: depth is the TOTAL thickness (depth/2 each side)"},
                     "reverse_dir": {"type": "boolean", "default": False, "description": "Reverse extrusion direction (extrude backward)"},
+                    "draft_angle": {"type": "number", "default": 0.0, "minimum": 0, "description": "Draft angle in degrees (0 = none): the walls taper inward along the extrusion"},
+                    "draft_outward": {"type": "boolean", "default": False, "description": "With draft_angle: taper outward (profile grows) instead of inward"},
+                    "merge": {"type": "boolean", "default": True, "description": "false = do not merge with existing bodies: the extrusion becomes its own solid body"},
                     "unit": {"type": "string", "description": "Unit"}
                 },
                 "required": []
@@ -511,6 +516,24 @@ def _build_tools() -> List[Tool]:
                     "unit": {"type": "string", "default": "mm", "enum": ["mm", "inch", "m", "cm"], "description": "Thickness unit"}
                 },
                 "required": ["thickness"]
+            }
+        ),
+        Tool(
+            name="combine_bodies",
+            description=(
+                "Boolean of solid bodies in a multi-body part (Combine). add: union of the bodies; subtract: main_body "
+                "minus tool_bodies (tool bodies are consumed), e.g. a foam body = cavity block minus liner bodies; "
+                "intersect: the common volume. Bodies are 1-based indices from list_topology kind='bodies'; create "
+                "separate bodies with extrude_sketch merge=false. The result lists the bodies that remain."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "operation": {"type": "string", "enum": ["add", "subtract", "intersect"], "default": "add", "description": "Boolean operation"},
+                    "main_body": {"type": "integer", "minimum": 1, "description": "subtract: the body that is kept and cut; add/intersect: optional extra body"},
+                    "tool_bodies": {"type": "array", "items": {"type": "integer", "minimum": 1}, "description": "Bodies to add, subtract or intersect"}
+                },
+                "required": ["operation", "tool_bodies"]
             }
         ),
         Tool(
@@ -1378,7 +1401,7 @@ def _build_tools() -> List[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "kind": {"type": "string", "enum": ["faces", "edges"], "description": "What to list"},
+                    "kind": {"type": "string", "enum": ["faces", "edges", "bodies"], "description": "What to list; 'bodies' lists every solid body of the part (index, name, bounding box, volume)"},
                     "body_index": {"type": "integer", "default": 1, "minimum": 1, "description": "1-based solid body index"},
                     "min_size": {"type": "number", "default": 0.0, "description": "Minimum face area in mm^2, or minimum edge length in mm"},
                     "max_count": {"type": "integer", "default": 60, "minimum": 1, "description": "Maximum entities to list"}
