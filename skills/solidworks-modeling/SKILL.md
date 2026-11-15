@@ -68,17 +68,30 @@ For dialog recovery and rebuild diagnostics, see `solidworks-diagnostics`.
 - `draw_circle {"x": float, "y": float, "radius": float, "unit": "mm"}`
 - `draw_line {"x1": float, "y1": float, "x2": float, "y2": float, "unit": "mm"}`
 - `draw_arc {"cx": float, "cy": float, "radius": float, "start_angle": float, "end_angle": float, "unit": "mm"}`
-- `draw_polygon {"cx": float, "cy": float, "radius": float, "sides": int, "unit": "mm"}`
+- `draw_polygon {"cx": float, "cy": float, "radius": float, "sides": int, "flats": bool, "rotation": float, "unit": "mm"}`: `flats: true` measures `radius` to the flats (hexagon across-flats = 2 x radius).
 - `draw_text {"text": str, "x": float, "y": float, "height": float, "font_name": str, "bold": bool, "unit": "mm"}`
+
+**World-coordinate input (preferred when the part is modelled in a global coordinate system).** The x/y
+arguments above are sketch-local, and the sketch axes are often not the world axes (Top plane: sketch y =
+world -Z; a face whose normal is -Z: sketch x = world -X). Every draw tool therefore also takes world/model
+points `[x, y, z]`, converted exactly to the active sketch:
+- `draw_rectangle {"corner1": [x, y, z], "corner2": [x, y, z]}`
+- `draw_circle {"center": [x, y, z], "radius": float}` · `draw_polygon {"center": [x, y, z], ...}`
+- `draw_line {"start": [x, y, z], "end": [x, y, z]}`
+- `draw_arc {"start": [x, y, z], "mid": [x, y, z], "end": [x, y, z]}`: a 3-point arc, no angles needed.
+- `draw_closed_profile {"world_points": [[x, y, z], ...]}`
+A world point must lie on the sketch plane (0.01 mm); otherwise the call fails and names the plane position.
+Every draw result reports where the entity landed in world coordinates.
 
 ### 3. 3D Solid Features
 - `extrude_sketch {"depth": float, "both_directions": bool, "unit": "mm"}`: Extrudes active or selected sketch. Automatically closes sketch and selects profile before extrusion.
 - `cut_extrude {"depth": float, "through_all": bool, "both_directions": bool, "unit": "mm"}`: Cuts material using active or selected sketch profile.
 - `revolve_sketch {"angle": float, "reverse_dir": bool, "is_thin": bool, "thin_thickness": float, "is_cut": bool, "axis_name": str, "unit": "deg"}`: Revolves sketch around a selected centerline or axis. Angle in degrees (default `360.0`).
-- `create_shell {"thickness": float, "outward": bool, "unit": "mm"}`: Creates hollow thin-walled solid body with constant wall thickness.
+- `create_shell {"thickness": float, "face_indices": [int], "outward": bool, "unit": "mm"}`: Hollows the body to a constant wall. `face_indices` (1-based, from `list_topology {"kind": "faces"}`) are the faces to remove; without it the currently selected faces are used. List the faces again right before: indices change after every feature.
 - `create_pattern`:
-  - Linear pattern: `{"pattern_type": "linear", "feature_name": "Cut-Extrude1", "num1": 4, "spacing1": 25.0, "flip_dir1": bool, "unit": "mm"}`
+  - Linear pattern along world axes: `{"pattern_type": "linear", "feature_name": "Cut-Extrude1", "num1": 4, "spacing1": 25.0, "direction1": "+x", "num2": 2, "spacing2": 40.0, "direction2": "-z"}`. The direction is checked after creation and flipped if the instances went the wrong way. Without `direction1` the direction is an arbitrary straight edge (or the entity pre-selected with `select ... "mark": 1`), so always pass `direction1`.
   - Circular pattern: `{"pattern_type": "circular", "feature_name": "Hole1", "num1": 6, "spacing1": 60.0, "angle": 360.0, "equal_spacing": true, "unit": "mm"}`
+  - Mirror: `{"pattern_type": "mirror", "mirror_plane": "Right" | "Top" | "Front" | "<plane name>", "feature_name": "Cut-Extrude1,Fillet1"}` mirrors those features; without `feature_name` every solid body is mirrored and merged (model half of a symmetric part, then mirror).
 - `create_hole_wizard`:
   - `{"hole_type": "counterbore" | "countersink" | "hole" | "tap", "standard": "ISO" | "DIN" | "AnsiMetric", "fastener_type": str, "size": "M8", "end_condition": "through_all" | "blind", "depth": float, "diameter": float, "unit": "mm"}`
 - `fillet_edges {"radius": float, "unit": "mm"}`: Blends currently selected edges with constant radius fillet.
@@ -160,8 +173,8 @@ All selection goes through one tool, `select`, with the method chosen by `"by"`:
 Check bend radii and hole-to-bend distances against `solidworks-dfm`.
 
 ### 10. Appearance & Images
-- `apply_material_appearance {"appearance_name": "Aluminum - Polished", "target_type": "part" | "feature" | "component", "target_name": str}` or a custom `color_rgb` / `reflectivity` / `transparency`.
-- `capture_viewport {"view_name": "*Isometric"}`: One standard or named view to a PNG.
+- `apply_material_appearance {"appearance_name": "Aluminum - Polished", "target_type": "part" | "feature" | "component", "target_name": str}` or a custom `color_rgb` / `reflectivity` / `transparency`. A material assigned with `set_material` brings a reflective appearance of its own; a part-level custom colour replaces it with a plain colour appearance (the material is kept).
+- `capture_viewport {"view_name": "*Isometric"}`: One standard or named view to a PNG, framed on the solid geometry.
 - `capture_viewport {"mode": "overview"}`: A stitched seven-view sheet plus detail crops (.NET runner). Best for checking a finished part from all sides.
 - `capture_viewport {"mode": "showcase", "display_style": "shaded_with_edges" | "realistic" | "wireframe", "eye_mm": [x, y, z], "target_mm": [x, y, z]}`: Explicit camera and display style.
 

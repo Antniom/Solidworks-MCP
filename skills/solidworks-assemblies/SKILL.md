@@ -47,9 +47,12 @@ For dialog and rebuild recovery, see `solidworks-diagnostics`.
 ### 1. Assembly Construction
 - `create_document {"type": "assembly"}`: Creates an empty assembly from default template.
 - `add_component`:
-  - `"component_path"`: Full path to `.sldprt` or `.sldasm` on disk.
-  - `"x"`, `"y"`, `"z"`: Placement position (defaults to `0.0, 0.0, 0.0`).
+  - `"component_path"`: Full path to `.sldprt` or `.sldasm` on disk, or to a STEP/IGES/Parasolid file. A neutral file is imported once, a native copy with the same name is saved next to it and reused on later calls (a large STEP can take minutes the first time). A STEP that holds only wireframe curves cannot be imported; the error says so.
+  - `"x"`, `"y"`, `"z"`: Position of the component **origin** (defaults to `0.0, 0.0, 0.0`).
+  - `"rotation_deg"`: `[rx, ry, rz]` in degrees, about the assembly X axis, then Y, then Z, through the component origin.
+  - `"fixed"`: `true` fixes the component in place, `false` leaves it floating for mates. Parts modelled in the assembly's own coordinate system go in with `x = y = z = 0` and `"fixed": true`, with no mates.
   - `"unit"`: `"mm"` (converted automatically to meters for COM).
+  - The result reports the origin, the component axes, the fixed state and the box the component occupies in the assembly.
 - `list_components {}`: Lists all components in assembly with their instance names, file paths, suppression state, and fixity (`is_fixed`).
 
 ### 2. Mating & Constraints (`add_mate`)
@@ -62,6 +65,7 @@ For dialog and rebuild recovery, see `solidworks-diagnostics`.
 - `angle`: Float value in degrees (for `"angle"` mate type).
 - `flip`: Boolean to reverse alignment orientation.
 - `unit`: `"mm"`
+- The result lists every component the mate moved, with its origin before and after and the box it now occupies. A distance or angle mate can solve to either side: read that box, and if it is the wrong side delete the mate (`delete_assembly_constraint`) and add it again with `"flip": true`.
 
 ### 3. Precision Selection for Mates (`select` by geometry)
 Never rely on guessed entity coordinates or broken face names. Use `select` (`"by": "geometry"`) to find exact mating features.
