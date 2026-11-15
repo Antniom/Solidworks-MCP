@@ -198,6 +198,31 @@ def get_assembly_mate_count(doc: Any) -> int:
     return count
 
 
+def get_model_rebuild_warnings(doc: Any) -> List[Dict[str, Any]]:
+    """Features whose rebuild state is a warning (e.g. a flange that intersects its neighbours)."""
+    out: List[Dict[str, Any]] = []
+    if doc is None:
+        return out
+    is_warn = byref_bool(False)
+    try:
+        feat = doc.FirstFeature
+    except Exception:
+        feat = None
+    while feat is not None:
+        try:
+            code = feat.GetErrorCode2(is_warn)
+            if code != 0 and is_warn.value:
+                out.append({"feature_name": getattr(feat, "Name", "?"),
+                            "feature_type": get_attr_or_call(feat, "GetTypeName2"), "warning_code": code})
+        except Exception:
+            pass
+        try:
+            feat = feat.GetNextFeature
+        except Exception:
+            feat = None
+    return out
+
+
 def get_model_rebuild_errors(doc: Any) -> List[Dict[str, Any]]:
     """Scan all features in active doc and collect any rebuild errors."""
     if doc is None:

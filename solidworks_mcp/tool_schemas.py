@@ -1448,6 +1448,8 @@ def _build_tools() -> List[Tool]:
                     "angle": {"type": "number", "default": 90.0, "description": "Bend angle in degrees (plain_wall: 90 only)"},
                     "position": {"type": "string", "enum": ["material_inside", "material_outside", "bend_outside"],
                                  "default": "material_inside", "description": "Where the flange sits relative to the original edge"},
+                    "end_offsets": {"type": "array", "items": {"type": "number", "minimum": 0}, "minItems": 2, "maxItems": 2,
+                                    "description": "Edge flange only: [low, high] mm to stop the wall short of the edge's two ends (low = the end with the smaller world coordinate along the edge). Needed where flanges on neighbouring edges meet at a corner: a wall that runs into them is rejected with an error"},
                     "plain_wall": {"type": "boolean", "default": False, "description": "true = simple extruded wall without a bend instead of a sheet-metal edge flange"},
                     "body_index": {"type": "integer", "default": 1, "minimum": 1, "description": "1-based body index"}
                 },

@@ -836,7 +836,7 @@ _TOOL_HANDLERS: Dict[str, Callable[[dict], Dict[str, Any]]] = {
     'hole_linear': _auto('hole_linear', ('face_axis', 'z'), ('face_value', 0.0), ('ref1_axis', 'x'), ('ref1_value', 0.0), ('dist1', 5.0), ('ref2_axis', 'y'), ('ref2_value', 0.0), ('dist2', 5.0), ('diameter', 5.5), ('depth', 0.0), ('tapped', False), ('cbore_diameter', 0.0), ('cbore_depth', 0.0)),
     'set_sheet_metal_thickness': _auto('set_sheet_metal_thickness', ('thickness_mm', 1.5), 'bend_radius_mm', ('k_factor', 0.5)),
     'sheet_metal_face': _auto('sheet_metal_face', 'thickness_mm', 'bend_radius_mm', ('reverse_dir', False), 'depth', ('both_directions', False), ('reverse_extrude', False)),
-    'flange': _auto('flange', 'edge_indices', ('distance', 25.0), ('angle', 90.0), ('body_index', 1), ('position', 'material_inside'), ('plain_wall', False)),
+    'flange': _auto('flange', 'edge_indices', ('distance', 25.0), ('angle', 90.0), ('body_index', 1), ('position', 'material_inside'), ('plain_wall', False), 'end_offsets'),
     'sheet_metal_cut': _auto('sheet_metal_cut', ('through_all', True), 'depth', ('normal_cut', True)),
     'delete_assembly_constraint': _auto('delete_assembly_constraint', ('constraint_name', '')),
     'manage_subassembly_kinematics': _auto('manage_subassembly_kinematics', ('action', 'set_flexible'), ('occurrence_name', ''), 'exclude_keywords'),

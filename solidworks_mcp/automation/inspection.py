@@ -329,6 +329,33 @@ class InspectionOperations:
                 except Exception as e:
                     logger.debug(f"SaveBMP fallback failed: {e}")
 
+            # A picture taken before SolidWorks repainted the new camera is plain background
+            # (reported as SUCCESS with a 701-byte file, MCP-024): repaint and take it again.
+            def _is_blank(path: str) -> bool:
+                try:
+                    from PIL import Image
+                    with Image.open(path) as im:
+                        colours = im.convert("RGB").getcolors(maxcolors=4)
+                    return colours is not None and len(colours) <= 2
+                except Exception:
+                    return False
+
+            blank = saved and _is_blank(filepath)
+            for _retry in range(2):
+                if not blank:
+                    break
+                try:
+                    time.sleep(0.4)
+                    doc.GraphicsRedraw2()
+                    get_attr_or_call(doc, "ActiveView").GraphicsRedraw(None)
+                except Exception:
+                    pass
+                try:
+                    doc.SaveAs3(filepath, 0, 2)
+                except Exception:
+                    pass
+                blank = _is_blank(filepath)
+
             for pref in hidden_prefs:
                 try:
                     doc.Extension.SetUserPreferenceToggle(pref, 0, True)
@@ -348,6 +375,15 @@ class InspectionOperations:
                 )
 
             size_bytes = os.path.getsize(filepath)
+            if blank:
+                return self._result(
+                    False,
+                    f"The captured image '{filepath}' shows only background (no geometry in the view, even after "
+                    "repainting twice). Check the camera: for mode='showcase' the target must be on the model and "
+                    "the eye outside it; or use a named view.",
+                    SwErrors.swExportError,
+                    {"filepath": filepath, "size_bytes": size_bytes, "blank": True},
+                )
             return self._result(
                 True,
                 f"Viewport captured: {filepath} ({size_bytes:,} bytes)",
@@ -1635,6 +1671,13 @@ class InspectionOperations:
 
             if view is None:
                 return False, "no active view"
+            # Start from a standard view: after a feature that edited a sketch, setting Orientation3
+            # directly left the view in a state that rendered plain background (MCP-024).
+            try:
+                doc.ShowNamedView2("*Isometric", 7)
+                view = getattr(doc, "ActiveView", None) or view
+            except Exception:
+                pass
             xf = view.Orientation3
             arr = list(xf.ArrayData)
             # rows i = model axis i, columns = (right, up, back)
@@ -1644,6 +1687,13 @@ class InspectionOperations:
                 arr[3 * i + 2] = back[i]
             xf.ArrayData = win32com.client.VARIANT(pythoncom.VT_ARRAY | pythoncom.VT_R8, [float(v) for v in arr])
             view.Orientation3 = xf
+            # Zoom-to-fit first: it makes SolidWorks recompute the view's depth range for the new
+            # orientation. Without it the model can fall outside the clipping range and the picture
+            # is plain background although the camera is right (MCP-024).
+            try:
+                doc.ViewZoomtofit2()
+            except Exception:
+                pass
             half = max(dist * 0.35, 0.005)
             # ViewZoomTo2 works in view space: centre the window on the target's view coordinates.
             tvx = sum(t[i] * right[i] for i in range(3))

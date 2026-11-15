@@ -118,6 +118,13 @@ class ModelVerifier:
                 rebuild_errors.append(
                     f"{fe.get('feature_name')} ({fe.get('feature_type')}): error code {fe.get('error_code')}"
                 )
+            # Feature warnings count too, so this agrees with inspect_rebuild_errors (MCP-023).
+            from .post_conditions import get_model_rebuild_warnings
+            for fw in get_model_rebuild_warnings(doc):
+                rebuild_count += 1
+                rebuild_errors.append(
+                    f"{fw.get('feature_name')} ({fw.get('feature_type')}): warning code {fw.get('warning_code')}"
+                )
         except Exception as e:
             warnings.append(f"Rebuild error scan failed: {e}")
 

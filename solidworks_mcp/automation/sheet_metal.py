@@ -483,7 +483,7 @@ class SheetMetalOperations:
             return None
 
     def _edge_flange(self, doc, edge_indices, height_mm: float, angle_deg: float, body_index: int,
-                     position: str) -> Dict[str, Any]:
+                     position: str, end_offsets: Optional[List[float]] = None) -> Dict[str, Any]:
         """
         Real sheet-metal edge flange(s): IModelDoc2.InsertSketchForEdgeFlange + a closed rectangular
         profile + IFeatureManager.InsertSheetMetalEdgeFlange2 (typed SAFEARRAYs of the edge and the
@@ -564,6 +564,40 @@ class SheetMetalOperations:
                     best_area = area
                     face_n = [float(v) for v in get_attr_or_call(af, "Normal")[:3]]
             vol0 = capture_vol_state(doc)
+
+            def top_sketches():
+                names = set()
+                f_it = get_attr_or_call(doc, "FirstFeature")
+                while f_it is not None:
+                    try:
+                        if get_attr_or_call(f_it, "GetTypeName2") == "ProfileFeature":
+                            names.add(str(f_it.Name))
+                    except Exception:
+                        pass
+                    f_it = get_attr_or_call(f_it, "GetNextFeature")
+                return names
+
+            sketches_before = top_sketches()
+
+            def remove_leftovers(feature):
+                """Delete a rejected flange and any profile sketch this attempt left in the tree."""
+                try:
+                    if feature is not None:
+                        doc.ClearSelection2(True)
+                        feature.Select2(False, 0)
+                        doc.Extension.DeleteSelection2(1)
+                except Exception:
+                    pass
+                for nm in top_sketches() - sketches_before:
+                    try:
+                        f_del = doc.FeatureByName(nm)
+                        if f_del is not None:
+                            doc.ClearSelection2(True)
+                            f_del.Select2(False, 0)
+                            doc.Extension.DeleteSelection2(0)
+                    except Exception:
+                        pass
+
             doc.ClearSelection2(True)
             edge.Select2(False, 0)
             skf = doc.InsertSketchForEdgeFlange(edge, math.radians(angle_deg), False)
@@ -593,6 +627,18 @@ class SheetMetalOperations:
                     if fx * nx + fy * ny < 0:
                         nx, ny = -nx, -ny
                 h = height_mm / 1000.0
+                # Optional insets of the wall from the edge ends: [low, high] = at the end with the
+                # lower / higher world coordinate along the edge. Keeps the wall clear of flanges
+                # on the neighbouring edges (MCP-023).
+                if end_offsets:
+                    lo, hi = (float(end_offsets[0]) / 1000.0, float(end_offsets[1]) / 1000.0)
+                    ax = max(range(3), key=lambda i: abs(b_pt[i] - a_pt[i]))
+                    off1, off2 = (lo, hi) if a_pt[ax] <= b_pt[ax] else (hi, lo)
+                    if off1 + off2 >= seg - 1e-6 or off1 < 0 or off2 < 0:
+                        raise ValueError("end_offsets leave no flange width")
+                    ux, uy = dx / seg, dy / seg
+                    s1 = (s1[0] + ux * off1, s1[1] + uy * off1)
+                    s2 = (s2[0] - ux * off2, s2[1] - uy * off2)
                 sm = doc.SketchManager
                 from ..core.sketch_guard import direct_sketch
                 with direct_sketch(doc):
@@ -619,16 +665,32 @@ class SheetMetalOperations:
                     pass
             vol1 = capture_vol_state(doc)
             added = (vol1[0] - vol0[0]) if (vol0 and vol1) else None
+            # SolidWorks flags a flange that runs into its neighbours with a warning/error on the
+            # feature while still building overlapping geometry: that is not a usable flange.
+            feat_problem = None
+            if feat is not None:
+                try:
+                    from ..core.com_compat import byref_bool
+                    is_warn = byref_bool(False)
+                    code = feat.GetErrorCode2(is_warn)
+                    if code != 0:
+                        feat_problem = f"{'warning' if is_warn.value else 'error'} code {code}"
+                except Exception:
+                    pass
+            if feat_problem:
+                remove_leftovers(feat)
+                return self._result(
+                    False,
+                    f"flange: the edge flange on edge {e_idx} rebuilt with a SolidWorks {feat_problem} (it would "
+                    f"have added {added:.1f} mm³) and was removed. The usual cause is that the wall runs into the "
+                    "flanges or walls on the neighbouring edges at its ends. Pass end_offsets [low, high] (mm) to "
+                    "stop the wall short of them at each end, e.g. the neighbouring flange height plus a small "
+                    f"gap.{done}",
+                    SwErrors.swFeatureError,
+                    {"edge_index": e_idx, "feature_problem": feat_problem,
+                     "would_have_added_mm3": round(added, 2) if added is not None else None})
             if feat is None or (added is not None and added < 1e-3):
-                for nm in ([str(feat.Name)] if feat is not None else []) + [sketch_name]:
-                    try:
-                        f_del = doc.FeatureByName(nm)
-                        if f_del is not None:
-                            doc.ClearSelection2(True)
-                            f_del.Select2(False, 0)
-                            doc.Extension.DeleteSelection2(1)
-                    except Exception:
-                        pass
+                remove_leftovers(feat)
                 return self._result(
                     False,
                     f"flange: no edge flange could be built on edge {e_idx} (nothing was left behind). The edge "
@@ -666,6 +728,7 @@ class SheetMetalOperations:
         body_index: int = 1,
         position: str = "material_inside",
         plain_wall: bool = False,
+        end_offsets: Optional[List[float]] = None,
     ) -> Dict[str, Any]:
         """
         Add a flange 'distance' mm high along one or more 1-based body edges (edge_indices).
@@ -677,8 +740,10 @@ class SheetMetalOperations:
             if err:
                 return err
             if not plain_wall:
+                if end_offsets is not None and (not isinstance(end_offsets, (list, tuple)) or len(end_offsets) != 2):
+                    return self._result(False, "end_offsets must be [low, high] in mm.", SwErrors.swInvalidParameter)
                 return self._edge_flange(doc, edge_indices or [1], float(distance), float(angle),
-                                         int(body_index), position)
+                                         int(body_index), position, end_offsets)
 
             bodies = get_attr_or_call(doc, "GetBodies2", 0, False) or []
             if not bodies or body_index < 1 or body_index > len(bodies):
