@@ -174,7 +174,7 @@ class InspectionOperations:
             logger.error(f"Verify model error: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Verification error: {e}", SwErrors.swGeneralError)
 
-    def _fit_view_to_model(self, doc, margin: float = 0.12) -> bool:
+    def _fit_view_to_model(self, doc, margin: float = 0.06) -> bool:
         """
         Frame the solid geometry tightly in the current view orientation. ViewZoomtofit2 also frames
         reference planes and sketches, which left a 100 mm part a few hundred pixels wide.
@@ -197,32 +197,10 @@ class InspectionOperations:
             corners = [to_view((box[i], box[j], box[k])) for i in (0, 3) for j in (1, 4) for k in (2, 5)]
             xs, ys, zs = [c[0] for c in corners], [c[1] for c in corners], [c[2] for c in corners]
             pad = margin * max(max(xs) - min(xs), max(ys) - min(ys), 1e-6)
-            x0, x1, y0, y1 = min(xs) - pad, max(xs) + pad, min(ys) - pad, max(ys) + pad
-            # ViewZoomTo2 fits the rectangle's width: widen/heighten it to the window's aspect ratio
-            # so nothing is cropped.
-            aspect = 2.0
-            try:
-                vb = get_attr_or_call(view, "GetVisibleBox")  # [left, top, right, bottom] px
-                w_px, h_px = abs(float(vb[2]) - float(vb[0])), abs(float(vb[3]) - float(vb[1]))
-                if w_px > 10 and h_px > 10:
-                    aspect = w_px / h_px
-            except Exception:
-                pass
-            w, h = x1 - x0, y1 - y0
-            if w / h < aspect:
-                grow = (h * aspect - w) / 2.0
-                x0, x1 = x0 - grow, x1 + grow
-            else:
-                grow = (w / aspect - h) / 2.0
-                y0, y1 = y0 - grow, y1 + grow
-            xs, ys, pad = [x0, x1], [y0, y1], 0.0
-            zc = (min(zs) + max(zs)) / 2.0
-            to_model = lambda v: (v[0] * a[0] + v[1] * a[1] + v[2] * a[2],  # noqa: E731
-                                  v[0] * a[3] + v[1] * a[4] + v[2] * a[5],
-                                  v[0] * a[6] + v[1] * a[7] + v[2] * a[8])
-            p1 = to_model((min(xs) - pad, min(ys) - pad, zc))
-            p2 = to_model((max(xs) + pad, max(ys) + pad, zc))
-            doc.ViewZoomTo2(p1[0], p1[1], p1[2], p2[0], p2[1], p2[2])
+            # ViewZoomTo2 takes VIEW-space coordinates (the model rotated into the view, metres):
+            # upper-left then lower-right corner. Passing model coordinates only happened to work
+            # for parts centred on the origin and cropped everything else (MCP-020).
+            doc.ViewZoomTo2(min(xs) - pad, max(ys) + pad, 0.0, max(xs) + pad, min(ys) - pad, 0.0)
             return True
         except Exception as e:
             logger.debug(f"_fit_view_to_model failed, using zoom-to-fit: {e}")
@@ -283,6 +261,21 @@ class InspectionOperations:
                     self._fit_view_to_model(doc)
                 except Exception as e:
                     logger.debug(f"View adjustment warning: {e}")
+
+            # Feature dimensions and annotations (templates that show them draw large arrows and
+            # dimension text over the model) are hidden for the picture and put back afterwards.
+            hidden_prefs = []
+            try:
+                ext = doc.Extension
+                for pref in (197, 32, 33):  # swDisplayAllAnnotations, FeatureDimensions, ReferenceDimensions
+                    try:
+                        if bool(ext.GetUserPreferenceToggle(pref, 0)):
+                            ext.SetUserPreferenceToggle(pref, 0, False)
+                            hidden_prefs.append(pref)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
             try:
                 doc.GraphicsRedraw2()
             except Exception:
@@ -335,6 +328,17 @@ class InspectionOperations:
                             pass
                 except Exception as e:
                     logger.debug(f"SaveBMP fallback failed: {e}")
+
+            for pref in hidden_prefs:
+                try:
+                    doc.Extension.SetUserPreferenceToggle(pref, 0, True)
+                except Exception:
+                    pass
+            if hidden_prefs:
+                try:
+                    doc.GraphicsRedraw2()
+                except Exception:
+                    pass
 
             if not saved or not os.path.exists(filepath):
                 return self._result(
@@ -1641,7 +1645,10 @@ class InspectionOperations:
             xf.ArrayData = win32com.client.VARIANT(pythoncom.VT_ARRAY | pythoncom.VT_R8, [float(v) for v in arr])
             view.Orientation3 = xf
             half = max(dist * 0.35, 0.005)
-            doc.ViewZoomTo2(t[0] - half, t[1] - half, t[2] - half, t[0] + half, t[1] + half, t[2] + half)
+            # ViewZoomTo2 works in view space: centre the window on the target's view coordinates.
+            tvx = sum(t[i] * right[i] for i in range(3))
+            tvy = sum(t[i] * up[i] for i in range(3))
+            doc.ViewZoomTo2(tvx - half, tvy + half, 0.0, tvx + half, tvy - half, 0.0)
             doc.GraphicsRedraw2()
             return True, ""
         except Exception as ex:
