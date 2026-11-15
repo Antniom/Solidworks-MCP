@@ -710,8 +710,9 @@ def _build_tools() -> List[Tool]:
                         "enum": ["plane", "cylinder", "cone", "sphere", "torus", "bspline"],
                         "description": "geometry/centroid: surface type of the face (centroid defaults to plane)"
                     },
-                    "normal": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3, "description": "geometry: face normal unit vector [nx, ny, nz]"},
-                    "normal_tolerance": {"type": "number", "default": 0.05, "description": "geometry: tolerance for normal matching"},
+                    "normal": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3, "description": "geometry: outward normal [nx, ny, nz] of PLANAR faces (curved faces never match; use axis for cylinders)"},
+                    "axis": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3, "description": "geometry: axis direction [ax, ay, az] of cylindrical/conical faces, either sense (e.g. [0, 1, 0] for vertical holes). Each matched cylinder reports radius_mm, axis, axis_point_mm (the hole/boss centre on the axis) and span_along_axis_mm"},
+                    "normal_tolerance": {"type": "number", "default": 0.05, "description": "geometry: tolerance for normal/axis matching"},
                     "radius": {"type": "number", "description": "geometry: radius of cylindrical/spherical faces or circular edges"},
                     "radius_tolerance": {"type": "number", "default": 0.05, "description": "geometry: tolerance for radius matching"},
                     "point_on_surface": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3, "description": "geometry: a point that must lie on the face [x, y, z]"},
@@ -722,7 +723,7 @@ def _build_tools() -> List[Tool]:
                     "bbox_min": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3, "description": "geometry: bounding box minimum [xmin, ymin, zmin]"},
                     "bbox_max": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3, "description": "geometry: bounding box maximum [xmax, ymax, zmax]"},
                     "max_results": {"type": "integer", "default": 200, "minimum": 1, "description": "geometry: stop after this many matches (result says PARTIAL)"},
-                    "time_budget_s": {"type": "number", "default": 40.0, "description": "geometry: stop scanning after this many seconds and return the partial result; on large assemblies pass component, bbox or point to prune"},
+                    "time_budget_s": {"type": "number", "default": 40.0, "description": "geometry: stop scanning after this many seconds and return the partial result (the call itself is allowed time_budget_s + 30 s); on large assemblies pass component, bbox or point to prune"},
                     "mark": {"type": "integer", "default": 0, "description": "Selection mark"},
                     "append": {"type": "boolean", "default": False, "description": "Add to the current selection instead of replacing it"},
                     "unit": {"type": "string", "enum": ["mm", "inch", "m", "cm"], "description": "Unit for name/point/geometry coordinates"}
@@ -1412,7 +1413,7 @@ def _build_tools() -> List[Tool]:
                 "properties": {
                     "thickness_mm": {"type": "number", "description": "Optional override thickness in mm"},
                     "bend_radius_mm": {"type": "number", "description": "Optional override bend radius in mm"},
-                    "reverse_dir": {"type": "boolean", "default": False, "description": "Closed profile: thickness grows along the sketch normal by default, true = opposite side (verified, thickness_side). Open profile: moves the thickness to the other side of the drawn lines"},
+                    "reverse_dir": {"type": "boolean", "default": False, "description": "Closed profile: thickness grows along the sketch normal by default, true = opposite side (verified, thickness_side). Open profile: moves the thickness to the other side of the drawn lines. Which side the default takes depends on the direction the chain was drawn in, so read sketch_extent.world_min_mm/world_max_mm in the result (drawn lines +/- thickness) and re-create with the opposite reverse_dir if the material is on the wrong side"},
                     "depth": {"type": "number", "description": "Open profile only (required there): extrude length in mm"},
                     "both_directions": {"type": "boolean", "default": False, "description": "Open profile: mid-plane extrude, depth is the total"},
                     "reverse_extrude": {"type": "boolean", "default": False, "description": "Open profile: extrude to the other side of the sketch plane"}

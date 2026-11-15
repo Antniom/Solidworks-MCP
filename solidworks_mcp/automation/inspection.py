@@ -174,7 +174,7 @@ class InspectionOperations:
             logger.error(f"Verify model error: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Verification error: {e}", SwErrors.swGeneralError)
 
-    def _fit_view_to_model(self, doc, margin: float = 0.04) -> bool:
+    def _fit_view_to_model(self, doc, margin: float = 0.12) -> bool:
         """
         Frame the solid geometry tightly in the current view orientation. ViewZoomtofit2 also frames
         reference planes and sketches, which left a 100 mm part a few hundred pixels wide.
@@ -453,9 +453,12 @@ class InspectionOperations:
         component: Optional[str] = None,
         max_results: int = 200,
         time_budget_s: float = 40.0,
+        axis: Optional[List[float]] = None,
     ) -> Dict[str, Any]:
         """
         Select model entities (faces, edges, vertices) by geometric filters.
+        `axis` filters cylindrical/conical faces by axis direction (either sense); `normal` applies to
+        planar faces only.
         Stops after max_results matches or time_budget_s seconds and says so (partial result).
         In an assembly, searches component bodies (optionally only `component`) and
         compares geometry in assembly coordinates.
@@ -518,6 +521,16 @@ class InspectionOperations:
                 if n_len > 1e-9:
                     req_norm = [c / n_len for c in normal[:3]]
 
+            req_axis = None
+            if axis and len(axis) >= 3:
+                a_len = math.sqrt(sum(c * c for c in axis[:3]))
+                if a_len > 1e-9:
+                    req_axis = [c / a_len for c in axis[:3]]
+
+            # The time budget covers everything, including collecting the component bodies.
+            import time as _time
+            deadline = _time.monotonic() + max(1.0, float(time_budget_s))
+
             # (body, 13-element transform or None, component name or None)
             body_entries: List[Tuple[Any, Optional[List[float]], Optional[str]]] = []
             pruned = 0
@@ -539,6 +552,8 @@ class InspectionOperations:
                         roi = ([v - 1e-3 for v in anchor], [v + 1e-3 for v in anchor])
                 pruned = 0
                 for c in comps:
+                    if _time.monotonic() > deadline:
+                        break
                     try:
                         cname = str(get_attr_or_call(c, "Name2") or "")
                         short = cname.split("/")[-1].lower()
@@ -617,10 +632,9 @@ class InspectionOperations:
             matched_entities = []
             entity_descriptors = []
 
-            # Stop well inside the 60 s worker timeout and return what was found so far, instead of
-            # leaving the COM worker busy for minutes on a large assembly (MCP-001).
-            import time as _time
-            deadline = _time.monotonic() + max(1.0, float(time_budget_s))
+            # Stop at the time budget and return what was found so far, instead of leaving the COM
+            # worker busy for minutes on a large assembly (MCP-001). The server's own timeout for
+            # this tool is time_budget_s + 30 s (MCP-019).
             cap = max(1, int(max_results))
             truncated_reason = None
             scanned = 0
@@ -645,6 +659,20 @@ class InspectionOperations:
                         if _stop():
                             break
                         scanned += 1
+                        # Spatial filters first: GetBox is one cheap call, while GetSurface creates a
+                        # new COM object per face (several round trips each).
+                        box = None
+                        if bmin_m or bmax_m or pos_m:
+                            box = _tx_box(get_attr_or_call(f, "GetBox"))
+                            if box and len(box) >= 6:
+                                if bmin_m and any(box[i] < bmin_m[i] - 1e-4 for i in range(3)):
+                                    continue
+                                if bmax_m and any(box[i + 3] > bmax_m[i] + 1e-4 for i in range(3)):
+                                    continue
+                                if pos_m and not (box[0] - 1e-3 <= pos_m[0] <= box[3] + 1e-3 and
+                                                  box[1] - 1e-3 <= pos_m[1] <= box[4] + 1e-3 and
+                                                  box[2] - 1e-3 <= pos_m[2] <= box[5] + 1e-3):
+                                    continue
                         surf = get_attr_or_call(f, "GetSurface")
                         if not surf:
                             continue
@@ -679,25 +707,25 @@ class InspectionOperations:
                         if surface_type and surface_type.strip().lower() != stype_str:
                             continue
 
-                        # Normal check (for planar or general surfaces)
+                        # Normal check: planar faces only (IFace2.Normal is a zero vector on curved faces).
                         f_normal = None
-                        try:
-                            fn = getattr(f, "Normal", None)
-                            if callable(fn):
-                                fn = fn()
-                            if fn and len(fn) >= 3:
-                                f_normal = [fn[0], fn[1], fn[2]]
-                        except Exception:
-                            pass
-
-                        if not f_normal and is_plane:
+                        if is_plane:
                             try:
-                                params = get_attr_or_call(surf, "PlaneParams")
-                                if params and len(params) >= 3:
-                                    f_normal = [params[0], params[1], params[2]]
+                                fn = getattr(f, "Normal", None)
+                                if callable(fn):
+                                    fn = fn()
+                                if fn and len(fn) >= 3 and any(abs(v) > 1e-12 for v in fn[:3]):
+                                    f_normal = [fn[0], fn[1], fn[2]]
                             except Exception:
                                 pass
-                        f_normal = _tx_vec(f_normal)
+                            if not f_normal:
+                                try:
+                                    params = get_attr_or_call(surf, "PlaneParams")
+                                    if params and len(params) >= 3:
+                                        f_normal = [params[0], params[1], params[2]]
+                                except Exception:
+                                    pass
+                            f_normal = _tx_vec(f_normal)
 
                         if req_norm:
                             if not f_normal:
@@ -706,13 +734,32 @@ class InspectionOperations:
                             if abs(1.0 - dot) > normal_tolerance:
                                 continue
 
-                        # Radius check
+                        # Radius and axis (cylinders: CylinderParams = origin xyz, axis xyz, radius)
                         f_radius = None
+                        f_axis = None
+                        f_axis_origin = None
                         if is_cyl:
                             cparams = get_attr_or_call(surf, "CylinderParams")
                             if cparams and len(cparams) >= 7:
                                 f_radius = cparams[6]
-                        elif is_sphere:
+                                f_axis_origin = _tx_pt([cparams[0], cparams[1], cparams[2]])
+                                f_axis = _tx_vec([cparams[3], cparams[4], cparams[5]])
+                        elif is_cone:
+                            try:
+                                kparams = get_attr_or_call(surf, "ConeParams")
+                                if kparams and len(kparams) >= 6:
+                                    f_axis_origin = _tx_pt([kparams[0], kparams[1], kparams[2]])
+                                    f_axis = _tx_vec([kparams[3], kparams[4], kparams[5]])
+                            except Exception:
+                                pass
+
+                        if req_axis:
+                            if not f_axis:
+                                continue
+                            if abs(1.0 - abs(sum(a * b for a, b in zip(f_axis, req_axis)))) > normal_tolerance:
+                                continue
+
+                        if is_sphere:
                             sparams = get_attr_or_call(surf, "SphereParams")
                             if sparams and len(sparams) >= 4:
                                 f_radius = sparams[3]
@@ -721,19 +768,8 @@ class InspectionOperations:
                             if f_radius is None or abs(f_radius - radius_m) > radius_tol_m:
                                 continue
 
-                        # Bounding box check
-                        box = _tx_box(get_attr_or_call(f, "GetBox"))
-                        if box and len(box) >= 6:
-                            if bmin_m and any(box[i] < bmin_m[i] - 1e-4 for i in range(3)):
-                                continue
-                            if bmax_m and any(box[i + 3] > bmax_m[i] + 1e-4 for i in range(3)):
-                                continue
-                            if pos_m:
-                                # Check point inside face box
-                                if not (box[0] - 1e-3 <= pos_m[0] <= box[3] + 1e-3 and
-                                        box[1] - 1e-3 <= pos_m[1] <= box[4] + 1e-3 and
-                                        box[2] - 1e-3 <= pos_m[2] <= box[5] + 1e-3):
-                                    continue
+                        if box is None:  # no spatial filter: still needed for the axis span below
+                            box = _tx_box(get_attr_or_call(f, "GetBox"))
 
                         area_m2 = get_attr_or_call(f, "GetArea") or 0.0
                         centroid_m = _tx_pt(face_centroid_m(f))
@@ -748,6 +784,18 @@ class InspectionOperations:
                             "radius_mm": round(f_radius * 1000, 2) if f_radius is not None else None,
                             "component": body_comp,
                         }
+                        if f_axis and f_axis_origin:
+                            # Point of the axis nearest the face centroid: the hole/boss centre even when
+                            # the cylinder is split into half faces (imported STEP).
+                            ref = centroid_m or f_axis_origin
+                            t_ax = sum((ref[i] - f_axis_origin[i]) * f_axis[i] for i in range(3))
+                            desc["axis"] = [round(c, 4) + 0.0 for c in f_axis]
+                            desc["axis_point_mm"] = [round((f_axis_origin[i] + t_ax * f_axis[i]) * 1000, 3) for i in range(3)]
+                            if box and len(box) >= 6:
+                                # For an axis along a world axis the face box gives the span along it.
+                                for i in range(3):
+                                    if abs(abs(f_axis[i]) - 1.0) < 1e-6:
+                                        desc["span_along_axis_mm"] = [round(box[i] * 1000, 3), round(box[i + 3] * 1000, 3)]
                         matched_entities.append(f)
                         entity_descriptors.append(desc)
 

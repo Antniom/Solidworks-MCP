@@ -861,7 +861,7 @@ _TOOL_HANDLERS: Dict[str, Callable[[dict], Dict[str, Any]]] = {
     'select': _route('by', {
         'name': _select_entity,
         'point': _select_entity,
-        'geometry': _auto('select_by_geometry', ('target_type', 'face'), 'surface_type', 'normal', ('normal_tolerance', 0.05), 'radius', ('radius_tolerance', 0.05), 'point_on_surface', 'curve_type', 'length', ('length_tolerance', 0.1), 'midpoint', 'point', 'bbox_min', 'bbox_max', ('mark', 0), ('append', False), 'unit', 'component', ('max_results', 200), ('time_budget_s', 40.0)),
+        'geometry': _auto('select_by_geometry', ('target_type', 'face'), 'surface_type', 'normal', ('normal_tolerance', 0.05), 'radius', ('radius_tolerance', 0.05), 'point_on_surface', 'curve_type', 'length', ('length_tolerance', 0.1), 'midpoint', 'point', 'bbox_min', 'bbox_max', ('mark', 0), ('append', False), 'unit', 'component', ('max_results', 200), ('time_budget_s', 40.0), 'axis'),
         'centroid': _select_by_centroid,
         'path': _sdk("selectByPath", "Selection by path failed", build=lambda a: {
             "path": a.get("path", ""), "multiSelect": bool(a.get("append", False)), "mark": int(a.get("mark", 0))}),
@@ -967,6 +967,14 @@ _PART_MUTATING_TOOLS = {
     "execute_code",
 }
 
+# Tools that hand control to the user or run a long solver: leave SolidWorks' normal idle processing on.
+_NO_COMMAND_IN_PROGRESS_TOOLS = {
+    "mesh_and_run_simulation",
+    "show_interactive_studio",
+    "studio_action",
+    "supervisor_clean_processes",
+}
+
 _SUBTRACTIVE_TOOLS = {
     "cut_extrude",
     "create_hole_wizard",
@@ -988,6 +996,29 @@ def _execute_tool_on_sta(name: str, arguments: dict) -> Tuple[Dict[str, Any], Op
             dispatched=False,
         )
 
+    # ISldWorks.CommandInProgress tells SolidWorks that an out-of-process client is running a batch of
+    # API calls. Measured on SW 2025: 5.6 ms -> 0.28 ms per COM call (a face scan of a 5,300-face
+    # assembly went from minutes to seconds, MCP-019). It must be switched off again afterwards.
+    cip_app = None
+    if name not in _NO_COMMAND_IN_PROGRESS_TOOLS:
+        try:
+            if sw_automation.is_connected and sw_automation._sw_app is not None:
+                sw_automation._sw_app.CommandInProgress = True
+                cip_app = sw_automation._sw_app
+        except Exception:
+            cip_app = None
+    try:
+        return _execute_tool_on_sta_inner(name, arguments, tid)
+    finally:
+        # The tool may have (re)connected: clear the flag on the app it was set on and the current one.
+        for app in {id(a): a for a in (cip_app, getattr(sw_automation, "_sw_app", None)) if a is not None}.values():
+            try:
+                app.CommandInProgress = False
+            except Exception:
+                pass
+
+
+def _execute_tool_on_sta_inner(name: str, arguments: dict, tid: int) -> Tuple[Dict[str, Any], Optional[str], Optional[str], Optional[int]]:
     vol_before = None
     if name in _PART_MUTATING_TOOLS:
         try:
@@ -1040,6 +1071,13 @@ def get_tool_timeout(tool_name: str, cfg: Any, arguments: Optional[dict] = None)
             return float(getattr(cfg, "import_timeout", 900.0))
         if tool_name == "add_component":
             return float(getattr(cfg, "open_save_timeout", 120.0)) * 2
+    if tool_name == "select" and arguments:
+        # The geometry scan stops itself at time_budget_s; give it room to return its partial result.
+        try:
+            budget = float(arguments.get("time_budget_s") or 40.0)
+        except (TypeError, ValueError):
+            budget = 40.0
+        return max(float(getattr(cfg, "default_timeout", 60.0)), budget + 30.0)
     if tool_name in (
         "open_document",
         "save_document",
