@@ -390,6 +390,11 @@ class FeatureOperations:
                     end_cond = 0  # swEndCondBlind
                 cut_depth = depth_m
 
+            # Through-all on both sides is built as a true two-direction cut (direction 1 and
+            # direction 2 both "through all"). The single-direction ThroughAllBoth end condition cut
+            # only one side on some calls (MCP-012/025).
+            two_sided = bool(through_all and both_directions)
+
             feat = None
             method_used = ""
             # reverse_dir None = try the default side, then the opposite one (old behaviour);
@@ -403,11 +408,11 @@ class FeatureOperations:
             for dir_opt in dir_options:
                 try:
                     feat = doc.FeatureManager.FeatureCut4(
-                        True,           # Sd - single direction
+                        not two_sided,  # Sd - single direction
                         False,          # Flip
                         dir_opt,        # Dir - direction (try normal, then opposite)
-                        end_cond,       # T1 - end condition
-                        0,              # T2 - end condition 2
+                        1 if two_sided else end_cond,  # T1 - end condition
+                        1 if two_sided else 0,         # T2 - end condition 2
                         cut_depth,      # D1 - depth
                         0,              # D2 - depth 2
                         False, False,   # Dchk1, Dchk2 - draft on/off
