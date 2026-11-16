@@ -998,13 +998,17 @@ class AssemblyOperations:
             dim_name = constraint_name if "@" in constraint_name else f"D1@{constraint_name}"
             step_results = []
             collisions_detected = 0
+            poses_start = self._component_poses(doc)
 
             for i in range(n_steps + 1):
                 t = i / float(n_steps)
                 val = float(start_value) + t * (float(end_value) - float(start_value))
                 set_res = self.set_dimension(name=dim_name, value=val, units=unit)
                 if not set_res.get("success") and "@" not in constraint_name:
+                    first_res = set_res
                     set_res = self.set_dimension(name=constraint_name, value=val, units=unit)
+                    if not set_res.get("success"):
+                        set_res = first_res  # report why the real dimension was refused, not the fallback
                 try:
                     doc.EditRebuild3()
                     doc.GraphicsRedraw2()
@@ -1022,14 +1026,38 @@ class AssemblyOperations:
                     step_entry["interferences"] = itf_cnt
                     if itf_cnt > 0:
                         collisions_detected += 1
+                if not step_entry["updated"]:
+                    step_entry["error"] = set_res.get("message")
                 step_results.append(step_entry)
+
+            # Where things ended up, and whether every step was applied (a failed step used to be
+            # ignored and the drive reported success with the component still at the old place, MCP-043).
+            failed = [s for s in step_results if not s["updated"]]
+            moved = []
+            poses_end = self._component_poses(doc)
+            for cname, (o_end, box_end) in poses_end.items():
+                o_start = (poses_start.get(cname) or (None, None))[0]
+                if o_start is None or any(abs(a - b) > 1e-3 for a, b in zip(o_start, o_end)):
+                    moved.append({"name": cname, "origin_start_mm": o_start, "origin_end_mm": o_end,
+                                  "bbox_end_mm": box_end})
+            where = "; ".join(
+                f"{m['name']} origin {m['origin_start_mm']} -> {m['origin_end_mm']} mm" for m in moved[:4]) or "no component moved"
+            if failed:
+                return self._result(
+                    False,
+                    f"Drive of '{constraint_name}' incomplete: {len(failed)} of {len(step_results)} step(s) were not applied "
+                    f"(first: value {failed[0]['value']}: {failed[0].get('error')}). Final state: {where}.",
+                    SwErrors.swGeneralError,
+                    {"constraint_name": constraint_name, "dimension_name": dim_name, "trajectory": step_results,
+                     "moved_components": moved})
 
             return self._result(
                 True,
                 f"Drove '{constraint_name}' from {start_value} to {end_value} ({unit}) across {n_steps} steps "
-                f"(collisions={collisions_detected})",
+                f"(collisions={collisions_detected}); {where}",
                 SwErrors.swSuccess,
                 {
+                    "moved_components": moved,
                     "constraint_name": constraint_name,
                     "dimension_name": dim_name,
                     "start_value": start_value,

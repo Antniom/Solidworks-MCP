@@ -967,7 +967,11 @@ class FeatureOperations:
             # For linear/radial/diameter dimensions, non-positive values (<= 0) are geometrically invalid.
             # Reject immediately BEFORE any COM call when units indicate linear or when units is None (model default unit MMGS).
             # Angular dimensions permit negative values (representing offset direction / reversed angle) and 0.
-            if not is_explicitly_angular and target_num <= 0:
+            # A mate distance of 0 is valid (a closed slide, faces touching): allow 0 when the dimension
+            # belongs to a mate (MCP-043). Mate names: Distance1, LimitDistance1, Width1 …
+            owner = str(name or "").split("@")[1] if "@" in str(name or "") else str(name or "")
+            is_mate_dim = owner.lower().startswith(("distance", "limitdistance", "width", "angle", "limitangle"))
+            if not is_explicitly_angular and (target_num < 0 or (target_num == 0 and not is_mate_dim)):
                 return self._result(
                     False,
                     f"Invalid dimension value {target_num}: linear, radial, and diameter dimensions must be strictly positive (> 0).",

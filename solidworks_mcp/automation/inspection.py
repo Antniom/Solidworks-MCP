@@ -657,10 +657,19 @@ class InspectionOperations:
                     except Exception as c_ex:
                         logger.debug(f"select_by_geometry: component scan error: {c_ex}")
                 if not body_entries:
+                    if not append:
+                        try:
+                            doc.ClearSelection2(True)
+                        except Exception:
+                            pass
+                    why = (f"all {pruned} component(s) lie outside the bbox/point filter region" if pruned else
+                           f"no component named {component!r}" if component else
+                           "no component has solid bodies")
                     return self._result(
                         False,
-                        f"No component bodies found{(' for component ' + repr(component)) if component else ''} in the assembly.",
+                        f"Nothing matched: {why}. The selection was {'kept (append)' if append else 'cleared'}.",
                         SwErrors.swSelectionError,
+                        {"selected_count": 0, "components_pruned": pruned},
                     )
             else:
                 bodies = doc.GetBodies2(0, False) if callable(getattr(doc, "GetBodies2", None)) else getattr(doc, "GetBodies2", None)
