@@ -264,6 +264,23 @@ class InspectionOperations:
 
             # Feature dimensions and annotations (templates that show them draw large arrows and
             # dimension text over the model) are hidden for the picture and put back afterwards.
+            # Temporary headlight: the template's directional lights shine across the screen, so faces
+            # seen head-on got only the 0.3 ambient light and rendered at ~40 % of their colour
+            # (MCP-039). A view-relative light from the viewer is added for the picture and removed.
+            headlight_added = False
+            light_count_before = None
+            was_dirty = None
+            try:
+                was_dirty = bool(get_attr_or_call(doc, "GetSaveFlag"))
+                light_count_before = int(get_attr_or_call(doc, "GetLightSourceCount"))
+                if doc.AddLightSource("Directional-%d" % (900 + light_count_before), 2, "MCP capture headlight"):
+                    doc.SetLightSourcePropertyValuesVB(
+                        "Directional-%d" % (900 + light_count_before), 2, 0.5, 16777215, 1.0,
+                        0.0, 0.0, 1.0, 0.0, 0.0, -1.0, 45.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, False)
+                    headlight_added = True
+            except Exception as hl_ex:
+                logger.debug(f"capture headlight not added: {hl_ex}")
+
             hidden_prefs = []
             try:
                 ext = doc.Extension
@@ -356,6 +373,14 @@ class InspectionOperations:
                     pass
                 blank = _is_blank(filepath)
 
+            if headlight_added:
+                try:
+                    n_now = int(get_attr_or_call(doc, "GetLightSourceCount"))
+                    for i in range(n_now - 1, -1, -1):
+                        if str(doc.LightSourceUserName(i)) == "MCP capture headlight":
+                            doc.DeleteLightSource(i)
+                except Exception as hl_ex:
+                    logger.debug(f"capture headlight not removed: {hl_ex}")
             for pref in hidden_prefs:
                 try:
                     doc.Extension.SetUserPreferenceToggle(pref, 0, True)
