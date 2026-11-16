@@ -51,6 +51,10 @@ class FeatureOperations:
             fresh = _cvs(doc)
             if fresh is not None or getattr(pre_state, "vol_state", None) is None:
                 pre_state.vol_state = fresh
+            # Also hand it to the server's volume-delta report: its own "before" reading was taken
+            # while the sketch was still open, where only the low-accuracy body sum is available (MCP-038).
+            if fresh is not None:
+                self._sketch_closed_pre_vol = fresh
         except Exception as _e:
             logger.debug(f"pre-volume recapture failed: {_e}")
 
@@ -1644,6 +1648,7 @@ class FeatureOperations:
                     return None
 
             vol_before_mm3 = _vol_mm3()  # taken with the sketch closed
+            self._recapture_pre_volume(doc, pre_state)  # same reading for the server's V-delta (MCP-038)
 
             feat = doc.FeatureManager.FeatureRevolve2(
                 True,          # SingleDir

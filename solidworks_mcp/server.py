@@ -1036,7 +1036,13 @@ def _execute_tool_on_sta_inner(name: str, arguments: dict, tid: int) -> Tuple[Di
         except Exception:
             pass
 
+    sw_automation._sketch_closed_pre_vol = None
     result = _dispatch_tool(name, arguments)
+    # A sketch-consuming tool re-reads the starting volume once the sketch is closed, at the same
+    # (high) accuracy as the "after" reading; use it so both ends of the delta match (MCP-038).
+    if getattr(sw_automation, "_sketch_closed_pre_vol", None) is not None:
+        vol_before = sw_automation._sketch_closed_pre_vol
+        sw_automation._sketch_closed_pre_vol = None
     sw_ver = None
     act_doc = None
     try:
