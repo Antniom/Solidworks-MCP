@@ -2856,7 +2856,8 @@ class FeatureOperations:
             box = None
             vol = None
             try:
-                bx = get_attr_or_call(b, "GetBodyBox")
+                from ..core.com_compat import tight_body_box
+                bx = tight_body_box(b)
                 box = {"min": [round(float(v) * 1000.0, 3) for v in bx[:3]],
                        "max": [round(float(v) * 1000.0, 3) for v in bx[3:6]]}
             except Exception:

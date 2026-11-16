@@ -182,8 +182,8 @@ class ModelVerifier:
         if bodies:
             for body in bodies:
                 try:
-                    box_prop = getattr(body, "GetBodyBox", None)
-                    box = box_prop() if callable(box_prop) else box_prop
+                    from .com_compat import tight_body_box
+                    box = tight_body_box(body)  # exact, not the loose GetBodyBox (MCP-034)
                     if box and len(box) >= 6:
                         min_pt[0] = min(min_pt[0], box[0])
                         min_pt[1] = min(min_pt[1], box[1])

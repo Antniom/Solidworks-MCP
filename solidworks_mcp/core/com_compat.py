@@ -146,3 +146,27 @@ def null_dispatch() -> Any:
     if not HAS_PYWIN32:
         return None
     return win32com.client.VARIANT(pythoncom.VT_DISPATCH, None)
+
+def tight_body_box(body):
+    """
+    Exact bounding box [xmin, ymin, zmin, xmax, ymax, zmax] (m) of a solid body from
+    IBody2.GetExtremePoint in the six axis directions. IBody2.GetBodyBox is a loose box that can
+    be more than a millimetre too big on bodies with curved faces (MCP-034); it is the fallback.
+    """
+    try:
+        ext = []
+        for axis in range(3):
+            for sign in (-1.0, 1.0):
+                d = [0.0, 0.0, 0.0]
+                d[axis] = sign
+                r = body.GetExtremePoint(d[0], d[1], d[2])
+                if not r or not r[0]:
+                    raise ValueError("no extreme point")
+                ext.append(float(r[1 + axis]))
+        return [ext[0], ext[2], ext[4], ext[1], ext[3], ext[5]]
+    except Exception:
+        try:
+            bx = get_attr_or_call(body, "GetBodyBox")
+            return [float(v) for v in bx[:6]] if bx and len(bx) >= 6 else None
+        except Exception:
+            return None
