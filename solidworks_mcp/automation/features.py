@@ -2916,8 +2916,8 @@ class FeatureOperations:
             except Exception:
                 pass
             try:
-                mp = b.GetMassProperties(1.0)
-                vol = round(float(mp[3]) * 1e9, 2)
+                from ..core.com_compat import accurate_body_volume_m3
+                vol = round(accurate_body_volume_m3(doc, b) * 1e9, 2)
             except Exception:
                 pass
             out.append((i, b, str(b.Name), box, vol))

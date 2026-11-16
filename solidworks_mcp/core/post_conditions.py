@@ -87,7 +87,7 @@ def capture_vol_state(doc: Any) -> Optional[Tuple[float, int, int, int]]:
         try:
             from .com_compat import accurate_mass_properties
             amp = accurate_mass_properties(doc)
-            if amp and mp_resolved and volume_mm3 > 0 and abs(amp[3] * 1e9 - volume_mm3) <= 1e-3 * volume_mm3:
+            if amp and amp[3] > 0:
                 volume_mm3 = amp[3] * 1e9
         except Exception:
             pass

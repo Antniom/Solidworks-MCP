@@ -178,6 +178,21 @@ def accurate_mass_properties(doc):
     The default accuracy is off by about 4e-6 of the volume: on a 33-litre foam body a 2 mm3 cut read
     as -127 mm3 (MCP-037).
     """
+    # Primary: IMassProperty2 with an explicit Recalculate. GetMassProperties2 returns whatever
+    # SolidWorks has cached, so the same unchanged body read 68,858 or 68,851 mm3 depending on what
+    # had been computed before (MCP-040).
+    try:
+        mp = get_attr_or_call(doc.Extension, "CreateMassProperty2")
+        mp.AccuracyLevel = 2
+        get_attr_or_call(mp, "Recalculate")
+        vol = float(get_attr_or_call(mp, "Volume"))
+        if vol > 0:
+            com = list(get_attr_or_call(mp, "CenterOfMass") or (0.0, 0.0, 0.0))[:3]
+            area = float(get_attr_or_call(mp, "SurfaceArea") or 0.0)
+            mass = float(get_attr_or_call(mp, "Mass") or 0.0)
+            return [float(com[0]), float(com[1]), float(com[2]), vol, area, mass]
+    except Exception:
+        pass
     try:
         import pythoncom
         import win32com.client
@@ -188,3 +203,26 @@ def accurate_mass_properties(doc):
     except Exception:
         pass
     return None
+
+def accurate_body_volume_m3(doc, body):
+    """
+    Volume (m3) of one solid body at the highest accuracy (IMassProperty2, AccuracyLevel 2, with the
+    body as SelectedItems). IBody2.GetMassProperties has no accuracy setting and read 0.12 % high on a
+    wire shelf (MCP-040); it is only the fallback.
+    """
+    try:
+        import pythoncom
+        import win32com.client
+        mp = get_attr_or_call(doc.Extension, "CreateMassProperty2")
+        mp.AccuracyLevel = 2
+        mp.SelectedItems = win32com.client.VARIANT(pythoncom.VT_ARRAY | pythoncom.VT_DISPATCH, [body])
+        get_attr_or_call(mp, "Recalculate")  # without it Volume still holds the previous selection's value
+        v = float(get_attr_or_call(mp, "Volume"))
+        if v > 0:
+            return v
+    except Exception:
+        pass
+    try:
+        return float(body.GetMassProperties(1.0)[3])
+    except Exception:
+        return None
