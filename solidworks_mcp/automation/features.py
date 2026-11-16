@@ -1366,6 +1366,24 @@ class FeatureOperations:
                 )
 
             if action_clean in ("hide", "show"):
+                # In an assembly a component name hides/shows the whole component (MCP-033).
+                if self.get_document_type(doc) == "Assembly":
+                    for comp in (doc.GetComponents(False) or ()):
+                        cname = str(comp.Name2)
+                        if cname.lower() == target_feat_name.lower() or cname.split("/")[-1].lower() == target_feat_name.lower():
+                            comp.Visible = 0 if action_clean == "hide" else 1  # swComponentHidden / swComponentVisible
+                            try:
+                                doc.GraphicsRedraw2()
+                            except Exception:
+                                pass
+                            state = int(comp.Visible)
+                            ok_vis = (state == 0) == (action_clean == "hide")
+                            return self._result(
+                                ok_vis,
+                                f"Component '{cname}' {'hidden' if state == 0 else 'shown'}" if ok_vis
+                                else f"Component '{cname}' visibility did not change",
+                                SwErrors.swSuccess if ok_vis else SwErrors.swGeneralError,
+                                {"component": cname, "visible": state != 0})
                 return self._set_feature_visibility(doc, feat, target_feat_name, action_clean == "hide")
 
             if action_clean == "suppress":

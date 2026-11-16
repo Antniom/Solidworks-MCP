@@ -437,7 +437,8 @@ def _build_tools() -> List[Tool]:
             name="manage_feature",
             description=(
                 "Manage feature tree operations: suppress, unsuppress, rename, delete, reorder, set_color, and hide/show "
-                "(visibility of reference geometry such as planes, axes and sketches, or of a solid body feature)."
+                "(visibility of reference geometry such as planes, axes and sketches, of a solid body feature, or, in "
+                "an assembly, of a whole component given by its name such as 'bracket-1')."
             ),
             inputSchema={
                 "type": "object",
