@@ -347,10 +347,41 @@ class DocumentOperations:
                                       SwErrors.swFileLoadError)
             
             title = self._get_doc_title(doc)
-            
-            return self._result(True, f"Opened: {title}",
+
+            # A document that is already loaded as a component of an open assembly is returned by
+            # OpenDoc6 without becoming the active document, so the next part tools edited the
+            # assembly instead (MCP-030). Activate it and confirm.
+            def _active_path() -> str:
+                try:
+                    act = self._sw_app.ActiveDoc
+                    return os.path.normcase(os.path.abspath(str(self._get_doc_path(act) or ""))) if act is not None else ""
+                except Exception:
+                    return ""
+
+            want = os.path.normcase(os.path.abspath(filepath))
+            if _active_path() != want:
+                for name in (title, os.path.basename(filepath), filepath):
+                    try:
+                        self._sw_app.ActivateDoc3(name, False, 2, byref_int(0))  # 2 = don't rebuild
+                    except Exception:
+                        pass
+                    if _active_path() == want:
+                        break
+            if _active_path() != want:
+                active_title = ""
+                try:
+                    active_title = self._get_doc_title(self._sw_app.ActiveDoc)
+                except Exception:
+                    pass
+                return self._result(
+                    False,
+                    f"'{title}' is loaded but could not be made the active document (active: '{active_title}'). "
+                    "Tools act on the active document, so nothing further was done.",
+                    SwErrors.swFileLoadError, {"name": title, "path": filepath, "active_document": active_title})
+
+            return self._result(True, f"Opened and active: {title}",
                               SwErrors.swSuccess,
-                              {"name": title, "path": filepath})
+                              {"name": title, "path": filepath, "active": True})
             
         except Exception as e:
             logger.error(f"Open document error: {e}\n{traceback.format_exc()}")
