@@ -171,26 +171,84 @@ def tight_body_box(body):
         except Exception:
             return None
 
-def accurate_mass_properties(doc):
-    """
-    Document mass properties at SolidWorks' highest accuracy (IModelDocExtension.GetMassProperties2
-    with accuracy 2): [cx, cy, cz, volume, area, mass, ...] in SI units, or None.
-    The default accuracy is off by about 4e-6 of the volume: on a 33-litre foam body a 2 mm3 cut read
-    as -127 mm3 (MCP-037).
-    """
-    # Primary: IMassProperty2 with an explicit Recalculate. GetMassProperties2 returns whatever
-    # SolidWorks has cached, so the same unchanged body read 68,858 or 68,851 mm3 depending on what
-    # had been computed before (MCP-040).
+def _save_selection(doc):
+    """[(object, mark)] of the current selection, so a measurement can put it back."""
+    saved = []
+    try:
+        sm = doc.SelectionManager
+        for i in range(1, int(sm.GetSelectedObjectCount2(-1)) + 1):
+            try:
+                saved.append((sm.GetSelectedObject6(i, -1), int(sm.GetSelectedObjectMark(i))))
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return saved
+
+
+def _restore_selection(doc, saved):
+    """Re-select what _save_selection recorded (with its marks); best effort."""
+    try:
+        doc.ClearSelection2(True)
+    except Exception:
+        return
+    for obj, mark in saved:
+        if obj is None:
+            continue
+        try:
+            if not obj.Select2(True, mark):
+                raise ValueError
+        except Exception:
+            try:
+                obj.Select4(True, None)
+            except Exception:
+                pass
+
+
+def _measure_items(doc):
+    """What 'the whole document' is for IMassProperty2: every solid body, or every top-level component."""
+    try:
+        if int(get_attr_or_call(doc, "GetType")) == 2:  # assembly
+            return [c for c in (doc.GetComponents(True) or ()) if not get_attr_or_call(c, "IsSuppressed")]
+        return list(doc.GetBodies2(0, False) or ())
+    except Exception:
+        return []
+
+
+def _mass_property2(doc, items):
+    """IMassProperty2 at accuracy 2 over `items`, recalculated. Restores the document selection,
+    which SelectedItems changes (and which, left alone, limits the measurement: MCP-042)."""
+    import pythoncom
+    import win32com.client
+    saved = _save_selection(doc)
     try:
         mp = get_attr_or_call(doc.Extension, "CreateMassProperty2")
         mp.AccuracyLevel = 2
-        get_attr_or_call(mp, "Recalculate")
-        vol = float(get_attr_or_call(mp, "Volume"))
-        if vol > 0:
-            com = list(get_attr_or_call(mp, "CenterOfMass") or (0.0, 0.0, 0.0))[:3]
-            area = float(get_attr_or_call(mp, "SurfaceArea") or 0.0)
-            mass = float(get_attr_or_call(mp, "Mass") or 0.0)
-            return [float(com[0]), float(com[1]), float(com[2]), vol, area, mass]
+        mp.SelectedItems = win32com.client.VARIANT(pythoncom.VT_ARRAY | pythoncom.VT_DISPATCH, list(items))
+        get_attr_or_call(mp, "Recalculate")  # without it the values belong to the previous item set
+        return mp
+    finally:
+        _restore_selection(doc, saved)
+
+
+def accurate_mass_properties(doc):
+    """
+    Document mass properties at SolidWorks' highest accuracy over ALL bodies / components:
+    [cx, cy, cz, volume, area, mass] in SI units, or None.
+    - The default accuracy is off by about 4e-6 of the volume (MCP-037).
+    - GetMassProperties2 returns cached values (MCP-040).
+    - IMassProperty2 without explicit items measures only the current selection (MCP-042).
+    """
+    try:
+        items = _measure_items(doc)
+        if items:
+            mp = _mass_property2(doc, items)
+            vol = float(get_attr_or_call(mp, "Volume"))
+            if vol > 0:
+                com = list(get_attr_or_call(mp, "CenterOfMass") or (0.0, 0.0, 0.0))[:3]
+                area = float(get_attr_or_call(mp, "SurfaceArea") or 0.0)
+                mass = float(get_attr_or_call(mp, "Mass") or 0.0)
+                return [float(com[0]), float(com[1]), float(com[2]), vol, area, mass]
     except Exception:
         pass
     try:
@@ -204,20 +262,15 @@ def accurate_mass_properties(doc):
         pass
     return None
 
+
 def accurate_body_volume_m3(doc, body):
     """
-    Volume (m3) of one solid body at the highest accuracy (IMassProperty2, AccuracyLevel 2, with the
-    body as SelectedItems). IBody2.GetMassProperties has no accuracy setting and read 0.12 % high on a
-    wire shelf (MCP-040); it is only the fallback.
+    Volume (m3) of one solid body at the highest accuracy (IMassProperty2 over that body; the
+    selection is restored). IBody2.GetMassProperties has no accuracy setting and read 0.12 % high on
+    a wire shelf (MCP-040); it is only the fallback.
     """
     try:
-        import pythoncom
-        import win32com.client
-        mp = get_attr_or_call(doc.Extension, "CreateMassProperty2")
-        mp.AccuracyLevel = 2
-        mp.SelectedItems = win32com.client.VARIANT(pythoncom.VT_ARRAY | pythoncom.VT_DISPATCH, [body])
-        get_attr_or_call(mp, "Recalculate")  # without it Volume still holds the previous selection's value
-        v = float(get_attr_or_call(mp, "Volume"))
+        v = float(get_attr_or_call(_mass_property2(doc, [body]), "Volume"))
         if v > 0:
             return v
     except Exception:
