@@ -412,8 +412,19 @@ class AssemblyOperations:
                         return True
                     return False
                 else:
+                    # The assembly's own plane/axis/feature: select the feature object itself.
+                    # SelectByID2 with an empty type found nothing for "Top Plane" (MCP-041).
+                    try:
+                        own = doc.FeatureByName(ent_name)
+                        if own is not None and own.Select2(append, 1):
+                            return True
+                    except Exception:
+                        pass
                     null_callout = win32com.client.VARIANT(pythoncom.VT_DISPATCH, None) if HAS_PYWIN32 else None
-                    return doc.Extension.SelectByID2(ent_name, "", 0.0, 0.0, 0.0, append, 1, null_callout, 0)
+                    for sel_type in ("PLANE", "AXIS", ""):
+                        if doc.Extension.SelectByID2(ent_name, sel_type, 0.0, 0.0, 0.0, append, 1, null_callout, 0):
+                            return True
+                    return False
 
             ok1 = True if use_selection else select_target(entity1, comp1, False)
             if not ok1:
