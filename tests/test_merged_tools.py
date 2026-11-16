@@ -71,9 +71,11 @@ def test_select_by_geometry(automation):
 def test_select_by_centroid(automation):
     call("select", by="centroid", x=0, y=0, z=20)
     automation.find_face.assert_called_once_with(
-        min_area=10.0, surface_type="plane", body_index=1, x=0, y=0, z=20, tolerance=0.5, select=True)
-    call("select", by="centroid", target_type="edge", x=5, locate_only=True)
-    automation.find_edge.assert_called_once_with(body_index=1, x=5, y=None, z=None, tolerance=0.5, select=False)
+        min_area=10.0, surface_type="plane", body_index=1, x=0, y=0, z=20, tolerance=0.5, select=True,
+        append=False, mark=0)
+    call("select", by="centroid", target_type="edge", x=5, locate_only=True, append=True, mark=1)
+    automation.find_edge.assert_called_once_with(body_index=1, x=5, y=None, z=None, tolerance=0.5, select=False,
+                                                 append=True, mark=1)
 
 
 def test_select_by_path(automation, runner):

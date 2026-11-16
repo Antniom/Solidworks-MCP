@@ -53,7 +53,9 @@ class FeatureOperations:
                 pre_state.vol_state = fresh
             # Also hand it to the server's volume-delta report: its own "before" reading was taken
             # while the sketch was still open, where only the low-accuracy body sum is available (MCP-038).
-            if fresh is not None:
+            # First reading wins: tools that build several sketch features in one call (counterbored
+            # holes, multi-edge plain walls) must report the delta of the whole call.
+            if fresh is not None and getattr(self, "_sketch_closed_pre_vol", None) is None:
                 self._sketch_closed_pre_vol = fresh
         except Exception as _e:
             logger.debug(f"pre-volume recapture failed: {_e}")

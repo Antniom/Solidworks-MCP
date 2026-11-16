@@ -122,7 +122,8 @@ Supported schema parameters:
 - `target_type`: `"face"`, `"edge"`, `"vertex"` (default: `"face"`)
 - `surface_type`: (For faces) `"plane"`, `"cylinder"`, `"cone"`, `"sphere"`, `"torus"`, `"bspline"`
 - `curve_type`: (For edges) `"line"`, `"circle"`, `"arc"`, `"bspline"`
-- `normal`: `[nx, ny, nz]` target unit vector with `normal_tolerance` (for planar faces)
+- `normal`: `[nx, ny, nz]` outward normal with `normal_tolerance` (planar faces only; curved faces never match)
+- `axis`: `[ax, ay, az]` axis direction of cylindrical/conical faces, either sense. Each matched cylinder reports `radius_mm`, `axis`, `axis_point_mm` (the hole or boss centre) and `span_along_axis_mm`, which is how to read hole patterns from bought STEP parts (add `component` and `bbox_min`/`bbox_max` in assemblies).
 - `radius`: Cylindrical/spherical face or circular edge radius with `radius_tolerance`
 - `length`: Edge length filter with `length_tolerance`
 - `point_on_surface`: `[x, y, z]` 3D coordinate lying on target face
@@ -132,9 +133,12 @@ Supported schema parameters:
 - `mark`: Integer selection mark (default: `0`)
 - `append`: `true` to add to current selection, `false` to clear previous selection first (default: `false`)
 - `unit`: `"mm"`, `"inch"`, `"m"`, `"cm"` (default: `"mm"`)
+A select that matches nothing clears the selection (unless `append`), so a following `fillet_edges` fails instead of acting on an old selection. Results report `total_selection_count`: check it before a multi-edge fillet or chamfer.
 
 ### 5. Inspection & Verification
-- `inspect_model {}`: Returns body count, bounding box `[dx, dy, dz]`, volume ($mm^3$), surface area ($mm^2$), center of mass, and rebuild error status.
+- `inspect_model {}`: Returns body count, exact bounding box (min/max per axis for parts), volume ($mm^3$, highest accuracy), surface area ($mm^2$), center of mass, and rebuild status (feature errors and warnings).
+- `list_topology {"kind": "bodies"}`: One line per solid body with its box and volume (multi-body parts).
+- Every feature tool appends `| V <volume> (<delta> mm³) | F<faces> E<edges>`: compute the expected delta before the call and compare.
 - `verify_model {"expected_dx": float, "expected_dy": float, "expected_dz": float, "expected_bodies": 1, "tolerance_mm": 0.2}`: Asserts that final geometry matches CAD design specifications.
 - `capture_viewport {"filepath": str, "view_name": "*Isometric"}`: Captures crisp rendered viewport PNG.
 
@@ -167,10 +171,18 @@ All selection goes through one tool, `select`, with the method chosen by `"by"`:
 
 ### 9. Sheet Metal
 1. `set_sheet_metal_thickness {"thickness_mm": 1.5, "bend_radius_mm": 1.5, "k_factor": 0.5}`
-2. Sketch the blank, then `sheet_metal_face {}` to create the base flange.
-3. `list_topology {"kind": "edges"}` to get edge indices, then `flange {"edge_indices": [3], "distance": 25, "angle": 90}`.
+2. Sketch the blank, then `sheet_metal_face {}` to create the base flange (closed profile = plate; an open line chain plus `depth` = a formed section with real bends and a flat pattern; read `sketch_extent` to see which side the thickness went).
+3. `list_topology {"kind": "edges"}` to get edge indices, then `flange {"edge_indices": [3], "distance": 25}`: a real sheet-metal Edge-Flange (bend radius, in the flat pattern), rising from the face the picked edge belongs to. `position`: `material_inside` (default) / `material_outside` / `bend_outside`. Where flanges on neighbouring edges meet at a corner, pass `end_offsets: [low, high]` (mm) to stop the wall short of them; a flange that runs into its neighbours is rejected. Re-list edges before every flange call (a flange trims the sheet). `plain_wall: true` builds a simple extruded wall without a bend instead.
 4. Sketch cut-outs on a face and `sheet_metal_cut {"through_all": true}`.
+Not available yet: hem, miter flange, form/emboss tools.
 Check bend radii and hole-to-bend distances against `solidworks-dfm`.
+
+### 9b. Tubes, Multi-body Parts, Mirror
+- `sweep_tube {"points": [[x, y, z], ...], "diameter": 8, "bend_radius": 15}`: a solid round tube along a 3D polyline (refrigerant lines, drain tubes, wire rods, harness bundles); the result gives the centre-line length and checks the volume. `merge: false` keeps it as its own body.
+- `extrude_sketch {"merge": false}` makes a separate solid body; `draft_angle` (+`draft_outward`) tapers the walls.
+- `combine_bodies {"operation": "subtract", "main_body": 1, "tool_bodies": [2, 3]}` (also `add`, `intersect`): e.g. a foam body = cavity block minus liner bodies. Body indices from `list_topology {"kind": "bodies"}`.
+- `create_pattern {"pattern_type": "mirror", "mirror_plane": "Right"}` mirrors all bodies (`merge: false` keeps the copy separate) or, with `feature_name`, those features.
+- `revolve_sketch` reports the volume change and the X/Y/Z range of the new faces; for a partial revolve read it to see which side it turned to (`reverse_dir`, or `both_directions` for a symmetric one).
 
 ### 10. Appearance & Images
 - `apply_material_appearance {"appearance_name": "Aluminum - Polished", "target_type": "part" | "feature" | "component", "target_name": str}` or a custom `color_rgb` / `reflectivity` / `transparency`. A material assigned with `set_material` brings a reflective appearance of its own; a part-level custom colour replaces it with a plain colour appearance (the material is kept).
