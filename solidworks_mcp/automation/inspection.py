@@ -916,10 +916,18 @@ class InspectionOperations:
 
                         # Bounding box filter
                         box = None
-                        if pt1 and pt2:
+                        closed = not (pt1 and pt2) or all(abs(a - b) < 1e-9 for a, b in zip(pt1, pt2))
+                        if is_circle and e_radius is not None and closed:
+                            # Full circle: extent r*sqrt(1 - a_i^2) along each axis (zero along its own
+                            # axis). The old box was a sphere around the centre, so a circle lying on
+                            # the edge of the requested box never matched (MCP-035).
+                            cp = get_attr_or_call(curve, "CircleParams")
+                            ctr = _tx_pt([cp[0], cp[1], cp[2]])
+                            ax = _tx_vec([cp[3], cp[4], cp[5]])
+                            half = [e_radius * math.sqrt(max(0.0, 1.0 - ax[i] * ax[i])) for i in range(3)]
+                            box = [ctr[i] - half[i] for i in range(3)] + [ctr[i] + half[i] for i in range(3)]
+                        elif pt1 and pt2:
                             box = [min(pt1[i], pt2[i]) for i in range(3)] + [max(pt1[i], pt2[i]) for i in range(3)]
-                        elif e_radius is not None and e_mid_m:
-                            box = [e_mid_m[i] - e_radius for i in range(3)] + [e_mid_m[i] + e_radius for i in range(3)]
 
                         if box:
                             if bmin_m and any(box[i] < bmin_m[i] - 1e-4 for i in range(3)):
@@ -971,6 +979,13 @@ class InspectionOperations:
             scope_note = (f" Scanned {scanned} {target_type_clean}(s)"
                           + (f", skipped {pruned_count} component(s) outside the filter region" if pruned_count else "") + ".")
             if not matched_entities:
+                # Nothing matched: do not leave an earlier selection behind for the next
+                # fillet/chamfer/shell to act on (MCP-035).
+                if not append:
+                    try:
+                        doc.ClearSelection2(True)
+                    except Exception:
+                        pass
                 return self._result(
                     False,
                     f"No {target_type_clean}s matched the specified geometric filters"

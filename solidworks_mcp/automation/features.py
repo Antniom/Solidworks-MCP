@@ -593,9 +593,9 @@ class FeatureOperations:
                 return self._result(False, f"Fillet failed post-condition verification: {post_msg}",
                                   SwErrors.swFeatureError, post_diag)
             
-            return self._result(True, f"Fillet: r={radius}{unit_str} [{method_used}]",
+            return self._result(True, f"Fillet: r={radius}{unit_str} on {sel_count} selected entit{'y' if sel_count == 1 else 'ies'} [{method_used}]",
                               SwErrors.swSuccess,
-                              {"radius": radius, "unit": unit_str,
+                              {"radius": radius, "unit": unit_str, "selected_entities": int(sel_count),
                                "feature_name": getattr(feat, "Name", "Fillet") if hasattr(feat, "Name") else "Fillet"})
             
         except Exception as e:
