@@ -2721,8 +2721,8 @@ class FeatureOperations:
             sketch_feat = None
             try:
                 sm.AddToDB = True
-                ok_lines = all(sm.CreateLine(a[0], a[1], a[2], b[0], b[1], b[2]) is not None
-                               for a, b in zip(pts, pts[1:]))
+                path_lines = [sm.CreateLine(a[0], a[1], a[2], b[0], b[1], b[2]) for a, b in zip(pts, pts[1:])]
+                ok_lines = all(l is not None for l in path_lines)
                 sm.AddToDB = False
                 bad_corner = None
                 if ok_lines and r_b > 0:
@@ -2731,10 +2731,23 @@ class FeatureOperations:
                         v = [(pts[i + 1][k] - pts[i][k]) / segs[i] for k in range(3)]
                         if abs(sum(a * b for a, b in zip(u, v)) + 1.0) < 1e-9:
                             continue
+                        # Select the corner through the sketch point object itself. Picking it by
+                        # coordinates (SelectByID2) hits the faces of existing bodies in front of it,
+                        # so the fillet failed in any part that already had geometry (MCP-028).
                         doc.ClearSelection2(True)
-                        doc.Extension.SelectByID2("", "SKETCHPOINT", pts[i][0], pts[i][1], pts[i][2], False, 0,
-                                                  null_dispatch(), 0)
-                        if sm.CreateFillet(r_b, 1) is None:
+                        picked = False
+                        try:
+                            corner_pt = get_attr_or_call(path_lines[i - 1], "GetEndPoint2")
+                            picked = bool(corner_pt.Select4(False, null_dispatch()))
+                        except Exception:
+                            picked = False
+                        if not picked:
+                            try:
+                                picked = bool(path_lines[i - 1].Select4(False, null_dispatch())) and \
+                                    bool(path_lines[i].Select4(True, null_dispatch()))
+                            except Exception:
+                                picked = False
+                        if not picked or sm.CreateFillet(r_b, 1) is None:
                             bad_corner = i + 1
                             break
             finally:
