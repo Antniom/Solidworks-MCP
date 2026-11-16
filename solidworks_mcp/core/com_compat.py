@@ -170,3 +170,21 @@ def tight_body_box(body):
             return [float(v) for v in bx[:6]] if bx and len(bx) >= 6 else None
         except Exception:
             return None
+
+def accurate_mass_properties(doc):
+    """
+    Document mass properties at SolidWorks' highest accuracy (IModelDocExtension.GetMassProperties2
+    with accuracy 2): [cx, cy, cz, volume, area, mass, ...] in SI units, or None.
+    The default accuracy is off by about 4e-6 of the volume: on a 33-litre foam body a 2 mm3 cut read
+    as -127 mm3 (MCP-037).
+    """
+    try:
+        import pythoncom
+        import win32com.client
+        status = win32com.client.VARIANT(pythoncom.VT_BYREF | pythoncom.VT_I4, 0)
+        r = doc.Extension.GetMassProperties2(2, status, False)
+        if r and len(r) >= 6 and float(r[3]) > 0:
+            return [float(v) for v in r]
+    except Exception:
+        pass
+    return None

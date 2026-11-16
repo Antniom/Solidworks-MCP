@@ -207,7 +207,10 @@ class ModelVerifier:
         try:
             # Method 1: doc.GetMassProperties (returns 12 doubles: COM x,y,z, Volume, SurfaceArea, Mass, ...)
             get_mp = getattr(doc, "GetMassProperties", None)
-            mp_arr = None
+            from .com_compat import accurate_mass_properties
+            mp_arr = accurate_mass_properties(doc)
+            if mp_arr is not None:
+                get_mp = None
             if callable(get_mp):
                 try:
                     mp_arr = get_mp()

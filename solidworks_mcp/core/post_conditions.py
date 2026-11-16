@@ -82,6 +82,15 @@ def capture_vol_state(doc: Any) -> Optional[Tuple[float, int, int, int]]:
                 mp_resolved = True
         except Exception as bm_ex:
             logger.debug(f"capture_vol_state body mass properties failed: {bm_ex}")
+        # Prefer the high-accuracy document value when it agrees with the body sum (it is stale
+        # right after a sketch closes, hence the comparison).
+        try:
+            from .com_compat import accurate_mass_properties
+            amp = accurate_mass_properties(doc)
+            if amp and mp_resolved and volume_mm3 > 0 and abs(amp[3] * 1e9 - volume_mm3) <= 1e-3 * volume_mm3:
+                volume_mm3 = amp[3] * 1e9
+        except Exception:
+            pass
         if not mp_resolved:
             try:
                 get_mp = getattr(doc, "GetMassProperties", None)

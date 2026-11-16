@@ -1637,7 +1637,9 @@ class FeatureOperations:
 
             def _vol_mm3():
                 try:
-                    return float(get_attr_or_call(doc, "GetMassProperties")[3]) * 1e9
+                    from ..core.com_compat import accurate_mass_properties
+                    amp = accurate_mass_properties(doc)
+                    return (amp[3] if amp else float(get_attr_or_call(doc, "GetMassProperties")[3])) * 1e9
                 except Exception:
                     return None
 
