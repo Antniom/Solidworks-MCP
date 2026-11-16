@@ -1753,6 +1753,7 @@ class FeatureOperations:
         direction1: Optional[str] = None,
         direction2: Optional[str] = None,
         mirror_plane: Optional[str] = None,
+        merge: bool = True,
     ) -> Dict:
         """
         Create a linear or circular pattern feature (IFeatureManager.FeatureLinearPattern4 / FeatureCircularPattern4).
@@ -1768,7 +1769,7 @@ class FeatureOperations:
             pre_state = capture_pre_mutation_state(doc)
 
             if ptype == "mirror":
-                return self._mirror_about_plane(doc, pre_state, feature_name, mirror_plane)
+                return self._mirror_about_plane(doc, pre_state, feature_name, mirror_plane, merge)
 
             if ptype == "linear" and direction1:
                 return self._linear_pattern_along_axes(
@@ -2008,7 +2009,7 @@ class FeatureOperations:
             feat = get_attr_or_call(feat, "GetNextFeature")
         return None
 
-    def _mirror_about_plane(self, doc, pre_state, feature_name, mirror_plane) -> Dict:
+    def _mirror_about_plane(self, doc, pre_state, feature_name, mirror_plane, merge: bool = True) -> Dict:
         """
         Mirror features (feature_name, comma-separated for several) or, without feature_name, every
         solid body about a plane: 'Right' (world YZ, flips X), 'Top' (XZ, flips Y), 'Front' (XY,
@@ -2053,7 +2054,7 @@ class FeatureOperations:
         feat = None
         try:
             # InsertMirrorFeature2(MirrorBody, GeometryPattern, Merge, Knit, ScopeOptions)
-            feat = doc.FeatureManager.InsertMirrorFeature2(mirror_body, False, True, False, 0)
+            feat = doc.FeatureManager.InsertMirrorFeature2(mirror_body, False, bool(merge) or not mirror_body, False, 0)
         except Exception as ex:
             logger.debug(f"InsertMirrorFeature2 failed: {ex}")
             try:
@@ -2652,6 +2653,166 @@ class FeatureOperations:
                 except Exception:
                     continue
         return out
+
+    # ========================================================================
+    # Swept tube along a 3D path (refrigerant lines, drain tubes, harness bundles)
+    # ========================================================================
+
+    def sweep_tube(self, points: List[List[float]], diameter: float, bend_radius: float = 0.0,
+                   merge: bool = True, unit: str = "mm") -> Dict:
+        """
+        Solid round bar/tube envelope of `diameter` swept along a 3D polyline through `points`
+        (world [x, y, z]), with an optional `bend_radius` at every corner. Built as a 3D sketch
+        plus a circular-profile sweep; the volume is checked against pi r^2 x path length.
+        """
+        try:
+            doc, err = self.get_active_doc()
+            if err:
+                return err
+            if self.get_document_type(doc) != "Part":
+                return self._result(False, "sweep_tube needs a Part document.", SwErrors.swInvalidDocumentType)
+            if not points or len(points) < 2 or any(len(p) != 3 for p in points):
+                return self._result(False, "points must be at least two [x, y, z] points.", SwErrors.swInvalidInput)
+            if float(diameter) <= 0 or float(bend_radius or 0) < 0:
+                return self._result(False, "diameter must be > 0 and bend_radius >= 0.", SwErrors.swInvalidInput)
+            if get_attr_or_call(doc, "GetActiveSketch2") is not None:
+                return self._result(False, "Close the active sketch first (close_sketch).", SwErrors.swSketchError)
+            pts = [tuple(self._units.to_meters(float(c), unit) for c in p) for p in points]
+            d_m = self._units.to_meters(float(diameter), unit)
+            r_b = self._units.to_meters(float(bend_radius or 0.0), unit)
+            segs = [math.dist(a, b) for a, b in zip(pts, pts[1:])]
+            if min(segs) < 1e-6:
+                return self._result(False, "Two consecutive points are identical.", SwErrors.swInvalidInput)
+            # path length with filleted corners, and a check that every bend fits its two legs
+            length = sum(segs)
+            if r_b > 0:
+                if r_b < d_m / 2.0:
+                    return self._result(False, "bend_radius (centre line) must be at least diameter / 2.",
+                                        SwErrors.swInvalidInput)
+                used = [0.0] * len(segs)
+                for i in range(1, len(pts) - 1):
+                    u = [(pts[i - 1][k] - pts[i][k]) / segs[i - 1] for k in range(3)]
+                    v = [(pts[i + 1][k] - pts[i][k]) / segs[i] for k in range(3)]
+                    cosang = max(-1.0, min(1.0, sum(a * b for a, b in zip(u, v))))
+                    ang = math.acos(cosang)          # angle between the legs at the corner
+                    if abs(ang - math.pi) < 1e-6:
+                        continue                      # straight through: no bend
+                    if ang < 1e-3:
+                        return self._result(False, f"The path folds back on itself at point {i + 1}.",
+                                            SwErrors.swInvalidInput)
+                    tan_len = r_b / math.tan(ang / 2.0)
+                    used[i - 1] += tan_len
+                    used[i] += tan_len
+                    length += r_b * (math.pi - ang) - 2.0 * tan_len
+                short = [i + 1 for i, (u_, s_) in enumerate(zip(used, segs)) if u_ > s_ + 1e-9]
+                if short:
+                    return self._result(
+                        False, f"bend_radius {bend_radius} does not fit segment(s) {short} (too short for the bends "
+                               "at their ends). Use a smaller bend_radius or longer segments.", SwErrors.swInvalidInput)
+
+            pre_state = capture_pre_mutation_state(doc)
+            vol0 = None
+            try:
+                vol0 = float(get_attr_or_call(doc, "GetMassProperties")[3])
+            except Exception:
+                vol0 = 0.0
+            sm = doc.SketchManager
+            sm.Insert3DSketch(True)
+            sketch_feat = None
+            try:
+                sm.AddToDB = True
+                ok_lines = all(sm.CreateLine(a[0], a[1], a[2], b[0], b[1], b[2]) is not None
+                               for a, b in zip(pts, pts[1:]))
+                sm.AddToDB = False
+                bad_corner = None
+                if ok_lines and r_b > 0:
+                    for i in range(1, len(pts) - 1):
+                        u = [(pts[i - 1][k] - pts[i][k]) / segs[i - 1] for k in range(3)]
+                        v = [(pts[i + 1][k] - pts[i][k]) / segs[i] for k in range(3)]
+                        if abs(sum(a * b for a, b in zip(u, v)) + 1.0) < 1e-9:
+                            continue
+                        doc.ClearSelection2(True)
+                        doc.Extension.SelectByID2("", "SKETCHPOINT", pts[i][0], pts[i][1], pts[i][2], False, 0,
+                                                  null_dispatch(), 0)
+                        if sm.CreateFillet(r_b, 1) is None:
+                            bad_corner = i + 1
+                            break
+            finally:
+                try:
+                    sm.AddToDB = False
+                except Exception:
+                    pass
+                sm.Insert3DSketch(True)
+            f_it = get_attr_or_call(doc, "FirstFeature")
+            while f_it is not None:
+                if get_attr_or_call(f_it, "GetTypeName2") == "3DProfileFeature":
+                    sketch_feat = f_it
+                f_it = get_attr_or_call(f_it, "GetNextFeature")
+
+            def drop_sketch():
+                try:
+                    if sketch_feat is not None:
+                        doc.ClearSelection2(True)
+                        sketch_feat.Select2(False, 0)
+                        doc.Extension.DeleteSelection2(0)
+                except Exception:
+                    pass
+
+            if not ok_lines or bad_corner or sketch_feat is None:
+                drop_sketch()
+                return self._result(
+                    False,
+                    "sweep_tube: the 3D path could not be drawn"
+                    + (f" (the bend at point {bad_corner} could not be filleted)" if bad_corner else "")
+                    + ". Nothing was left in the part.", SwErrors.swSketchError)
+            fm = doc.FeatureManager
+            sd = fm.CreateDefinition(17)  # swFmSweep
+            sd.CircularProfile = True
+            sd.CircularProfileDiameter = d_m
+            try:
+                sd.Merge = bool(merge)
+            except Exception:
+                pass
+            sd.Path = sketch_feat
+            feat = fm.CreateFeature(sd)
+            get_attr_or_call(doc, "EditRebuild3")
+            if not feat:
+                drop_sketch()
+                return self._result(
+                    False, "sweep_tube: SolidWorks could not sweep along this path (the tube would intersect itself: "
+                           "use a larger bend_radius or a smaller diameter). Nothing was left in the part.",
+                    SwErrors.swFeatureError)
+            ok, post_msg, post_diag = verify_mutation_post_condition(doc, feat, pre_state, "feature")
+            if not ok:
+                return self._result(False, f"sweep_tube failed post-condition verification: {post_msg}",
+                                    SwErrors.swFeatureError, post_diag)
+            expected = math.pi * (d_m / 2.0) ** 2 * length * 1e9
+            added = None
+            try:
+                added = (float(get_attr_or_call(doc, "GetMassProperties")[3]) - (vol0 or 0.0)) * 1e9
+            except Exception:
+                pass
+            note = ""
+            if added is not None and abs(added - expected) > max(0.02 * expected, 1.0):
+                note = (f" NOTE: it added {added:.1f} mm3 but a free tube of this path is {expected:.1f} mm3: it "
+                        "overlaps or merged with existing geometry.")
+            return self._result(
+                True,
+                f"Swept tube D={diameter}{unit} along {len(pts)} points, centre-line length "
+                f"{length * 1000.0:.2f} mm, bend radius {bend_radius}{unit}: {feat.Name}.{note}",
+                SwErrors.swSuccess,
+                {"feature_name": feat.Name, "path_sketch": str(sketch_feat.Name),
+                 "length_mm": round(length * 1000.0, 3), "expected_volume_mm3": round(expected, 2),
+                 "added_volume_mm3": round(added, 2) if added is not None else None, "merged": bool(merge)})
+        except Exception as e:
+            logger.error(f"sweep_tube error: {e}\n{traceback.format_exc()}")
+            try:
+                doc_now, _ = self.get_active_doc()
+                if doc_now is not None and get_attr_or_call(doc_now, "GetActiveSketch2") is not None:
+                    doc_now.SketchManager.Insert3DSketch(True)
+            except Exception:
+                pass
+            return self._result(False, f"sweep_tube error: {e}", SwErrors.swGeneralError)
 
     # ========================================================================
     # Multi-body parts: list and combine solid bodies

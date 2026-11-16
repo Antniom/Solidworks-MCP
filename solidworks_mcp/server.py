@@ -809,7 +809,8 @@ _TOOL_HANDLERS: Dict[str, Callable[[dict], Dict[str, Any]]] = {
     'manage_feature': _auto('manage_feature', ('action', 'suppress'), ('feature_name', ''), 'new_name', 'target_feature', ('move_location', 'after'), ('delete_absorbed', True), ('delete_children', False), ('config_scope', 1), 'color_rgb'),
     'revolve_sketch': _auto('revolve_sketch', ('angle', 360.0), ('reverse_dir', False), ('is_thin', False), ('thin_thickness', 1.0), ('is_cut', False), 'axis_name', 'unit'),
     'create_shell': _auto('create_shell', ('thickness', 1.0), ('outward', False), 'unit', 'face_indices', ('body_index', 1)),
-    'create_pattern': _auto('create_pattern', ('pattern_type', 'linear'), 'feature_name', ('num1', 2), ('spacing1', 10.0), ('flip_dir1', False), ('num2', 1), ('spacing2', 0.0), ('flip_dir2', False), ('angle', 360.0), ('equal_spacing', True), 'unit', 'direction1', 'direction2', 'mirror_plane'),
+    'create_pattern': _auto('create_pattern', ('pattern_type', 'linear'), 'feature_name', ('num1', 2), ('spacing1', 10.0), ('flip_dir1', False), ('num2', 1), ('spacing2', 0.0), ('flip_dir2', False), ('angle', 360.0), ('equal_spacing', True), 'unit', 'direction1', 'direction2', 'mirror_plane', ('merge', True)),
+    'sweep_tube': _auto('sweep_tube', ('points', []), ('diameter', 8.0), ('bend_radius', 0.0), ('merge', True), 'unit'),
     'create_hole_wizard': _auto('create_hole_wizard', ('hole_type', 'counterbore'), ('standard', 'ISO'), ('fastener_type', 'Hex Bolt'), ('size', 'M6'), ('end_condition', 'through_all'), 'depth', 'diameter', 'unit'),
     'inspect_model': _auto('inspect_model'),
     'verify_model': _auto('verify_model', 'expected_dx', 'expected_dy', 'expected_dz', ('expected_bodies', 1), ('tolerance_mm', 0.2)),
@@ -951,6 +952,7 @@ def _dispatch_dialog_tool(name: str, arguments: dict) -> Dict[str, Any]:
 
 _PART_MUTATING_TOOLS = {
     "extrude_sketch",
+    "sweep_tube",
     "combine_bodies",
     "cut_extrude",
     "revolve_sketch",

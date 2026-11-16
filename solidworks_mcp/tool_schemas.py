@@ -519,6 +519,29 @@ def _build_tools() -> List[Tool]:
             }
         ),
         Tool(
+            name="sweep_tube",
+            description=(
+                "Solid round tube/bar of `diameter` swept along a 3D polyline through world points [x, y, z], with an "
+                "optional centre-line `bend_radius` at every corner (refrigerant lines, capillaries, drain tubes, "
+                "conduits, harness bundles, round gaskets). No sketch is needed: the tool draws the 3D path itself. The "
+                "result gives the centre-line length and compares the added volume with pi r^2 x length. merge=false "
+                "keeps the tube as its own solid body."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "points": {"type": "array", "minItems": 2,
+                               "items": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3},
+                               "description": "Path corner points [x, y, z] in order (world coordinates)"},
+                    "diameter": {"type": "number", "exclusiveMinimum": 0, "description": "Outside diameter of the tube"},
+                    "bend_radius": {"type": "number", "default": 0.0, "minimum": 0, "description": "Centre-line radius at every corner (0 = sharp corners); must be >= diameter / 2 and fit the segments"},
+                    "merge": {"type": "boolean", "default": True, "description": "false = separate solid body"},
+                    "unit": {"type": "string", "enum": ["mm", "inch", "m", "cm"], "description": "Length unit"}
+                },
+                "required": ["points", "diameter"]
+            }
+        ),
+        Tool(
             name="combine_bodies",
             description=(
                 "Boolean of solid bodies in a multi-body part (Combine). add: union of the bodies; subtract: main_body "
@@ -559,6 +582,7 @@ def _build_tools() -> List[Tool]:
                     },
                     "feature_name": {"type": "string", "description": "Name of feature to pattern (seed feature); mirror: one or several comma-separated, or omit to mirror the bodies"},
                     "mirror_plane": {"type": "string", "description": "mirror: 'Right', 'Top', 'Front' or the name of a reference plane"},
+                    "merge": {"type": "boolean", "default": True, "description": "mirror of bodies only: false keeps the mirrored copy as a separate solid body (needed when the copy does not touch the original)"},
                     "direction1": {"type": "string", "enum": ["x", "y", "z", "+x", "-x", "+y", "-y", "+z", "-z"],
                                    "description": "linear: world axis (with sign) for direction 1"},
                     "direction2": {"type": "string", "enum": ["x", "y", "z", "+x", "-x", "+y", "-y", "+z", "-z"],
