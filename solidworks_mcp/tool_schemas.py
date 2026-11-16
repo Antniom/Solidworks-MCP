@@ -484,12 +484,13 @@ def _build_tools() -> List[Tool]:
         ),
         Tool(
             name="revolve_sketch",
-            description="Revolve the active sketch around a centerline or specified axis (IFeatureManager.FeatureRevolve2).",
+            description=("Revolve the active sketch (closed profile + one construction line as the axis, or axis_name) as a boss or, with is_cut, a cut. The result gives the volume change and the X/Y/Z range of the new faces; a cut that removes nothing (or a boss that adds nothing) is removed and reported as an error, keeping the sketch."),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "angle": {"type": "number", "default": 360.0, "description": "Revolution angle in degrees"},
-                    "reverse_dir": {"type": "boolean", "default": False, "description": "Reverse revolution direction"},
+                    "reverse_dir": {"type": "boolean", "default": False, "description": "Partial revolve: turn to the other side of the sketch plane. Which side false/true gives depends on the axis line direction, so read the swept region in the result (new faces X/Y/Z range) and switch if it is the wrong side"},
+                    "both_directions": {"type": "boolean", "default": False, "description": "Partial revolve symmetric about the sketch plane: angle is the TOTAL (half each side)"},
                     "is_thin": {"type": "boolean", "default": False, "description": "Create thin feature"},
                     "thin_thickness": {"type": "number", "default": 1.0, "description": "Wall thickness for thin revolve"},
                     "is_cut": {"type": "boolean", "default": False, "description": "Revolve cut instead of boss"},

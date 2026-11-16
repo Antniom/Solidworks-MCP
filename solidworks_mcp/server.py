@@ -809,7 +809,7 @@ _TOOL_HANDLERS: Dict[str, Callable[[dict], Dict[str, Any]]] = {
     'get_dimensions': _auto('get_dimensions', 'feature_name', 'dimension_name'),
     'set_dimension': _auto('set_dimension', 'name', 'value', 'units', ('config_scope', 'this_configuration')),
     'manage_feature': _auto('manage_feature', ('action', 'suppress'), ('feature_name', ''), 'new_name', 'target_feature', ('move_location', 'after'), ('delete_absorbed', True), ('delete_children', False), ('config_scope', 1), 'color_rgb'),
-    'revolve_sketch': _auto('revolve_sketch', ('angle', 360.0), ('reverse_dir', False), ('is_thin', False), ('thin_thickness', 1.0), ('is_cut', False), 'axis_name', 'unit'),
+    'revolve_sketch': _auto('revolve_sketch', ('angle', 360.0), ('reverse_dir', False), ('is_thin', False), ('thin_thickness', 1.0), ('is_cut', False), 'axis_name', 'unit', ('both_directions', False)),
     'create_shell': _auto('create_shell', ('thickness', 1.0), ('outward', False), 'unit', 'face_indices', ('body_index', 1)),
     'create_pattern': _auto('create_pattern', ('pattern_type', 'linear'), 'feature_name', ('num1', 2), ('spacing1', 10.0), ('flip_dir1', False), ('num2', 1), ('spacing2', 0.0), ('flip_dir2', False), ('angle', 360.0), ('equal_spacing', True), 'unit', 'direction1', 'direction2', 'mirror_plane', ('merge', True)),
     'sweep_tube': _auto('sweep_tube', ('points', []), ('diameter', 8.0), ('bend_radius', 0.0), ('merge', True), 'unit'),

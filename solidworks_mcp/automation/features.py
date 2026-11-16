@@ -1600,9 +1600,12 @@ class FeatureOperations:
         is_cut: bool = False,
         axis_name: Optional[str] = None,
         unit: str = "mm",
+        both_directions: bool = False,
     ) -> Dict:
         """
         Revolve active sketch around a centerline or specified axis (IFeatureManager.FeatureRevolve2).
+        The result reports the volume change and the box of the faces the feature made, so the side
+        a partial revolve went to can be read; a cut that removes nothing is deleted and reported.
         """
         import math
         try:
@@ -1632,6 +1635,14 @@ class FeatureOperations:
 
             pre_state = capture_pre_mutation_state(doc)
 
+            def _vol_mm3():
+                try:
+                    return float(get_attr_or_call(doc, "GetMassProperties")[3]) * 1e9
+                except Exception:
+                    return None
+
+            vol_before_mm3 = _vol_mm3()  # taken with the sketch closed
+
             feat = doc.FeatureManager.FeatureRevolve2(
                 True,          # SingleDir
                 True,          # IsSolid
@@ -1639,7 +1650,7 @@ class FeatureOperations:
                 bool(is_cut),  # IsCut
                 bool(reverse_dir), # ReverseDir
                 False,         # BothDirectionUpToSameEntity
-                0,             # Dir1Type (swEndCondBlind = 0)
+                6 if both_directions else 0,  # Dir1Type (0 = blind, 6 = mid-plane: angle is the total)
                 0,             # Dir2Type
                 angle_rad,     # Dir1Angle
                 0.0,           # Dir2Angle
@@ -1661,11 +1672,46 @@ class FeatureOperations:
                 return self._result(False, f"revolve_sketch failed post-condition verification: {post_msg}", SwErrors.swFeatureError, post_diag)
 
             feat_name = getattr(feat, "Name", "Revolve")
+            vol_after_mm3 = _vol_mm3()
+            delta = (vol_after_mm3 - vol_before_mm3) if (vol_after_mm3 is not None and vol_before_mm3 is not None) else None
+            region = None
+            try:
+                lo, hi = [float("inf")] * 3, [float("-inf")] * 3
+                for f in (get_attr_or_call(feat, "GetFaces") or ()):
+                    b = get_attr_or_call(f, "GetBox")
+                    for i in range(3):
+                        lo[i], hi[i] = min(lo[i], b[i]), max(hi[i], b[i + 3])
+                if lo[0] != float("inf"):
+                    region = {"min": [round(v * 1000.0, 3) for v in lo], "max": [round(v * 1000.0, 3) for v in hi]}
+            except Exception:
+                region = None
+            wrong = delta is not None and ((is_cut and delta > -1e-3) or (not is_cut and delta < 1e-3))
+            if wrong:
+                try:
+                    doc.ClearSelection2(True)
+                    feat.Select2(False, 0)
+                    doc.Extension.DeleteSelection2(0)  # keep the sketch for another try
+                except Exception:
+                    pass
+                return self._result(
+                    False,
+                    f"Revolve {'cut' if is_cut else 'boss'} of {angle}° changed the volume by {delta:+.2f} mm³ "
+                    f"({'a cut must remove material' if is_cut else 'a boss must add material'}); it was removed and "
+                    f"the sketch '{sketch_name}' kept. The swept region was {region}. For a partial revolve try the "
+                    f"other side with reverse_dir={not bool(reverse_dir)}, or both_directions=true (angle = total, "
+                    "half each side of the sketch plane).",
+                    SwErrors.swFeatureError,
+                    {"volume_delta_mm3": round(delta, 3), "swept_region_mm": region, "sketch_name": sketch_name})
+            side = "both sides of the sketch plane" if both_directions else f"reverse_dir={bool(reverse_dir)}"
+            where = (f"; new faces span X {region['min'][0]:g}..{region['max'][0]:g}, Y {region['min'][1]:g}..{region['max'][1]:g}, "
+                     f"Z {region['min'][2]:g}..{region['max'][2]:g} mm") if region else ""
             return self._result(
                 True,
-                f"Successfully revolved sketch ({angle}°)",
+                f"Revolve {'cut' if is_cut else 'boss'} {angle}° ({side}): {feat_name}{where}",
                 SwErrors.swSuccess,
-                {"feature_name": feat_name, "angle": angle, "is_cut": is_cut},
+                {"feature_name": feat_name, "angle": angle, "is_cut": is_cut, "both_directions": bool(both_directions),
+                 "reverse_dir": bool(reverse_dir), "swept_region_mm": region,
+                 "volume_delta_mm3": round(delta, 3) if delta is not None else None},
             )
         except Exception as e:
             logger.error(f"revolve_sketch error: {e}\n{traceback.format_exc()}")
