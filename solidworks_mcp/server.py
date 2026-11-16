@@ -363,6 +363,8 @@ def _select_by_centroid(arguments: dict) -> Dict[str, Any]:
         z=arguments.get("z"),
         tolerance=arguments.get("tolerance", 0.5),
         select=not arguments.get("locate_only", False),
+        append=bool(arguments.get("append", False)),
+        mark=int(arguments.get("mark", 0) or 0),
     )
     if arguments.get("target_type") == "edge":
         return sw_automation.find_edge(**common)

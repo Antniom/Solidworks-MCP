@@ -1224,6 +1224,8 @@ class InspectionOperations:
 
     def find_face(
         self,
+        append: bool = False,
+        mark: int = 0,
         body_index: int = 1,
         x: Optional[float] = None,
         y: Optional[float] = None,
@@ -1276,8 +1278,9 @@ class InspectionOperations:
 
                     if select:
                         try:
-                            doc.ClearSelection2(True)
-                            f.Select2(False, 0)
+                            if not append:
+                                doc.ClearSelection2(True)
+                            f.Select2(True, int(mark or 0))
                         except Exception:
                             pass
 
@@ -1290,6 +1293,7 @@ class InspectionOperations:
                             "centroid_mm": [round(cx, 2), round(cy, 2), round(cz, 2)],
                             "area_mm2": round(area_mm2, 1),
                             "selected": select,
+                            "total_selection_count": int(doc.SelectionManager.GetSelectedObjectCount2(-1)) if select else None,
                         },
                     )
                 except Exception:
@@ -1306,6 +1310,8 @@ class InspectionOperations:
 
     def find_edge(
         self,
+        append: bool = False,
+        mark: int = 0,
         body_index: int = 1,
         x: Optional[float] = None,
         y: Optional[float] = None,
@@ -1350,8 +1356,9 @@ class InspectionOperations:
 
                     if select:
                         try:
-                            doc.ClearSelection2(True)
-                            e.Select2(False, 0)
+                            if not append:
+                                doc.ClearSelection2(True)
+                            e.Select2(True, int(mark or 0))
                         except Exception:
                             pass
 
@@ -1363,6 +1370,7 @@ class InspectionOperations:
                             "edge_index": idx,
                             "midpoint_mm": [round(mx, 2), round(my, 2), round(mz, 2)],
                             "selected": select,
+                            "total_selection_count": int(doc.SelectionManager.GetSelectedObjectCount2(-1)) if select else None,
                         },
                     )
                 except Exception:
