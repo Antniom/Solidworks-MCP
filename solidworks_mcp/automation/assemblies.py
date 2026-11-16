@@ -573,14 +573,26 @@ class AssemblyOperations:
                     vol_mm3 = vol_m3 * 1e9
                     comps = getattr(itf, "Components", None)
                     comp_names = [c.Name2 for c in comps] if comps else []
-                    coords = getattr(itf, "Coordinates", None)
-
-                    interference_list.append({
+                    # Where it is: the box of the interference body (IInterference.Coordinates is
+                    # empty under late binding, so hits could not be located, MCP-029).
+                    box_mm = None
+                    try:
+                        ibody = get_attr_or_call(itf, "GetInterferenceBody")
+                        bx = get_attr_or_call(ibody, "GetBodyBox") if ibody is not None else None
+                        if bx and len(bx) >= 6:
+                            box_mm = {"min": [round(float(v) * 1000.0, 3) for v in bx[:3]],
+                                      "max": [round(float(v) * 1000.0, 3) for v in bx[3:6]]}
+                    except Exception as box_ex:
+                        logger.debug(f"interference body box failed: {box_ex}")
+                    entry = {
                         "index": i,
                         "volume_mm3": round(vol_mm3, 3),
                         "components": comp_names,
-                        "center_m": list(coords) if coords else [],
-                    })
+                        "box_mm": box_mm,
+                    }
+                    if box_mm:
+                        entry["size_mm"] = [round(box_mm["max"][k] - box_mm["min"][k], 3) for k in range(3)]
+                    interference_list.append(entry)
 
             # Exit PropertyManager page to restore normal assembly selection
             try:
@@ -595,6 +607,15 @@ class AssemblyOperations:
                 else "No interference detected across components."
             )
 
+            if has_interference:
+                rows = []
+                for e in sorted(interference_list, key=lambda d: -d["volume_mm3"]):
+                    b = e.get("box_mm")
+                    where = (f"X {b['min'][0]:g}..{b['max'][0]:g} Y {b['min'][1]:g}..{b['max'][1]:g} "
+                             f"Z {b['min'][2]:g}..{b['max'][2]:g}") if b else "location unknown"
+                    rows.append(f"[{e['index']}] {e['volume_mm3']:g} mm3  {' <-> '.join(e['components'])}  {where}")
+                message += " (largest first; box of each overlap in assembly mm):\n" + "\n".join(rows)
+
             return self._result(
                 True,
                 message,
@@ -602,7 +623,6 @@ class AssemblyOperations:
                 {
                     "has_interference": has_interference,
                     "interference_count": len(interference_list),
-                    "interferences": interference_list,
                 },
             )
         except Exception as e:
