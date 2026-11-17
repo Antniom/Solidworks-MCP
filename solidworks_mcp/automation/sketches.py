@@ -938,13 +938,68 @@ class SketchOperations:
             except Exception as fe:
                 logger.debug(f"Could not apply font formatting: {fe}")
 
+            # The justification argument of InsertSketchText has no effect on free sketch text: the
+            # text always starts at (x, y) (MCP-049). Measure the glyph outlines (model space),
+            # convert them to sketch x/y and, for center=True, shift the text so its extent is
+            # centred on x.
+            from ..core.com_compat import get_attr_or_call
+            frame = sketch_frame(doc)
+
+            def _text_extent_mm():
+                if not frame:
+                    return None
+                o, ex, ey = frame["origin_mm"], frame["x_axis_world"], frame["y_axis_world"]
+                xs, ys = [], []
+                for edge in (get_attr_or_call(sketch_text, "GetEdges") or []):
+                    try:
+                        p = [float(v) * 1000.0 for v in get_attr_or_call(edge, "GetCurveParams2")]
+                    except Exception:
+                        continue
+                    for q in (p[0:3], p[3:6]):
+                        d = [q[i] - o[i] for i in range(3)]
+                        xs.append(sum(d[i] * ex[i] for i in range(3)))
+                        ys.append(sum(d[i] * ey[i] for i in range(3)))
+                if not xs:
+                    return None
+                return [min(xs), max(xs), min(ys), max(ys)]
+
+            extent = None
+            try:
+                try:
+                    doc.GraphicsRedraw2()
+                except Exception:
+                    pass
+                extent = _text_extent_mm()
+                if center and extent is not None:
+                    x_target_mm = x_m * 1000.0
+                    dx_mm = x_target_mm - (extent[0] + extent[1]) / 2.0
+                    if abs(dx_mm) > 1e-4:
+                        sketch_text.SetCoordinates(x_m + dx_mm / 1000.0, y_m, 0.0)
+                        try:
+                            doc.GraphicsRedraw2()
+                        except Exception:
+                            pass
+                        extent = _text_extent_mm()
+            except Exception as ce:
+                logger.debug(f"draw_text extent/centring failed: {ce}")
+
+            if center and extent is None:
+                return self._result(
+                    False,
+                    "Text inserted, but its extent could not be measured, so it could not be centred "
+                    "(it starts at x). Delete it or place it with an explicit left x.",
+                    SwErrors.swSketchError,
+                )
+
             unit_str = unit or self._units.default_unit.value
-            return self._result(
-                True,
-                f"Inserted sketch text: '{text[:30]}' at ({x}, {y})",
-                SwErrors.swSuccess,
-                {"text": text, "x": x, "y": y, "height": height, "font": font_name, "angle": angle, "center": center, "unit": unit_str},
-            )
+            data = {"text": text, "x": x, "y": y, "height": height, "font": font_name, "angle": angle, "center": center, "unit": unit_str}
+            msg = f"Inserted sketch text: '{text[:30]}' at ({x}, {y})"
+            if extent is not None:
+                ext_u = [round(self._units.from_meters(v / 1000.0, unit), 3) for v in extent]
+                data["extent_sketch"] = {"x_min": ext_u[0], "x_max": ext_u[1], "y_min": ext_u[2], "y_max": ext_u[3]}
+                msg += (f"; glyphs span sketch x {ext_u[0]}..{ext_u[1]}, y {ext_u[2]}..{ext_u[3]} {unit_str}"
+                        + (" (centred on x)" if center else " (left-aligned at x)"))
+            return self._result(True, msg, SwErrors.swSuccess, data)
         except Exception as e:
             logger.error(f"Draw text error: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Error: {e}", SwErrors.swSketchError)
