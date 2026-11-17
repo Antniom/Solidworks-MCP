@@ -1,15 +1,11 @@
 {
   "mcpServers": {
     "solidworks": {
-      "command": "uv",
+      "command": "cmd",
       "args": [
-        "run",
-        "--locked",
-        "--project",
-        "${CLAUDE_PLUGIN_ROOT}",
-        "python",
-        "-m",
-        "solidworks_mcp.server"
+        "/d",
+        "/c",
+        "${CLAUDE_PLUGIN_ROOT}/scripts/start-server.cmd"
       ],
       "env": {
         "PYTHONUNBUFFERED": "1"

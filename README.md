@@ -23,8 +23,12 @@ mechanical-engineering workflows, plus an interactive studio for adjusting dimen
 
 - Windows with SolidWorks installed (developed against SolidWorks 2025). Simulation features need the
   SolidWorks Simulation add-in; Toolbox features need Toolbox.
-- [uv](https://docs.astral.sh/uv/getting-started/installation/) on your PATH. The connector is a Python
-  program; uv installs the exact dependency versions pinned in `uv.lock` the first time it starts.
+- Python 3.10 or newer ([python.org](https://www.python.org/downloads/), tick *Add python.exe to PATH*),
+  or [uv](https://docs.astral.sh/uv/getting-started/installation/). The connector is a Python program.
+  With uv on your PATH it runs the exact versions pinned in `uv.lock`. Without uv, the first start
+  creates a private environment from your Python and installs the dependencies into it, which takes
+  about a minute. If the first connection reports that it is still installing, reconnect a minute
+  later (`/mcp` in Claude Code).
 - A Claude surface that runs local connectors: **Cowork in the Claude desktop app** (sessions that run on
   your computer) or Claude Code. The skills also load in ordinary chat, but chat cannot start a local
   connector, so it cannot drive SolidWorks.
@@ -67,9 +71,13 @@ server accepts only requests carrying a per-session token, so other web pages ca
 
 Everything this plugin does happens on your PC:
 
-- **The connector** is the Python package in `solidworks_mcp/`, started by `uv run --locked` from the plugin
-  folder. It also starts the bundled .NET runner (`MecAgent.SolidWorks.Runner.exe`) the first time a
-  runner-backed tool is used. On first start uv downloads the pinned Python packages in `uv.lock` from PyPI. The connector then
+- **The connector** is the Python package in `solidworks_mcp/`, started by `scripts/start-server.cmd` from
+  the plugin folder. That script uses `uv run --locked` when uv is installed. Otherwise it uses the first
+  Python 3.10+ it finds (`python`, `py -3`, `python3`) to build a private environment in the plugin's
+  data folder (`%USERPROFILE%\.claude\plugins\data\...`, or `%LOCALAPPDATA%\SolidCADWorks` outside Claude
+  Code) and installs the dependencies from `pyproject.toml` into it. On first start these packages are
+  downloaded from PyPI; the install log is `install.log` in that folder. The connector also starts the
+  bundled .NET runner (`MecAgent.SolidWorks.Runner.exe`) the first time a runner-backed tool is used, and
   controls SolidWorks through its COM automation interface.
 - **Files**: it reads and writes CAD files, exports and screenshots only in locations you name, limited to
   your user profile, the working folder and the temp folder. Logs and checkpoint copies go to
@@ -95,8 +103,10 @@ files of that size.
 
 ## Troubleshooting
 
-- **The connector does not start**: check that `uv --version` works in a new terminal, then restart the
-  desktop app.
+- **The connector does not start**: check that `python --version` (3.10 or newer) or `uv --version` works
+  in a new terminal. On the very first start, wait a minute for the dependency install and reconnect;
+  its progress is in `install.log` in the plugin's data folder. Then restart the desktop app or run
+  `/mcp` in Claude Code.
 - **"SolidWorks is blocked by a modal dialog"**: ask Claude to inspect and dismiss the dialog, or close it
   yourself.
 - **A tool timed out**: ask Claude to check the model before retrying; the operation may still have finished.

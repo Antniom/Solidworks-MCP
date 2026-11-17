@@ -84,13 +84,33 @@ def test_claude_manifest_meets_directory_rules():
 def test_local_connector_command_is_reviewable():
     servers = json.loads(Path(".mcp.json").read_text(encoding="utf-8"))["mcpServers"]
     sw = servers["solidworks"]
-    # A package launcher must be pinned: uv run needs --locked plus a committed lock file.
-    assert sw["command"] == "uv" and sw["args"][:2] == ["run", "--locked"]
-    assert Path("uv.lock").exists()
+    # Launched through the bundled script, so it works without uv: cmd.exe always exists on Windows.
+    assert sw["command"] == "cmd" and sw["args"] == ["/d", "/c", "${CLAUDE_PLUGIN_ROOT}/scripts/start-server.cmd"]
     joined = " ".join(sw["args"])
-    assert "${CLAUDE_PLUGIN_ROOT}" in joined and ".." not in joined
-    assert "$" not in joined.replace("${CLAUDE_PLUGIN_ROOT}", "")
+    assert ".." not in joined and "$" not in joined.replace("${CLAUDE_PLUGIN_ROOT}", "")
     assert not any(k.upper().endswith(("KEY", "TOKEN", "SECRET")) for k in sw.get("env", {}))
+    # The script still prefers a pinned uv run (--locked plus the committed lock file) when uv exists.
+    script = Path("scripts/start-server.cmd").read_bytes()
+    assert b"\r\n" in script and b"\n" not in script.replace(b"\r\n", b""), "start-server.cmd needs CRLF"
+    assert b"uv run --quiet --locked" in script and Path("uv.lock").exists()
+    assert Path("scripts/bootstrap_env.py").exists() and Path("scripts/pyprobe.py").exists()
+
+
+def test_bootstrap_reads_dependencies_from_pyproject():
+    import importlib.util
+    import tomllib
+    spec = importlib.util.spec_from_file_location("bootstrap_env", "scripts/bootstrap_env.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    expected = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))["project"]["dependencies"]
+    assert mod.read_dependencies(Path(".")) == expected
+
+
+def test_server_sends_an_icon():
+    from solidworks_mcp import server
+    assert Path("solidworks_mcp/assets/icon-128.png").exists()
+    icons = server._server_icons()
+    assert icons and icons[0].src.startswith("data:image/png;base64,") and icons[0].sizes == ["128x128"]
 
 
 def test_plugin_folder_stays_within_marketplace_limits():

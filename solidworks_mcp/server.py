@@ -1348,14 +1348,38 @@ async def read_resource(
     )
 
 
-server = Server(
-    "solidworks-mcp-server",
+def _server_icons() -> list:
+    """The connector icon, sent in serverInfo.icons (clients show it next to the server). A data URI,
+    so it works offline and needs no hosting. Claude Code ignores plugin.json's "icon" field."""
+    try:
+        import base64
+        icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "icon-128.png")
+        with open(icon_path, "rb") as fh:
+            data = base64.b64encode(fh.read()).decode("ascii")
+        from mcp import types as _mcp_types
+        return [_mcp_types.Icon(src=f"data:image/png;base64,{data}", mime_type="image/png", sizes=["128x128"])]
+    except Exception as ex:  # an icon must never stop the server
+        logger.debug(f"server icon not available: {ex}")
+        return []
+
+
+_server_kwargs = dict(
     version=__version__,
     on_list_tools=list_tools,
     on_call_tool=call_tool,
     on_list_resources=list_resources,
     on_read_resource=read_resource,
 )
+try:
+    server = Server(
+        "solidworks-mcp-server",
+        title="SolidCADWorks",
+        website_url="https://github.com/Antniom/Solidworks-MCP",
+        icons=_server_icons() or None,
+        **_server_kwargs,
+    )
+except TypeError:  # an older mcp SDK without title/icons
+    server = Server("solidworks-mcp-server", **_server_kwargs)
 
 
 # ============================================================================
