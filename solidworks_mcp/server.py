@@ -817,7 +817,7 @@ _TOOL_HANDLERS: Dict[str, Callable[[dict], Dict[str, Any]]] = {
     'inspect_model': _auto('inspect_model'),
     'verify_model': _auto('verify_model', 'expected_dx', 'expected_dy', 'expected_dz', ('expected_bodies', 1), ('tolerance_mm', 0.2)),
     'add_component': _auto('add_component', ('component_path', ''), ('x', 0.0), ('y', 0.0), ('z', 0.0), 'unit', 'rotation_deg', 'fixed'),
-    'add_mate': _auto('add_mate', ('mate_type', 'coincident'), ('entity1', ''), ('entity2', ''), 'comp1', 'comp2', ('align', 0), ('flip', False), ('distance', 0.0), ('angle', 0.0), 'min_limit', 'max_limit', 'unit', ('use_selection', False)),
+    'add_mate': _auto('add_mate', ('mate_type', 'coincident'), ('entity1', ''), ('entity2', ''), 'comp1', 'comp2', ('align', 0), ('flip', False), ('distance', 0.0), ('angle', 0.0), 'min_limit', 'max_limit', 'unit', ('use_selection', False), 'gear_ratio'),
     'check_interference': _auto('check_interference', ('treat_coincidence_as_interference', False)),
     'list_components': _auto('list_components'),
     'create_drawing_from_model': _auto('create_drawing_from_model', 'model_path', ('view_name', '*Isometric'), ('x', 0.1), ('y', 0.1), ('paper_size', 'A4')),

@@ -900,18 +900,25 @@ def _build_tools() -> List[Tool]:
         Tool(
             name="add_mate",
             description=(
-                "Create an assembly mate (coincident, concentric, distance, parallel, perpendicular, tangent, angle) "
+                "Create an assembly mate (coincident, concentric, distance, parallel, perpendicular, tangent, angle, gear) "
                 "between two entities. Either name them (entity1/entity2 + comp1/comp2), or pre-select exactly two "
                 "faces/edges (e.g. two `select` calls with by='geometry' and component=..., the second with append=true) "
-                "and pass use_selection=true (or entity1='@selected', entity2='@selected')."
+                "and pass use_selection=true (or entity1='@selected', entity2='@selected'). "
+                "Gear mate: select one cylindrical face or circular edge on each gear (concentric with its rotation axis) "
+                "and pass gear_ratio=[teeth_or_diameter_1, teeth_or_diameter_2] (e.g. [20, 40]: gear 1 turns 2x as fast); "
+                "flip=true reverses the relative direction. Angle mate with min_limit/max_limit creates a limit angle mate."
             ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "mate_type": {
                         "type": "string",
-                        "enum": ["coincident", "concentric", "perpendicular", "parallel", "tangent", "distance", "angle"],
+                        "enum": ["coincident", "concentric", "perpendicular", "parallel", "tangent", "distance", "angle", "gear"],
                         "description": "Mate type"
+                    },
+                    "gear_ratio": {
+                        "type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2,
+                        "description": "Gear mate only: [value for entity 1, value for entity 2] — tooth counts or pitch diameters (e.g. [20, 40])"
                     },
                     "use_selection": {"type": "boolean", "default": False, "description": "Mate the two currently selected entities instead of entity1/entity2"},
                     "entity1": {"type": "string", "description": "First entity/plane/face name (e.g. 'Top Plane')"},

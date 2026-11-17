@@ -34,6 +34,7 @@ class AssemblyOperations:
         "tangent": 4,       # swMateTANGENT
         "distance": 5,      # swMateDISTANCE
         "angle": 6,         # swMateANGLE
+        "gear": 10,         # swMateGEAR
     }
 
     def add_component(
@@ -303,6 +304,7 @@ class AssemblyOperations:
         max_limit: Optional[float] = None,
         unit: str = "mm",
         use_selection: bool = False,
+        gear_ratio: Optional[List[float]] = None,
     ) -> Dict:
         """
         Add a mate between two entities in the active assembly.
@@ -342,6 +344,18 @@ class AssemblyOperations:
                     SwErrors.swInvalidParameter,
                 )
             sw_mate_type = self.MATE_TYPES[mate_type_lower]
+            gear_num, gear_den = 1.0, 1.0
+            if sw_mate_type == 10:
+                try:
+                    gear_num, gear_den = float(gear_ratio[0]), float(gear_ratio[1])
+                except Exception:
+                    return self._result(
+                        False,
+                        "Gear mate needs gear_ratio=[value_for_entity1, value_for_entity2] (tooth counts or pitch diameters, e.g. [20, 40]).",
+                        SwErrors.swInvalidParameter,
+                    )
+                if gear_num <= 0 or gear_den <= 0:
+                    return self._result(False, "gear_ratio values must be > 0.", SwErrors.swInvalidParameter)
 
             # "@selected" works even with clients that cached the older schema (no use_selection).
             if str(entity1 or "").strip().lower() in ("@selected", "@selection") or \
@@ -458,6 +472,11 @@ class AssemblyOperations:
             poses_before = self._component_poses(doc)
 
             mate_err = byref_int(0)
+            # IAssemblyDoc.AddMate3(type, align, flip, distance, distUpper, distLower,
+            #   GearRatioNumerator, GearRatioDenominator, angle, angleUpper, angleLower,
+            #   ForPositioningOnly, ErrorStatus). The angle values used to be passed one slot early
+            # (into the gear ratio), so limit angle mates got 0/0 limits (MCP-047).
+            # Gear ratio values are lengths (pitch diameters) in metres; teeth/1000 keeps the ratio.
             mate_feat = doc.AddMate3(
                 sw_mate_type,
                 int(align),
@@ -465,12 +484,12 @@ class AssemblyOperations:
                 dist_m,
                 dist_upper_m,
                 dist_lower_m,
+                gear_num / 1000.0,
+                gear_den / 1000.0,
                 angle_rad,
                 angle_upper_rad,
                 angle_lower_rad,
                 False,
-                False,
-                0,
                 mate_err,
             )
 

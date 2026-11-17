@@ -273,11 +273,20 @@ class InspectionOperations:
             try:
                 was_dirty = bool(get_attr_or_call(doc, "GetSaveFlag"))
                 light_count_before = int(get_attr_or_call(doc, "GetLightSourceCount"))
-                if doc.AddLightSource("Directional-%d" % (900 + light_count_before), 2, "MCP capture headlight"):
-                    doc.SetLightSourcePropertyValuesVB(
-                        "Directional-%d" % (900 + light_count_before), 2, 0.5, 16777215, 1.0,
-                        0.0, 0.0, 1.0, 0.0, 0.0, -1.0, 45.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, False)
+                # A new light is LOCKED TO THE MODEL, so its +Z direction only lit views from the
+                # front: faces seen from below rendered at ~40 % (MCP-046). Unlock it so the
+                # direction is view-relative (+Z = from the viewer) for every view and showcase camera.
+                hl_name = "Directional-%d" % (900 + light_count_before)
+                if doc.AddLightSource(hl_name, 2, "MCP capture headlight"):
                     headlight_added = True
+                    hl_idx = int(get_attr_or_call(doc, "GetLightSourceCount")) - 1
+                    try:
+                        doc.LockLightToModel(hl_idx, False)
+                    except Exception as lk_ex:
+                        logger.debug(f"capture headlight not unlocked from the model: {lk_ex}")
+                    doc.SetLightSourcePropertyValuesVB(
+                        hl_name, 2, 0.35, 16777215, 1.0,
+                        0.0, 0.0, 1.0, 0.0, 0.0, -1.0, 45.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, False)
             except Exception as hl_ex:
                 logger.debug(f"capture headlight not added: {hl_ex}")
 
@@ -377,7 +386,8 @@ class InspectionOperations:
                 try:
                     n_now = int(get_attr_or_call(doc, "GetLightSourceCount"))
                     for i in range(n_now - 1, -1, -1):
-                        if str(doc.LightSourceUserName(i)) == "MCP capture headlight":
+                        # SolidWorks suffixes duplicate user names ("...headlight1"), so match the prefix.
+                        if str(doc.LightSourceUserName(i)).startswith("MCP capture headlight"):
                             doc.DeleteLightSource(i)
                 except Exception as hl_ex:
                     logger.debug(f"capture headlight not removed: {hl_ex}")
