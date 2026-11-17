@@ -5,14 +5,14 @@
   },
   "metadata": {
     "description": "SolidCADWorks: SolidWorks CAD plugin for Claude",
-    "version": "5.0.29"
+    "version": "5.0.30"
   },
   "plugins": [
     {
       "name": "solidcadworks",
       "source": "./",
       "description": "Model parts, build assemblies, make drawings and run stress analysis in SolidWorks from a conversation, with an interactive studio for adjusting dimensions.",
-      "version": "5.0.29",
+      "version": "5.0.30",
       "author": {
         "name": "António Coelho"
       },
