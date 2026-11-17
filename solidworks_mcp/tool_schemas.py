@@ -103,8 +103,27 @@ def _build_tools() -> List[Tool]:
         ),
         Tool(
             name="list_open_documents",
-            description="List all open documents.",
+            description="List all open documents, plus SolidWorks' memory use and the system's free memory.",
             inputSchema={"type": "object", "properties": {}, "required": []}
+        ),
+        Tool(
+            name="restart_solidworks",
+            description=(
+                "Close every document, quit SolidWorks and start a fresh instance. SolidWorks keeps memory from "
+                "closed documents; in long sessions it runs out and terminates. Call this between subassemblies "
+                "or whenever a result carries a memory warning. Refuses while a document has unsaved changes "
+                "unless discard_unsaved=true. Reports memory before and after; no document is open afterwards."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "discard_unsaved": {"type": "boolean", "default": False,
+                                        "description": "Close documents with unsaved changes without saving"},
+                    "timeout_s": {"type": "number", "default": 90, "minimum": 10,
+                                  "description": "Seconds to wait for the old SolidWorks to exit before terminating it"}
+                },
+                "required": []
+            }
         ),
         Tool(
             name="manage_configuration",

@@ -793,6 +793,7 @@ _TOOL_HANDLERS: Dict[str, Callable[[dict], Dict[str, Any]]] = {
     'close_document': _auto('close_document', ('save', False)),
     'get_document_info': _auto('get_document_info'),
     'list_open_documents': _auto('list_open_documents'),
+    'restart_solidworks': _auto('restart_solidworks', ('discard_unsaved', False), ('timeout_s', 90.0)),
     'manage_configuration': _auto('manage_configuration', ('action', 'list'), 'name', 'new_name', 'description', 'comment'),
     'manage_custom_properties': _auto('manage_custom_properties', ('action', 'list'), 'name', 'value', ('property_type', 'text'), ('configuration', '')),
     'draw_line': _world_draw(_draw_line),
@@ -980,7 +981,12 @@ _NO_COMMAND_IN_PROGRESS_TOOLS = {
     "show_interactive_studio",
     "studio_action",
     "supervisor_clean_processes",
+    "restart_solidworks",
 }
+
+# Tools after which no memory warning is appended (they report memory themselves or have no SolidWorks).
+_NO_MEMORY_WARNING_TOOLS = {"restart_solidworks", "list_open_documents", "get_capabilities",
+                            "inspect_dialogs", "dismiss_dialog", "supervisor_clean_processes"}
 
 _SUBTRACTIVE_TOOLS = {
     "cut_extrude",
@@ -1069,6 +1075,21 @@ def _execute_tool_on_sta_inner(name: str, arguments: dict, tid: int) -> Tuple[Di
                             result["data"]["zero_volume_change_warning"] = True
     except Exception:
         pass
+    # MCP-050: SolidWorks keeps memory from closed documents and terminates when it runs out. Warn on
+    # every result once it holds more than half the RAM, so the caller restarts it in time.
+    if name not in _NO_MEMORY_WARNING_TOOLS and isinstance(result, dict):
+        try:
+            if sw_automation.is_connected and sw_automation._sw_app is not None:
+                from .core.memory_watch import memory_status, solidworks_pid
+                mem = memory_status(solidworks_pid(sw_automation._sw_app,
+                                                   getattr(sw_automation, "_connected_pid", None)))
+                if mem.get("warning"):
+                    result["message"] = f"{result.get('message', '')} [MEMORY WARNING: {mem['warning']}]"
+                    if not isinstance(result.get("data"), dict):
+                        result["data"] = {"value": result.get("data")}
+                    result["data"]["memory_warning"] = mem
+        except Exception:
+            pass
     return result, sw_ver, act_doc, tid
 
 
@@ -1103,6 +1124,12 @@ def get_tool_timeout(tool_name: str, cfg: Any, arguments: Optional[dict] = None)
         "find_related_files",
     ):
         return float(getattr(cfg, "open_save_timeout", 120.0))
+    elif tool_name == "restart_solidworks":
+        try:
+            wait = float((arguments or {}).get("timeout_s") or 90.0)
+        except (TypeError, ValueError):
+            wait = 90.0
+        return wait + 240.0  # exit wait + terminate + launch of a fresh SolidWorks
     elif tool_name in ("export_drawing",):
         return float(getattr(cfg, "export_timeout", 180.0))
     elif tool_name in ("mesh_and_run_simulation",):

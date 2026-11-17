@@ -738,11 +738,93 @@ class DocumentOperations:
                 except Exception:
                     pass
             
-            return self._result(True, f"{len(docs)} document(s) open",
-                              SwErrors.swSuccess, {"documents": docs})
-            
+            from ..core.memory_watch import memory_status, solidworks_pid
+            mem = memory_status(solidworks_pid(self._sw_app, getattr(self, "_connected_pid", None)))
+            msg = f"{len(docs)} document(s) open"
+            if mem.get("solidworks_private_mb") is not None:
+                msg += (f"; SolidWorks memory {mem['solidworks_private_mb']} MB, "
+                        f"system free {mem['system_free_mb']} of {mem['system_total_mb']} MB")
+            return self._result(True, msg, SwErrors.swSuccess, {"documents": docs, "memory": mem})
+
         except Exception as e:
             logger.error(f"List documents error: {e}\n{traceback.format_exc()}")
+            return self._result(False, f"Error: {e}", SwErrors.swGeneralError)
+
+    def restart_solidworks(self, discard_unsaved: bool = False, timeout_s: float = 90.0) -> Dict:
+        """
+        Close every document, quit SolidWorks and start a fresh instance (MCP-050: SolidWorks keeps
+        memory from closed documents and terminates when it runs out). Refuses when a document has
+        unsaved changes unless discard_unsaved=True.
+        """
+        import gc
+        import time
+        from ..core.memory_watch import memory_status, solidworks_pid, wait_for_exit
+        try:
+            if not self.is_connected:
+                r = self.connect()
+                if not r.get("success"):
+                    return r
+            app = self._sw_app
+            pid = solidworks_pid(app, getattr(self, "_connected_pid", None))
+            before = memory_status(pid)
+            dirty, titles = [], []
+            try:
+                raw = app.GetDocuments
+                raw = raw() if callable(raw) else raw
+            except Exception:
+                raw = []
+            for d in (raw or []):
+                try:
+                    t = str(get_attr_or_call(d, "GetTitle"))
+                    titles.append(t)
+                    if bool(get_attr_or_call(d, "GetSaveFlag")):
+                        dirty.append(t)
+                except Exception:
+                    pass
+            if dirty and not discard_unsaved:
+                return self._result(
+                    False,
+                    f"Not restarted: {len(dirty)} document(s) have unsaved changes: {', '.join(dirty[:10])}. "
+                    "Save them (or pass discard_unsaved=true to lose those changes).",
+                    SwErrors.swInvalidParameter,
+                    {"unsaved_documents": dirty, "memory_before": before},
+                )
+            try:
+                app.CloseAllDocuments(True)
+            except Exception as ex:
+                logger.debug(f"CloseAllDocuments failed: {ex}")
+            try:
+                app.ExitApp()
+            except Exception as ex:
+                logger.debug(f"ExitApp raised (expected while SolidWorks shuts down): {ex}")
+            app = None
+            self.disconnect()
+            gc.collect()
+            exit_state = wait_for_exit(pid, timeout_s, terminate=True) if pid else "unknown pid"
+            if exit_state == "still running":
+                return self._result(
+                    False,
+                    f"SolidWorks (pid {pid}) did not exit within {timeout_s:.0f} s and could not be terminated.",
+                    SwErrors.swConnectionError, {"memory_before": before})
+            time.sleep(2.0)
+            r = self.connect()
+            if not r.get("success"):
+                return self._result(
+                    False, f"Old SolidWorks {exit_state}, but starting a new instance failed: {r.get('message')}",
+                    SwErrors.swConnectionError, {"memory_before": before})
+            after = memory_status(solidworks_pid(self._sw_app, getattr(self, "_connected_pid", None)))
+            return self._result(
+                True,
+                f"SolidWorks restarted (old pid {pid} {exit_state}; closed {len(titles)} document(s)"
+                f"{', discarding unsaved changes in ' + str(len(dirty)) if dirty else ''}). Memory "
+                f"{before.get('solidworks_private_mb')} MB -> {after.get('solidworks_private_mb')} MB; "
+                f"system free {after.get('system_free_mb')} MB. No document is open now.",
+                SwErrors.swSuccess,
+                {"old_pid": pid, "exit": exit_state, "closed_documents": titles, "discarded": dirty,
+                 "memory_before": before, "memory_after": after},
+            )
+        except Exception as e:
+            logger.error(f"restart_solidworks error: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Error: {e}", SwErrors.swGeneralError)
 
     def manage_configuration(
