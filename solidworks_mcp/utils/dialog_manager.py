@@ -475,14 +475,29 @@ def find_blocking_modal_dialog(target_pid: Optional[int] = None) -> Optional[Dic
     2. Window is top-level, visible, and belongs to SolidWorks (#32770 or owned popup).
     """
     dialogs = list_active_dialogs(target_pid=target_pid)
+    candidates = []
     for dlg in dialogs:
         # SolidWorks' own progress windows ("Calculating Interference Detection", rebuild,
         # meshing, solver ...) disable the main frame while it works. They are not waiting
         # for the user, so they must not abort the running tool call.
         if is_progress_dialog(dlg):
             continue
-        return dlg
-    return None
+        candidates.append(dlg)
+    if not candidates:
+        return None
+
+    # Several windows can qualify. Report the one that is actually asking something: SolidWorks also
+    # keeps an untitled template window ("Title Description Button1 Button2 Hyperlink Text 1 …") with no
+    # buttons, which used to be named instead of the real prompt (MCP-045).
+    def _rank(d: Dict[str, Any]):
+        buttons = [str(b.get("text", "")).replace("&", "").strip() for b in (d.get("buttons") or [])]
+        has_buttons = any(buttons)
+        has_title = bool(str(d.get("title", "")).strip())
+        msgs = " ".join(str(m) for m in (d.get("messages") or []))
+        placeholder = "Button1" in msgs and "Hyperlink Text" in msgs
+        return (0 if has_buttons else 1, 0 if has_title else 1, 1 if placeholder else 0)
+
+    return sorted(candidates, key=_rank)[0]
 
 
 _PROGRESS_KEYWORDS = (
