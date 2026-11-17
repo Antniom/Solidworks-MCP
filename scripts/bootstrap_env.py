@@ -23,7 +23,7 @@ import time
 from pathlib import Path
 
 BOOTSTRAP_VERSION = "1"
-WAIT_S = 25.0
+WAIT_S = 12.0  # Claude Code may start the server twice within its 30 s connect budget
 STALE_LOCK_S = 30 * 60
 
 
