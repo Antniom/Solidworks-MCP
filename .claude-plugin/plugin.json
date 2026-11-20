@@ -1,7 +1,7 @@
 {
   "name": "solidcadworks",
   "displayName": "SolidCADWorks",
-  "version": "5.0.33",
+  "version": "5.0.34",
   "description": "Model parts, build assemblies, make drawings and run stress analysis in SolidWorks from a conversation, with an interactive studio for adjusting dimensions.",
   "icon": "./assets/icon.png",
   "author": {
