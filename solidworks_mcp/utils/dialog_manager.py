@@ -467,6 +467,15 @@ def get_main_solidworks_hwnd(target_pid: Optional[int] = None) -> Optional[int]:
     return main_hwnd
 
 
+def _is_task_dialog_template(dlg: Dict[str, Any]) -> bool:
+    """The untitled placeholder window with template texts and no usable buttons."""
+    msgs = " ".join(str(m) for m in (dlg.get("messages") or []))
+    buttons = [str(b.get("text", "")).replace("&", "").strip() for b in (dlg.get("buttons") or [])]
+    real_buttons = [b for b in buttons if b and b not in ("Button1", "Button2")]
+    return ("Button1" in msgs and "Hyperlink Text" in msgs and not real_buttons
+            and not str(dlg.get("title", "")).strip())
+
+
 def find_blocking_modal_dialog(target_pid: Optional[int] = None) -> Optional[Dict[str, Any]]:
     """
     Detect if SolidWorks is blocked by an active modal dialog.
@@ -481,6 +490,11 @@ def find_blocking_modal_dialog(target_pid: Optional[int] = None) -> Optional[Dic
         # meshing, solver ...) disable the main frame while it works. They are not waiting
         # for the user, so they must not abort the running tool call.
         if is_progress_dialog(dlg):
+            continue
+        # SolidWorks' untitled task-dialog TEMPLATE ("Title Description Button1 Button2 Hyperlink
+        # Text 1 ...", no real buttons) appears while the main thread is busy, e.g. during a STEP
+        # import. It never waits for the user, so it must not abort the running call (MCP-055).
+        if _is_task_dialog_template(dlg):
             continue
         candidates.append(dlg)
     if not candidates:
