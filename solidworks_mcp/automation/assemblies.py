@@ -585,6 +585,16 @@ class AssemblyOperations:
                     SwErrors.swInvalidDocumentType,
                 )
 
+            # Interference Detection checks only the selected components when anything is selected
+            # (a face selection from an earlier `select` limited the check to those parts and it
+            # reported 0, MCP-053). Clear the selection so the whole assembly is checked.
+            cleared = 0
+            try:
+                cleared = int(doc.SelectionManager.GetSelectedObjectCount2(-1) or 0)
+                if cleared:
+                    doc.ClearSelection2(True)
+            except Exception:
+                cleared = 0
             int_mgr = getattr(doc, "InterferenceDetectionManager", None)
             if int_mgr is None:
                 return self._result(
@@ -636,6 +646,8 @@ class AssemblyOperations:
                 if has_interference
                 else "No interference detected across components."
             )
+            if cleared:
+                message += f" (the {cleared} selected item(s) were deselected first so the whole assembly was checked)"
 
             if has_interference:
                 rows = []
@@ -653,6 +665,7 @@ class AssemblyOperations:
                 {
                     "has_interference": has_interference,
                     "interference_count": len(interference_list),
+                    "selection_cleared": cleared,
                 },
             )
         except Exception as e:

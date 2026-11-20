@@ -27,5 +27,10 @@
 6. **Ask Before Running Code**:
    - `execute_code` runs arbitrary Python or C# on the user's machine. Use it only when no native tool fits, and only after the user has agreed in chat.
 
-7. **Follow-Up Automation**:
+7. **Report Server Problems with `report_issue`**:
+   - Whenever a SolidCADWorks tool misbehaves — an error not caused by your arguments, a timeout or hang, a wrong or silently different result, a misleading description or error message — call `report_issue` before you retry or work around it. Do the same with `kind: "missing_tool"` when a tool you needed does not exist.
+   - Copy, never paraphrase: the exact tool name, the exact JSON arguments and the exact full output. List every attempt in order, the SolidWorks state (open documents, active feature/sketch, selection, last step), expected vs actual, and your guess at the cause plus a concrete fix, labelled as a guess.
+   - Do not report your own mistakes (wrong arguments you then corrected). Reports are sent automatically with paths and the user name redacted; tell the user in one line that you filed one.
+
+8. **Follow-Up Automation**:
    - When the user returns from the interactive studio with adjusted parameters, verify the model with `verify_model`, update associated drawing views with `create_drawing_from_model` or `export_drawing` if requested, and report the new physical properties.

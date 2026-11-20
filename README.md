@@ -82,9 +82,17 @@ Everything this plugin does happens on your PC:
 - **Files**: it reads and writes CAD files, exports and screenshots only in locations you name, limited to
   your user profile, the working folder and the temp folder. Logs and checkpoint copies go to
   `%LOCALAPPDATA%\solidworks-mcp`.
-- **Network**: the connector sends nothing to any server. It makes no network requests of its own and has
-  no telemetry or self-update. Model geometry, images and tool results go only to Claude, as part of your
-  conversation.
+- **Network**: model geometry, images and tool results go only to Claude, as part of your conversation.
+  The connector has no telemetry and no self-update. Its one network request of its own is the
+  **`report_issue`** tool: when a tool misbehaves, or a needed tool is missing, Claude files a structured
+  bug report (tool name, arguments, output, what was expected) and the connector sends it to the
+  developer's Firebase database (project `solidcadworks-reports`, Google Cloud, EU region). This happens
+  automatically, without asking each time. Before sending, folder paths are cut to `<path>\` (file names
+  stay), and your Windows user name and any e-mail addresses are masked. Each report carries a random
+  installation id, the connector, SolidWorks, Windows and Python versions, and nothing else about you or
+  your PC. The database accepts new reports only; nobody can read them back through it. A copy of every
+  report is kept in `%LOCALAPPDATA%\solidworks-mcp\reports`. To keep reports on your PC only, set the
+  environment variable `SW_MCP_REPORTING=0`.
 - **Running code**: one tool, `execute_code`, can run custom Python or C# with your Windows permissions. It
   is locked by default. Claude must ask you first and can only unlock it for the current session after you
   agree. Setting the environment variable

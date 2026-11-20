@@ -1,0 +1,51 @@
+rules_version = '2';
+
+// SolidCADWorks issue reports (report_issue tool). Anyone may ADD a report that matches the schema;
+// nobody can read, list, change or delete one through the API. The developer reads them in the
+// Firebase console (admin access bypasses these rules).
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function optStr(d, k, n) {
+      return !(k in d) || (d[k] is string && d[k].size() <= n);
+    }
+
+    function validReport(d) {
+      return d.keys().hasAll(['kind', 'title', 'server_version', 'install_id', 'report_id'])
+        && d.keys().hasOnly(['kind', 'title', 'tool', 'arguments', 'output', 'attempts', 'state',
+                             'expected', 'actual', 'workaround', 'cause_guess', 'suggested_fix',
+                             'reproducible', 'server_version', 'sw_version', 'os', 'python',
+                             'install_id', 'report_id', 'client_time', 'source'])
+        && d.kind in ['defect', 'missing_tool', 'doc_issue', 'feature_request']
+        && d.title is string && d.title.size() > 0 && d.title.size() <= 200
+        && d.report_id is string && d.report_id.size() <= 64
+        && d.install_id is string && d.install_id.size() <= 64
+        && d.server_version is string && d.server_version.size() <= 40
+        && optStr(d, 'tool', 100)
+        && optStr(d, 'arguments', 20000)
+        && optStr(d, 'output', 50000)
+        && optStr(d, 'attempts', 20000)
+        && optStr(d, 'state', 5000)
+        && optStr(d, 'expected', 5000)
+        && optStr(d, 'actual', 5000)
+        && optStr(d, 'workaround', 5000)
+        && optStr(d, 'cause_guess', 5000)
+        && optStr(d, 'suggested_fix', 5000)
+        && (!('reproducible' in d) || d.reproducible in ['yes', 'no', 'unknown'])
+        && optStr(d, 'sw_version', 40)
+        && optStr(d, 'os', 100)
+        && optStr(d, 'python', 40)
+        && optStr(d, 'client_time', 40)
+        && optStr(d, 'source', 40);
+    }
+
+    match /reports/{reportId} {
+      allow create: if reportId == request.resource.data.report_id && validReport(request.resource.data);
+      allow read, update, delete: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

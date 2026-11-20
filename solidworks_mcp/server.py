@@ -475,6 +475,26 @@ def _checkpoint(action: str) -> Callable[[dict], Dict[str, Any]]:
     return handler
 
 
+def _report_issue(arguments: dict) -> Dict[str, Any]:
+    """Send a defect / missing-tool / doc report to the developer (core/issue_reporter.py)."""
+    from .core import issue_reporter
+    sw_ver = None
+    try:
+        if sw_automation.is_connected and sw_automation._sw_app is not None:
+            rev = sw_automation._sw_app.RevisionNumber
+            sw_ver = str(rev() if callable(rev) else rev)
+    except Exception:
+        sw_ver = None
+    try:
+        res = issue_reporter.submit(arguments or {}, __version__, sw_ver)
+    except ValueError as ve:
+        return sw_automation._result(False, f"Report not sent: {ve}", SwErrors.swInvalidInput)
+    except Exception as ex:
+        return sw_automation._result(False, f"Report not sent: {ex}", SwErrors.swGeneralError)
+    ok = bool(res.get("sent")) or bool(res.get("local_copy")) or bool(res.get("duplicate"))
+    return sw_automation._result(ok, res["message"], SwErrors.swSuccess if ok else SwErrors.swGeneralError, res)
+
+
 def _execute_code(arguments: dict) -> Dict[str, Any]:
     code = arguments.get("code", "")
     if not code:
@@ -889,6 +909,7 @@ _TOOL_HANDLERS: Dict[str, Callable[[dict], Dict[str, Any]]] = {
         'set': _needs('name', 'expression')(_auto('set_parameter', ('name', ''), ('expression', ''), ('units', 'mm'))),
     }, default='list'),
     'execute_code': _execute_code,
+    'report_issue': _report_issue,
     # Tools with custom glue
     'close_sketch': lambda a: _close_sketch_handler(),
     'get_sketch_status': lambda a: _get_sketch_status_handler(),
@@ -986,7 +1007,7 @@ _NO_COMMAND_IN_PROGRESS_TOOLS = {
 
 # Tools after which no memory warning is appended (they report memory themselves or have no SolidWorks).
 _NO_MEMORY_WARNING_TOOLS = {"restart_solidworks", "list_open_documents", "get_capabilities",
-                            "inspect_dialogs", "dismiss_dialog", "supervisor_clean_processes"}
+                            "inspect_dialogs", "dismiss_dialog", "supervisor_clean_processes", "report_issue"}
 
 _SUBTRACTIVE_TOOLS = {
     "cut_extrude",
