@@ -6,7 +6,7 @@ Model Context Protocol server for SolidWorks automation.
 Author: António Coelho
 """
 
-__version__ = "5.0.36"
+__version__ = "5.0.37"
 __author__ = "António Coelho"
 
 from .automation import SolidWorksAutomation
