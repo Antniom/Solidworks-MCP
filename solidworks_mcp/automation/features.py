@@ -1368,7 +1368,9 @@ class FeatureOperations:
 
             target_feat_name = feature_name.strip()
             feat = doc.FeatureByName(target_feat_name)
-            if not feat:
+            # A component inside a sub-assembly ("Sub-1/Part-1") is not a feature of the top
+            # assembly, so look for components before giving up (MCP-054).
+            if not feat and not (action_clean in ("hide", "show") and dtype == "Assembly"):
                 return self._result(
                     False,
                     f"Feature '{target_feat_name}' not found in active document",
@@ -1376,7 +1378,8 @@ class FeatureOperations:
                 )
 
             if action_clean in ("hide", "show"):
-                # In an assembly a component name hides/shows the whole component (MCP-033).
+                # In an assembly a component name hides/shows the whole component (MCP-033), at any
+                # level: the full path "Sub-1/Part-1" or the component's own name.
                 if self.get_document_type(doc) == "Assembly":
                     for comp in (doc.GetComponents(False) or ()):
                         cname = str(comp.Name2)
@@ -1394,6 +1397,13 @@ class FeatureOperations:
                                 else f"Component '{cname}' visibility did not change",
                                 SwErrors.swSuccess if ok_vis else SwErrors.swGeneralError,
                                 {"component": cname, "visible": state != 0})
+                if not feat:
+                    return self._result(
+                        False,
+                        f"No feature or component named '{target_feat_name}' in the active assembly "
+                        "(for a nested component use its path, e.g. 'Sub-1/Part-1', as list_components shows it)",
+                        SwErrors.swFeatureError,
+                    )
                 return self._set_feature_visibility(doc, feat, target_feat_name, action_clean == "hide")
 
             if action_clean == "suppress":
