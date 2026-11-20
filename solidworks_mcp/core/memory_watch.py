@@ -100,7 +100,10 @@ def memory_status(pid: Optional[int]) -> Dict[str, Any]:
                 finally:
                     k.CloseHandle(h)
         priv, total, free = out["solidworks_private_mb"], out["system_total_mb"], out["system_free_mb"]
-        if priv is not None and total and (priv > WARN_SHARE_OF_RAM * total or (free is not None and free < WARN_FREE_MB)):
+        # Low free RAM only counts when SolidWorks is a large part of it: if other programs fill the
+        # memory, restarting SolidWorks does not help and the warning would fire on every call.
+        low_free = free is not None and free < WARN_FREE_MB and priv is not None and priv > 0.25 * total
+        if priv is not None and total and (priv > WARN_SHARE_OF_RAM * total or low_free):
             out["warning"] = (
                 f"SolidWorks is using {priv / 1024:.1f} GB of {total / 1024:.1f} GB RAM "
                 f"({free / 1024:.1f} GB free). SolidWorks does not release memory from closed documents; "

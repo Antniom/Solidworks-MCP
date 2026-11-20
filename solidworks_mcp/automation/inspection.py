@@ -631,9 +631,15 @@ class InspectionOperations:
                         break
                     try:
                         cname = str(get_attr_or_call(c, "Name2") or "")
-                        short = cname.split("/")[-1].lower()
-                        if want and want not in (cname.lower(), short):
-                            continue
+                        if want:
+                            # Name2 of a nested part is a path ("Group-1/Part-1"). Match the full path,
+                            # the part's own name, or any enclosing sub-assembly: a sub-assembly has
+                            # no bodies of its own, so naming it must search its parts (MCP-051).
+                            segs = [s.lower() for s in cname.split("/")]
+                            lowered = cname.lower()
+                            if not (lowered == want or segs[-1] == want or want in segs
+                                    or lowered.startswith(want.rstrip("/") + "/")):
+                                continue
                         if bool(get_attr_or_call(c, "IsSuppressed")):
                             continue
                         if roi is not None:
