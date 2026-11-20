@@ -1,6 +1,6 @@
 {
   "name": "solidcadworks",
-  "version": "5.0.34",
+  "version": "5.0.35",
   "description": "Parametric 3D CAD modeling, interactive in-chat studio, FEA simulation, and drawing generation in Dassault Systèmes SolidWorks.",
   "author": {
     "name": "António Coelho"
