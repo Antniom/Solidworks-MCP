@@ -113,8 +113,22 @@ class AssemblyOperations:
             if HAS_PYWIN32:
                 errors = byref_int(0)
                 warnings = byref_int(0)
-                # OpenDoc6 with Option 1 = swOpenDocOptions_Silent
-                comp_doc = self._sw_app.OpenDoc6(component_path, int(doc_type), 1, "", errors, warnings)
+                # AddComponent4 needs the file loaded. Load it INVISIBLY: a visible OpenDoc6 gave every new
+                # part its own window and graphics, costing 200-780 MB each that SolidWorks never gave back,
+                # and after a few inserts the assembly could no longer be re-activated (MCP-056).
+                # Measured: invisible load + insert costs 0-5 MB per part.
+                try:
+                    self._sw_app.DocumentVisible(False, int(doc_type))
+                except Exception as vis_ex:
+                    logger.debug(f"add_component: DocumentVisible(False) failed: {vis_ex}")
+                try:
+                    # OpenDoc6 with Option 1 = swOpenDocOptions_Silent
+                    comp_doc = self._sw_app.OpenDoc6(component_path, int(doc_type), 1, "", errors, warnings)
+                finally:
+                    try:
+                        self._sw_app.DocumentVisible(True, int(doc_type))
+                    except Exception as vis_ex:
+                        logger.debug(f"add_component: DocumentVisible(True) failed: {vis_ex}")
                 # AddComponent4 places the component's bounding-box centre (not its origin) at the
                 # given point, so read that centre in the component's own coordinates.
                 try:
@@ -127,9 +141,17 @@ class AssemblyOperations:
                             box_center = [(bx[0] + bx[3]) / 2.0, (bx[1] + bx[4]) / 2.0, (bx[2] + bx[5]) / 2.0]
                 except Exception as bx_ex:
                     logger.debug(f"add_component: bbox read failed: {bx_ex}")
-                # Ensure assembly remains active
+                # Ensure assembly remains active, and refuse to insert into anything else.
                 title = get_attr_or_call(doc, "GetTitle")
                 self._sw_app.ActivateDoc3(title, False, 2, errors)
+                act = self._sw_app.ActiveDoc
+                if act is None or get_attr_or_call(act, "GetType") != SwDocumentTypes.swDocASSEMBLY:
+                    return self._result(
+                        False,
+                        f"Could not re-activate the assembly '{title}' after loading '{os.path.basename(component_path)}'; "
+                        "nothing was inserted. Activate the assembly with open_document and retry.",
+                        SwErrors.swInvalidDocumentType,
+                    )
 
             # Capture pre-state for post-condition verification (F3)
             pre_state = capture_pre_mutation_state(doc)
