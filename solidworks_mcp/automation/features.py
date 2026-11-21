@@ -1614,18 +1614,30 @@ class FeatureOperations:
             elif action_clean == "reorder":
                 loc_clean = str(move_location).strip().lower()
                 if (not target_feature or not target_feature.strip()) and loc_clean in ("to_end", "to_top"):
-                    # to_end/to_top need no target: anchor on the last / first solid feature.
+                    # to_end/to_top need no target: anchor on the last / first item of real model
+                    # content. In an assembly that is the components (system folders such as "Live
+                    # Section Planes" or "Mates" cannot be reordered against, MCP-059). In a part it is
+                    # the features after the origin.
                     names = []
                     f_it = doc.FirstFeature
+                    past_origin = False
+                    is_asm = dtype == "Assembly"
                     while f_it is not None:
                         try:
-                            if get_attr_or_call(f_it, "GetTypeName2") not in (
-                                "CommentsFolder", "FavoriteFolder", "HistoryFolder", "SelectionSetFolder",
-                                "SensorFolder", "DocsFolder", "DetailCabinet", "SurfaceBodyFolder",
-                                "SolidBodyFolder", "EnvFolder", "InkMarkupFolder", "EqnFolder",
-                                "MaterialFolder", "RefPlane", "OriginProfileFeature",
-                            ):
-                                names.append(f_it.Name)
+                            tname = get_attr_or_call(f_it, "GetTypeName2")
+                            if is_asm:
+                                if tname == "Reference":  # an assembly component in the tree
+                                    names.append(f_it.Name)
+                            else:
+                                if tname == "OriginProfileFeature":
+                                    past_origin = True
+                                elif past_origin and tname not in (
+                                    "MateGroup", "HistoryFolder", "SelectionSetFolder", "SensorFolder",
+                                    "DocsFolder", "DetailCabinet", "SurfaceBodyFolder", "SolidBodyFolder",
+                                    "EnvFolder", "InkMarkupFolder", "EqnFolder", "MaterialFolder",
+                                    "CommentsFolder", "FavoriteFolder",
+                                ):
+                                    names.append(f_it.Name)
                             f_it = f_it.GetNextFeature
                         except Exception:
                             break
