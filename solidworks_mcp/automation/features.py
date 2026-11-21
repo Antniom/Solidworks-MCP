@@ -1243,6 +1243,32 @@ class FeatureOperations:
             else:
                 set_ret = dim.SetSystemValue3(new_sys_val, config_scope_val, "")
             ret_code = int(set_ret) if set_ret is not None else 0
+            if ret_code == 2:
+                # swSetValue_InvalidValue at a limit mate's own bound: its stored/solved bound can sit
+                # a few ulps below the value we convert (92 deg -> ...783 vs ...7828 / ...7825), so the
+                # exact limit is refused (MCP-058). Retry with the value pulled inward by up to 1e-9
+                # (far below any modelling tolerance); keep the failure if that does not help.
+                def _apply(v):
+                    if config_scope_val == 1 and act_name:
+                        return dim.SetSystemValue3(v, 3, act_name)
+                    if config_scope_val == 1:
+                        return dim.SetSystemValue3(v, 1, "")
+                    return dim.SetSystemValue3(v, config_scope_val, "")
+                if config_scope_val != 1:
+                    act_name = ""
+                for nudge in (1e-15, 1e-13, 1e-11, 1e-9):
+                    for cand in (new_sys_val - nudge * max(1.0, abs(new_sys_val)),
+                                 new_sys_val + nudge * max(1.0, abs(new_sys_val))):
+                        try:
+                            r2 = _apply(cand)
+                        except Exception:
+                            continue
+                        if int(r2 if r2 is not None else 1) == 0:
+                            new_sys_val = cand
+                            ret_code = 0
+                            break
+                    if ret_code == 0:
+                        break
             if ret_code != 0:
                 ret_names = {
                     1: "swSetValue_Failure",
@@ -1252,11 +1278,23 @@ class FeatureOperations:
                     5: "swSetValue_FrozenFeatureOwner",
                 }
                 ret_desc = ret_names.get(ret_code, f"ErrorCode_{ret_code}")
+                limit_hint = ""
+                if ret_code == 2 and feat_part:
+                    try:
+                        spec = get_attr_or_call(doc.FeatureByName(feat_part), "GetSpecificFeature2")
+                        lo, hi = float(spec.MinimumVariation), float(spec.MaximumVariation)
+                        if hi > lo:
+                            conv = (lambda v: math.degrees(v)) if is_angular else (lambda v: v * 1000.0)
+                            limit_hint = (f" The value is outside the limit mate's range "
+                                          f"{conv(lo):g}..{conv(hi):g} {'deg' if is_angular else 'mm'}.")
+                    except Exception:
+                        pass
                 return self._result(
                     False,
-                    f"SetSystemValue3 failed for '{name}' with status {ret_code} ({ret_desc}).",
+                    f"SetSystemValue3 failed for '{name}' with status {ret_code} ({ret_desc}).{limit_hint}",
                     SwErrors.swFeatureError,
-                    {"return_code": ret_code, "status": ret_desc}
+                    {"return_code": ret_code, "status": ret_desc, "system_value_sent": repr(new_sys_val),
+                     "system_value_before": repr(old_sys_val)}
                 )
 
             # 4. Rebuild document
