@@ -374,6 +374,24 @@ class FeatureOperations:
             
             pre_state = capture_pre_mutation_state(doc)
 
+            # Where the sketch plane is and which way its normal points, read while the sketch is
+            # still active, so the result can say in world terms where material was removed (MCP-057).
+            cut_frame = None
+            part_span = None
+            try:
+                from ..core.sketch_guard import sketch_frame
+                cut_frame = sketch_frame(doc)
+                if cut_frame:
+                    nrm = cut_frame["normal_world"]
+                    bx = doc.GetPartBox(True)
+                    if bx and len(bx) >= 6:
+                        corners = [(x, y, z) for x in (bx[0], bx[3]) for y in (bx[1], bx[4]) for z in (bx[2], bx[5])]
+                        proj = [sum(c[i] * 1000.0 * nrm[i] for i in range(3)) for c in corners]
+                        part_span = (min(proj), max(proj))
+            except Exception as fr_ex:
+                logger.debug(f"cut_extrude: sketch frame not read: {fr_ex}")
+                cut_frame = None
+
             # Step 1: Close sketch and select it
             success, sketch_name, error_msg = self._close_and_select_sketch(doc)
             if not success:
@@ -496,16 +514,57 @@ class FeatureOperations:
                 cut_type = f"{depth}{unit_str}"
             reversed_used = method_used.endswith("_Rev")
 
+            # Say where the material went, in world terms (MCP-057). dir False = against the sketch
+            # normal, True = along it (see the docstring).
+            where = ""
+            direction_data = None
+            if cut_frame and not both_directions:
+                nrm = cut_frame["normal_world"]
+                sign = 1.0 if reversed_used else -1.0
+                cut_dir = [round(sign * c, 6) + 0.0 for c in nrm]
+                o = cut_frame["origin_mm"]
+                plane_pos = sum(o[i] * nrm[i] for i in range(3))
+                axis_names = {(1, 0, 0): "+X", (-1, 0, 0): "-X", (0, 1, 0): "+Y", (0, -1, 0): "-Y",
+                              (0, 0, 1): "+Z", (0, 0, -1): "-Z"}
+                key = tuple(int(round(c)) if abs(abs(c) - 1.0) < 1e-6 or abs(c) < 1e-6 else 9 for c in cut_dir)
+                dir_name = axis_names.get(key)
+                direction_data = {"cut_direction_world": cut_dir, "sketch_plane_mm_along_normal": round(plane_pos, 3)}
+                if dir_name:
+                    ax = dir_name[1]
+                    axis_i = "XYZ".index(ax)
+                    p0 = o[axis_i]
+                    if through_all:
+                        where = f"; cut toward world {dir_name} from {ax} {p0:g} through all"
+                    else:
+                        p1 = p0 + (depth_m * 1000.0) * (1 if dir_name[0] == "+" else -1)
+                        where = f"; cut toward world {dir_name}: {ax} {min(p0, p1):g}..{max(p0, p1):g}"
+                        direction_data["cut_range_mm"] = {ax: [round(min(p0, p1), 3), round(max(p0, p1), 3)]}
+                else:
+                    where = f"; cut direction (world) {cut_dir}"
+                # Material on both sides of the sketch plane and no side chosen: say so loudly.
+                if reverse_dir is None and part_span is not None:
+                    below = plane_pos - part_span[0] > 0.01
+                    above = part_span[1] - plane_pos > 0.01
+                    if below and above:
+                        other = axis_names.get(tuple(-k for k in key), str([-c for c in cut_dir])) if dir_name else \
+                            str([-c for c in cut_dir])
+                        where += (f". WARNING: the part has material on both sides of the sketch plane and no side was "
+                                  f"chosen, so this cut went toward {dir_name or cut_dir}; if you meant {other}, undo it "
+                                  f"and pass reverse_dir={not reversed_used}")
+                        direction_data["both_sides_warning"] = True
+
+            data = {"depth": depth, "through_all": through_all,
+                    "both_directions": both_directions,
+                    "end_condition": {0: "blind", 1: "through_all", 6: "mid_plane", 9: "through_all_both"}[end_cond],
+                    "reversed_direction": reversed_used,
+                    "sketch_name": sketch_name,
+                    "api_method": method_used,
+                    "feature_name": getattr(feat, "Name", "Cut-Extrude")}
+            if direction_data:
+                data.update(direction_data)
             return self._result(True, f"Cut extrude: {cut_type}" + (", reversed direction" if reversed_used and not both_directions else "")
-                              + f" [{method_used}]",
-                              SwErrors.swSuccess,
-                              {"depth": depth, "through_all": through_all,
-                               "both_directions": both_directions,
-                               "end_condition": {0: "blind", 1: "through_all", 6: "mid_plane", 9: "through_all_both"}[end_cond],
-                               "reversed_direction": reversed_used,
-                               "sketch_name": sketch_name,
-                               "api_method": method_used,
-                               "feature_name": getattr(feat, "Name", "Cut-Extrude")})
+                              + where + f" [{method_used}]",
+                              SwErrors.swSuccess, data)
             
         except Exception as e:
             logger.error(f"Cut extrude error: {e}\n{traceback.format_exc()}")
