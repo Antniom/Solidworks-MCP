@@ -46,6 +46,7 @@ mechanical-engineering workflows, plus an interactive studio for adjusting dimen
 
 | Skill | What it covers |
 | :--- | :--- |
+| `solidworks-project` | Whole-product projects: interviews you, collects your files, writes `AGENT_CONTEXT.md` and works module by module against it as a tracklist |
 | `solidworks-modeling` | Sketches, features, sheet metal, global variables, selection and verification |
 | `solidworks-interactive` | The studio with live dimension sliders |
 | `solidworks-assemblies` | Components, mates, kinematics, positional states, interference checks |
