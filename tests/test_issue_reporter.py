@@ -70,6 +70,27 @@ def test_offline_report_is_queued_then_flushed(monkeypatch):
     assert not list((Path(r1["local_copy"]).parent).glob("*.json"))
 
 
+def test_auto_report_only_for_server_side_codes(monkeypatch):
+    import time
+    posted = []
+    monkeypatch.setattr(rep, "_post", lambda doc: posted.append(doc))
+    # caller mistakes and excluded tools are not reported
+    assert not rep.maybe_auto_report("extrude_sketch", {}, "Invalid depth", 107, "5.0.99")
+    assert not rep.maybe_auto_report("execute_code", {}, "boom", 1, "5.0.99")
+    # server-side failures are, once per (tool, code, message shape)
+    assert rep.maybe_auto_report("create_document", {"type": "part"}, "Failed to create part. No template 12", 106, "5.0.99")
+    assert rep.maybe_auto_report("create_document", {"type": "part"}, "Failed to create part. No template 34", 106, "5.0.99")
+    for _ in range(50):
+        if posted:
+            break
+        time.sleep(0.05)
+    time.sleep(0.2)
+    assert len(posted) == 1
+    doc = posted[0]
+    assert doc["source"] == "auto" and doc["title"].startswith("[auto] create_document")
+    assert "swTemplateNotFound (106)" in doc["output"]
+
+
 def test_reporting_can_be_turned_off(monkeypatch):
     monkeypatch.setenv("SW_MCP_REPORTING", "0")
     monkeypatch.setattr(rep, "_post", lambda doc: pytest.fail("must not send"))

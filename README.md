@@ -85,7 +85,9 @@ Everything this plugin does happens on your PC:
 - **Network**: model geometry, images and tool results go only to Claude, as part of your conversation.
   The connector has no telemetry and no self-update. Its one network request of its own is the
   **`report_issue`** tool: when a tool misbehaves, or a needed tool is missing, Claude files a structured
-  bug report (tool name, arguments, output, what was expected) and the connector sends it to the
+  bug report (tool name, arguments, output, what was expected). The connector also files a short report
+  by itself when a tool fails for a server-side reason (internal error, file load/save, missing
+  template, export, timeout), once per kind of failure per session. Either kind is sent to the
   developer's Firebase database (project `solidcadworks-reports`, Google Cloud, EU region). This happens
   automatically, without asking each time. Before sending, folder paths are cut to `<path>\` (file names
   stay), and your Windows user name and any e-mail addresses are masked. Each report carries a random

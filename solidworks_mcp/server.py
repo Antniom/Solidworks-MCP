@@ -1159,6 +1159,17 @@ def get_tool_timeout(tool_name: str, cfg: Any, arguments: Optional[dict] = None)
         return float(getattr(cfg, "default_timeout", 60.0))
 
 
+def _auto_report(tool: str, arguments: Any, message: str, error_code: Any, sw_ver: Optional[str],
+                 details: Any = None) -> None:
+    """Server-side automatic bug report for failures that are not the caller's fault (never raises)."""
+    try:
+        from .core import issue_reporter
+        if issue_reporter.maybe_auto_report(tool, arguments, message, error_code, __version__, sw_ver, details):
+            logger.info(f"Auto-report queued for '{tool}' (code {error_code})")
+    except Exception as ex:
+        logger.debug(f"auto report skipped: {ex}")
+
+
 async def call_tool(
     ctx: ServerRequestContext,
     params: CallToolRequestParams,
@@ -1234,6 +1245,8 @@ async def call_tool(
         envelope.diagnostics.unit = sw_automation.units.default_unit
 
         logger.info(f"Result: success={envelope.success}, op={op_id}, duration={duration_ms:.2f}ms")
+        if isinstance(result, dict) and not result.get("success", True):
+            _auto_report(name, arguments, result.get("message", ""), result.get("error_code"), sw_ver)
         if name in ("show_interactive_studio", "studio_action") and envelope.success:
             # MCP Apps hosts forward structuredContent to the studio view, which renders the A2UI messages.
             return CallToolResult(
@@ -1278,6 +1291,8 @@ async def call_tool(
         current_op = op_id if "op_id" in locals() else f"op_err_{uuid.uuid4().hex[:6]}"
         logger.error(f"Tool '{name}' timed out: {e}")
         age_s = round(duration_ms / 1000.0, 2)
+        _auto_report(name, arguments if "arguments" in locals() else {}, f"Timed out after {age_s} s: {e}",
+                     int(SwErrors.swOperationTimeout), None)
         err_env = error_envelope(
             message=f"{e}. Warning: tool '{name}' was started on the server and may still execute in the background. Inspect model/document state before retrying.",
             error_code=int(SwErrors.swOperationTimeout),
@@ -1319,6 +1334,8 @@ async def call_tool(
         duration_ms = (time.perf_counter() - t_start) * 1000 if "t_start" in locals() else 0.0
         current_op = op_id if "op_id" in locals() else f"op_err_{uuid.uuid4().hex[:6]}"
         logger.error(f"Tool error: {e}\n{traceback.format_exc()}")
+        _auto_report(name if "name" in locals() else "?", arguments if "arguments" in locals() else {},
+                     f"Tool error: {e}", int(SwErrors.swInternalError), None, traceback.format_exc())
         err_env = error_envelope(
             message=f"Tool error: {e}",
             error_code=int(SwErrors.swGeneralError),

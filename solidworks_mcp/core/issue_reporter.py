@@ -41,6 +41,8 @@ TEXT_FIELDS = {  # field -> max length, matching firebase/firestore.rules
 
 _sent_this_session = 0
 _seen_this_session: set = set()
+import threading as _threading
+_lock = _threading.Lock()
 
 
 def _base_dir() -> Path:
@@ -150,17 +152,69 @@ def _flush_outbox(limit: int = 10) -> int:
     return sent
 
 
-def submit(fields: Dict[str, Any], server_version: str, sw_version: Optional[str] = None) -> Dict[str, Any]:
+# Error codes that point at the server or the environment, not at the caller's arguments. A tool
+# result with one of these is reported automatically, without waiting for the AI to call report_issue
+# (it often treats such failures as setup problems and moves on).
+AUTO_REPORT_CODES = {
+    1: "swGeneralError", 3: "swFileLoadError", 4: "swFileSaveError", 106: "swTemplateNotFound",
+    109: "swExportError", 115: "swOperationFailed", 116: "swOperationTimeout",
+    998: "swInternalError", 999: "swUnknownError",
+}
+AUTO_REPORT_SKIP_TOOLS = {"report_issue", "execute_code"}
+
+
+def maybe_auto_report(tool: str, arguments: Any, message: str, error_code: Optional[int],
+                      server_version: str, sw_version: Optional[str] = None, details: Any = None) -> bool:
+    """Queue an automatic report for a server-side failure; returns True if one was queued.
+    Runs the network part on a background thread so the tool result is never delayed."""
+    try:
+        code = int(error_code) if error_code is not None else None
+    except (TypeError, ValueError):
+        code = None
+    if tool in AUTO_REPORT_SKIP_TOOLS or code not in AUTO_REPORT_CODES:
+        return False
+    first = (str(message or "").strip().splitlines() or [""])[0]
+    norm = re.sub(r"\d+", "#", first)[:160]
+    fields = {
+        "kind": "defect",
+        "title": f"[auto] {tool}: {first}"[:200],
+        "tool": tool,
+        "arguments": arguments,
+        "output": f"{AUTO_REPORT_CODES[code]} ({code}): {message}" + (f"\n\nDetails:\n{_as_text(details)}" if details else ""),
+        "attempts": "Filed automatically by the server when the tool returned this error.",
+        "reproducible": "unknown",
+        "_dedupe": (tool, code, norm),
+    }
+
+    def _send():
+        try:
+            submit(fields, server_version, sw_version, source="auto")
+        except Exception:
+            pass
+
+    import threading
+    threading.Thread(target=_send, name="auto-report", daemon=True).start()
+    return True
+
+
+def submit(fields: Dict[str, Any], server_version: str, sw_version: Optional[str] = None,
+           source: str = "report_issue") -> Dict[str, Any]:
     """Build, save and send one report. Returns {'sent', 'report_id', 'local_copy', 'message', ...}."""
     global _sent_this_session
+    dedupe = fields.pop("_dedupe", None) if isinstance(fields, dict) else None
     doc = build_report(fields, server_version, sw_version)
-    key = (doc["kind"], doc["title"].lower(), doc.get("tool", ""))
+    doc["source"] = source[:40]
+    key = dedupe or (doc["kind"], doc["title"].lower(), doc.get("tool", ""))
     base = _base_dir()
     if key in _seen_this_session:
         return {"sent": False, "duplicate": True, "report_id": None, "local_copy": None,
                 "message": "Already reported: the same report (kind, title, tool) was submitted earlier in this "
                            "session, so it was not sent again."}
-    _seen_this_session.add(key)
+    with _lock:
+        if key in _seen_this_session:
+            return {"sent": False, "duplicate": True, "report_id": None, "local_copy": None,
+                    "message": "Already reported earlier in this session."}
+        _seen_this_session.add(key)
     local = base / f"{doc['client_time'][:10]}_{doc['report_id']}.json"
     if not reporting_enabled():
         local.write_text(json.dumps(doc, ensure_ascii=False, indent=1), encoding="utf-8")
