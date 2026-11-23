@@ -36,20 +36,91 @@ class DocumentOperations:
         if not hasattr(self, "_template_cache"):
             self._template_cache = {}
         if template_type not in self._template_cache:
-            tmpl = None
-            pref_map = {"part": 1, "assembly": 2, "drawing": 3}
-            if getattr(self, "_sw_app", None) is not None and template_type in pref_map:
-                try:
-                    pref_val = self._sw_app.GetUserPreferenceStringValue(pref_map[template_type])
-                    if pref_val and os.path.exists(pref_val):
-                        tmpl = pref_val
-                except Exception:
-                    pass
-            if not tmpl:
-                tmpl = find_template(template_type) or ""
-            self._template_cache[template_type] = tmpl
-            logger.info(f"Cached {template_type} template: {tmpl}")
+            tmpl = self._resolve_template(template_type)
+            if tmpl:  # never cache a miss: the user may fix the setting and retry
+                self._template_cache[template_type] = tmpl
+            logger.info(f"{template_type} template: {tmpl or 'NOT FOUND'}")
+            return tmpl
         return self._template_cache[template_type]
+
+    def _new_document_failed(self, template_type: str, template: str) -> Dict:
+        """A NewDocument failure, explained: almost always a missing or unreadable template."""
+        self._template_cache = {}  # re-resolve next time (the user may fix the setting)
+        ext = {"part": ".prtdot", "assembly": ".asmdot", "drawing": ".drwdot"}[template_type]
+        if template:
+            why = (f"SolidWorks could not create a {template_type} from the template '{template}'. It may be from a "
+                   f"newer SolidWorks version or damaged.")
+        else:
+            why = (f"No {template_type} template ({ext}) was found on this computer: not in SolidWorks' Default "
+                   f"Templates setting, not via SolidWorks itself, not in the File Locations > Document Templates "
+                   f"folders, and not in ProgramData\\SOLIDWORKS\\SOLIDWORKS 20xx\\templates.")
+        return self._result(
+            False,
+            f"Failed to create {template_type}. {why} Fix: in SolidWorks open Tools > Options > System Options > "
+            f"Default Templates and pick a {template_type} template (or reinstall the SolidWorks templates), then retry.",
+            SwErrors.swTemplateNotFound,
+            {"template_tried": template or None, "template_type": template_type},
+        )
+
+    def _resolve_template(self, template_type: str) -> str:
+        """
+        Find a document template on THIS machine, whatever the SolidWorks version or language.
+        Order: the user's default-template setting; SolidWorks' own answer (GetDocumentTemplate);
+        the template folders set in File Locations; any ProgramData SOLIDWORKS 20xx\\templates folder
+        and the install's lang\\*\\templates; finally the old fixed list. The setting used to be read
+        with IDs 1/2/3, which are the Documents / palette folders, not the templates (8/9/10).
+        """
+        import glob
+        ext = {"part": ".prtdot", "assembly": ".asmdot", "drawing": ".drwdot"}.get(template_type)
+        if not ext:
+            return ""
+        app = getattr(self, "_sw_app", None)
+        if app is not None:
+            try:  # swDefaultTemplatePart / Assembly / Drawing
+                v = app.GetUserPreferenceStringValue({"part": 8, "assembly": 9, "drawing": 10}[template_type])
+                if v and os.path.isfile(v):
+                    return v
+            except Exception:
+                pass
+            try:  # SolidWorks' own choice (honours the "always use default templates" options)
+                v = app.GetDocumentTemplate({"part": 1, "assembly": 2, "drawing": 3}[template_type], "", 0, 0.0, 0.0)
+                if v and os.path.isfile(str(v)):
+                    return str(v)
+            except Exception:
+                pass
+
+        def pick(paths):
+            files = [p for p in paths if os.path.isfile(p) and p.lower().endswith(ext)]
+            if not files:
+                return ""
+            stem = {"part": "part", "assembly": "assembly", "drawing": "drawing"}[template_type]
+            files.sort(key=lambda p: (os.path.splitext(os.path.basename(p))[0].lower() != stem,
+                                      "\\mbd\\" in p.lower(), len(p)))
+            return files[0]
+
+        folders = []
+        if app is not None:
+            try:  # swFileLocationsDocumentTemplates: ';'-separated folder list
+                v = app.GetUserPreferenceStringValue(6)
+                folders += [f for f in str(v or "").split(";") if f.strip()]
+            except Exception:
+                pass
+        pdata = os.environ.get("ProgramData", r"C:\ProgramData")
+        folders += sorted(glob.glob(os.path.join(pdata, "SOLIDWORKS", "SOLIDWORKS 20*", "templates")), reverse=True)
+        try:
+            from ..utils import SolidWorksFinder as _F  # install dir: lang\<any>\templates, data\templates
+            exe = _F.find()
+            if exe:
+                base = os.path.dirname(exe)
+                folders += glob.glob(os.path.join(base, "lang", "*", "templates")) + [os.path.join(base, "data", "templates")]
+        except Exception:
+            pass
+        for folder in folders:
+            hit = pick(glob.glob(os.path.join(folder.strip(), "*" + ext)) +
+                       glob.glob(os.path.join(folder.strip(), "*" + ext.upper())))
+            if hit:
+                return hit
+        return find_template(template_type) or ""
 
     def create_new_part(self) -> Dict:
         """
@@ -82,8 +153,7 @@ class DocumentOperations:
             doc = self._sw_app.NewDocument(template, 0, 0, 0)
             
             if doc is None:
-                return self._result(False, "Failed to create part document",
-                                  SwErrors.swFileLoadError)
+                return self._new_document_failed("part", template)
             
             # Set view and ensure visibility in foreground
             try:
@@ -135,8 +205,7 @@ class DocumentOperations:
             doc = self._sw_app.NewDocument(template, 0, 0, 0)
             
             if doc is None:
-                return self._result(False, "Failed to create assembly",
-                                  SwErrors.swFileLoadError)
+                return self._new_document_failed("assembly", template)
             
             try:
                 doc.ShowNamedView2("*Isometric", 7)
@@ -191,8 +260,7 @@ class DocumentOperations:
             doc = self._sw_app.NewDocument(template, 0, 0, 0)
             
             if doc is None:
-                return self._result(False, "Failed to create drawing",
-                                  SwErrors.swFileLoadError)
+                return self._new_document_failed("drawing", template)
             
             title = self._get_doc_title(doc)
             
