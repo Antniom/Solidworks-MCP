@@ -1,0 +1,66 @@
+[
+  {
+    "query": "will this bracket hold 500 N hanging from the end? it's fixed by the two bolt holes",
+    "should_trigger": true
+  },
+  {
+    "query": "run a static stress analysis on the part with 2 MPa pressure on the inside face",
+    "should_trigger": true
+  },
+  {
+    "query": "what's the factor of safety of the lever in 6061-T6",
+    "should_trigger": true
+  },
+  {
+    "query": "how much does the cantilever bend under 200 N at the tip",
+    "should_trigger": true
+  },
+  {
+    "query": "análise de tensões da peça aberta com 1000 N na face de cima",
+    "should_trigger": true
+  },
+  {
+    "query": "find the first natural frequency of the plate",
+    "should_trigger": true
+  },
+  {
+    "query": "mesh finer and re-run the study, the stress looks off",
+    "should_trigger": true
+  },
+  {
+    "query": "is 3 mm steel enough for this hook if I hang 80 kg on it",
+    "should_trigger": true
+  },
+  {
+    "query": "explain the difference between von Mises and Tresca yield criteria",
+    "should_trigger": false
+  },
+  {
+    "query": "check if anything collides in the gearbox assembly",
+    "should_trigger": false
+  },
+  {
+    "query": "is this bracket printable on an FDM printer without supports",
+    "should_trigger": false
+  },
+  {
+    "query": "set the material of the part to AISI 304 and give me its mass",
+    "should_trigger": false
+  },
+  {
+    "query": "write a python script that renames all .sldprt files in a folder to lowercase",
+    "should_trigger": false
+  },
+  {
+    "query": "explain the difference between von Mises and Tresca yield criteria",
+    "should_trigger": false
+  },
+  {
+    "query": "model this bracket in Fusion 360",
+    "should_trigger": false
+  },
+  {
+    "query": "what's the tap drill size for M10x1.5?",
+    "should_trigger": false
+  }
+]

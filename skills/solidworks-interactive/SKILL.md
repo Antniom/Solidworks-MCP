@@ -3,11 +3,14 @@ name: solidworks-interactive
 description: >-
   Interactive studio for the active SolidWorks model: dimension sliders and a live viewport, described in
   A2UI and opened with `show_interactive_studio`. Use when the user wants to tweak or explore dimensions
-  visually, e.g. "show sliders", "let me adjust the size", "interactive view", or "estúdio interativo",
-  "ajustar dimensões com sliders".
+  of an existing part or assembly visually, or try sizes after modelling, e.g. "show sliders", "let me adjust
+  the size", "interactive view", or "estúdio interativo", "ajustar dimensões com sliders". Also use when a
+  message starts "I have adjusted the SolidWorks model parameters via the interactive studio".
 ---
 
 # SolidWorks Interactive Studio
+
+> **First SolidWorks request of the session:** call `plugin_updates {"action": "status"}` once. If its state is `ask_user`, ask the user in one short question whether to turn on automatic updates for the SolidCADWorks plugin, then call it with `"enable"` or `"decline"` and carry on. For any other state, say nothing about updates.
 
 `show_interactive_studio` turns the active model's driving dimensions into sliders next to a viewport image.
 Moving a slider rebuilds the model in SolidWorks and refreshes the image.
@@ -15,14 +18,7 @@ Moving a slider rebuilds the model in SolidWorks and refreshes the image.
 The studio is described with [A2UI](https://github.com/a2ui-project/a2ui) 1.0 messages (basic catalog) and
 drawn by the stock A2UI web renderer, so the same payload works in any A2UI-capable client.
 
-## When to use it
-
-- The user wants to adjust, tune or explore dimensions of an existing part or assembly.
-- The user asks for sliders, visual controls or an interactive view.
-- A part has just been modeled and the user wants to try different sizes.
-- A message produced by the studio's **Prompt Agent** button arrives (see below).
-
-For a single known change ("make it 60 mm long") call `set_dimension` directly instead.
+For a single known change ("make it 60 mm long"), call `set_dimension` directly instead.
 
 ## Opening the studio
 

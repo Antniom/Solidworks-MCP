@@ -7,7 +7,6 @@ and installs all bundled SolidWorks CAD/FEA/Drafting skills.
 
 Supported Clients:
 - Claude Desktop
-- Claude Code
 - Antigravity / Gemini CLI
 - Cursor
 - Windsurf (Codeium)
@@ -86,12 +85,6 @@ def get_detected_clients() -> List[ClientTarget]:
             name="Claude Desktop",
             config_path=app_data / "Claude" / "claude_desktop_config.json",
             detection_hint=app_data / "Claude",
-        ),
-        ClientTarget(
-            name="Claude Code",
-            config_path=user_profile / ".claude.json",
-            skills_dirs=[user_profile / ".claude" / "skills"],
-            detection_hint=user_profile / ".claude",
         ),
         ClientTarget(
             name="Antigravity / Gemini",

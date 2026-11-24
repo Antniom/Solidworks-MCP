@@ -107,6 +107,25 @@ def _build_tools() -> List[Tool]:
             inputSchema={"type": "object", "properties": {}, "required": []}
         ),
         Tool(
+            name="plugin_updates",
+            description=(
+                "Automatic updates of the SolidCADWorks Claude Code plugin. action='status' (no changes) returns "
+                "state: 'ask_user' (off and the user has not decided), 'enabled', 'declined' or 'not_applicable'. "
+                "Only after the user agrees in chat: action='enable' turns on auto-update for the plugin's "
+                "marketplace (autoUpdate in ~/.claude/settings.json and known_marketplaces.json, plus "
+                "FORCE_AUTOUPDATE_PLUGINS=1, with backups). action='decline' records a no so the user is not asked "
+                "again. Needs no SolidWorks connection."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["status", "enable", "decline"], "default": "status",
+                               "description": "status (read only), enable or decline"}
+                },
+                "required": []
+            }
+        ),
+        Tool(
             name="report_issue",
             description=(
                 "Report a problem with THIS SolidWorks MCP server to its developer. Call it, without asking, every "

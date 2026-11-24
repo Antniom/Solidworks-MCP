@@ -12,8 +12,13 @@ TOOL_NAMES = {t.name for t in srv._tool_definitions()}
 CALL = re.compile(r"^([a-z][a-z0-9_]+) (\{.*?^\}|\{.*?\})\s*$", re.M | re.S)
 
 
+def _skill_docs():
+    """SKILL.md files plus the reference files they link to (skills/<name>/reference/*.md)."""
+    return sorted(Path("skills").glob("*/SKILL.md")) + sorted(Path("skills").glob("*/reference/*.md"))
+
+
 def _examples():
-    for skill in sorted(Path("skills").glob("*/SKILL.md")):
+    for skill in _skill_docs():
         text = skill.read_text(encoding="utf-8")
         for block in re.findall(r"```(?:json|jsonc|javascript)?\n(.*?)```", text, re.S):
             block = re.sub(r"^\s*//.*$", "", block, flags=re.M)
@@ -22,7 +27,7 @@ def _examples():
                     args = json.loads(body)
                 except json.JSONDecodeError:
                     continue  # schematic examples such as {"x": float}
-                yield pytest.param(name, args, id=f"{skill.parent.name}:{name}:{json.dumps(args)[:40]}")
+                yield pytest.param(name, args, id=f"{skill.parent.name}/{skill.stem}:{name}:{json.dumps(args)[:40]}")
 
 
 EXAMPLES = list(_examples())
@@ -39,7 +44,7 @@ def test_skill_example_is_a_valid_call(name, args):
 
 
 def test_skills_do_not_mention_merged_tool_names():
-    for skill in list(Path("skills").glob("*/SKILL.md")) + [Path("rules/AGENTS.md"), Path("README.md")]:
+    for skill in _skill_docs() + [Path("rules/AGENTS.md"), Path("README.md")]:
         text = skill.read_text(encoding="utf-8")
         stale = sorted(old for old in srv._MERGED_TOOLS if re.search(rf"\b{old}\b", text))
         assert not stale, f"{skill}: {stale}"

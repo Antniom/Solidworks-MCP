@@ -1,0 +1,74 @@
+[
+  {
+    "query": "model a 120x80x10 mm aluminium mounting plate with four M6 clearance holes 10 mm from each corner",
+    "should_trigger": true
+  },
+  {
+    "query": "in solidworks, add a 2 mm fillet to all the outside edges of the bracket I have open",
+    "should_trigger": true
+  },
+  {
+    "query": "make the wall of this enclosure 3 mm instead of 2, it's a shell feature I think",
+    "should_trigger": true
+  },
+  {
+    "query": "can you cut a 20 mm wide slot through the middle of the part, along X",
+    "should_trigger": true
+  },
+  {
+    "query": "desenha uma chapa metálica em L com 1.5 mm de espessura e abas de 40 e 25 mm",
+    "should_trigger": true
+  },
+  {
+    "query": "create a shaft Ø20 x 150 with a 1x45 chamfer on both ends and a keyway",
+    "should_trigger": true
+  },
+  {
+    "query": "the part I have open has 3 bodies but should be one, figure out why and fix it",
+    "should_trigger": true
+  },
+  {
+    "query": "revolve a pulley profile: OD 60, bore 12, groove 8 mm wide",
+    "should_trigger": true
+  },
+  {
+    "query": "export the plate drawing as DXF for the laser cutter",
+    "should_trigger": false
+  },
+  {
+    "query": "check if anything collides in the gearbox assembly",
+    "should_trigger": false
+  },
+  {
+    "query": "will this bracket hold 500 N hanging from the end?",
+    "should_trigger": false
+  },
+  {
+    "query": "SolidWorks is stuck, there's some dialog open and every tool times out",
+    "should_trigger": false
+  },
+  {
+    "query": "show me sliders so I can play with the size of this part",
+    "should_trigger": false
+  },
+  {
+    "query": "insert four M8x30 ISO 4017 bolts from the Toolbox into the flange holes",
+    "should_trigger": false
+  },
+  {
+    "query": "write a python script that renames all .sldprt files in a folder to lowercase",
+    "should_trigger": false
+  },
+  {
+    "query": "explain the difference between von Mises and Tresca yield criteria",
+    "should_trigger": false
+  },
+  {
+    "query": "model this bracket in Fusion 360",
+    "should_trigger": false
+  },
+  {
+    "query": "what's the tap drill size for M10x1.5?",
+    "should_trigger": false
+  }
+]

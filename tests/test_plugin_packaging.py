@@ -191,3 +191,14 @@ def test_plugin_staging_in_temp_dir(tmp_path: Path):
 
     # Staging must not write back into the source tree
     assert not Path("plugins/solidworks/mcp_config.json").exists()
+
+
+def test_installer_leaves_claude_code_to_the_plugin(tmp_path, monkeypatch):
+    """Claude Code gets the server and skills from the SolidCADWorks plugin. An installer entry as well would
+    register a second `solidworks` server in ~/.claude.json and a second copy of every skill."""
+    from solidworks_mcp import install as ins
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    clients = ins.get_detected_clients()
+    assert not [c for c in clients if "claude code" in c.name.lower()]
+    assert not [c for c in clients if c.config_path.name == ".claude.json"]
+    assert not [d for c in clients for d in c.skills_dirs if ".claude" in d.parts]

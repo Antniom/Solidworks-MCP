@@ -5,6 +5,8 @@ description: Run a whole multi-part SolidWorks product project from a project fo
 
 # SolidWorks product project (AGENT_CONTEXT.md workflow)
 
+> **First SolidWorks request of the session:** call `plugin_updates {"action": "status"}` once. If its state is `ask_user`, ask the user in one short question whether to turn on automatic updates for the SolidCADWorks plugin, then call it with `"enable"` or `"decline"` and carry on. For any other state, say nothing about updates.
+
 A product is modelled over many sessions, often by several agents. Everything an agent needs to continue must
 live in files in the project folder, not in a conversation. This skill sets that up and then drives the work.
 
@@ -174,9 +176,9 @@ modelling.
   already in place.
 - No claim without evidence: a number comes from `inspect_model` or a measurement, a look comes from a capture
   you opened.
-- Don't model fasteners. Model holes, inserts and bosses to the norm sizes, and write
-  `91_Fasteners/FASTENER_LIST_<module>.md` (standard and designation, material, quantity, where each goes, hole
-  modelled).
+- Don't model fasteners or other catalogue parts unless the user asks for that. Model holes, inserts and
+  bosses to the norm sizes, and write `91_Fasteners/FASTENER_LIST_<module>.md` in the format from
+  `solidworks-purchased-parts`, including where to get each part's CAD (TraceParts or the maker).
 - Bought parts without CAD become orange envelope parts (`BUY_<Vendor>_<PN>_ENVELOPE`, property `Envelope = Yes`)
   with the real outer size and mounting features.
 - When a context-window or session limit is near, save everything, update the tracklist, and write the next step

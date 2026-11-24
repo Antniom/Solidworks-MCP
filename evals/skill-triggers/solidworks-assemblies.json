@@ -1,0 +1,70 @@
+[
+  {
+    "query": "put the motor STEP from the purchased folder into the frame assembly and mate the shaft to the coupler",
+    "should_trigger": true
+  },
+  {
+    "query": "add a concentric mate between the pin and the hinge hole",
+    "should_trigger": true
+  },
+  {
+    "query": "check if anything collides in the gearbox assembly",
+    "should_trigger": true
+  },
+  {
+    "query": "drive the lid hinge from 0 to 110 degrees and tell me where it hits the body",
+    "should_trigger": true
+  },
+  {
+    "query": "criar montagem com a base e o suporte, o suporte fixo em cima da base",
+    "should_trigger": true
+  },
+  {
+    "query": "the distance mate put the slider on the wrong side, flip it",
+    "should_trigger": true
+  },
+  {
+    "query": "make the door subassembly flexible so the hinge can move in the top assembly",
+    "should_trigger": true
+  },
+  {
+    "query": "save an 'open' and a 'closed' state of the clamp mechanism",
+    "should_trigger": true
+  },
+  {
+    "query": "add a 2 mm fillet to all the outside edges of the bracket",
+    "should_trigger": false
+  },
+  {
+    "query": "make a manufacturing drawing of the bracket on A3",
+    "should_trigger": false
+  },
+  {
+    "query": "I need a DIN 933 M8x40 bolt as a part file",
+    "should_trigger": false
+  },
+  {
+    "query": "run a static stress analysis on the part with 2 MPa pressure",
+    "should_trigger": false
+  },
+  {
+    "query": "is this bracket printable on an FDM printer without supports",
+    "should_trigger": false
+  },
+  {
+    "query": "write a python script that renames all .sldprt files in a folder to lowercase",
+    "should_trigger": false
+  },
+  {
+    "query": "explain the difference between von Mises and Tresca yield criteria",
+    "should_trigger": false
+  },
+  {
+    "query": "model this bracket in Fusion 360",
+    "should_trigger": false
+  },
+  {
+    "query": "what's the tap drill size for M10x1.5?",
+    "should_trigger": false
+  }
+]

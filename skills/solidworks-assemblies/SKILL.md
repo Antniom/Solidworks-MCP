@@ -1,169 +1,83 @@
 ---
 name: solidworks-assemblies
 description: >-
-  Assemblies in SolidWorks through the `solidworks` MCP server: inserting components, standard and
-  mechanical mates, flexible/rigid subassemblies, driving mates through a motion range, positional
-  representations and interference checks. Use for requests like "create assembly", "add mate",
-  "insert component", "check interference", "animate the hinge", or "criar montagem", "adicionar relação".
+  Assemblies in SolidWorks through the `solidworks` MCP server: inserting parts, subassemblies and STEP/IGES
+  files, positioning and fixing components, standard and mechanical mates, flexible/rigid subassemblies,
+  driving mates through a motion range, positional representations and interference checks. Use for any
+  multi-component (.sldasm) request, e.g. "create assembly", "add mate", "insert the motor STEP", "check
+  interference", "animate the hinge", "does the lid clear when open", or "criar montagem", "adicionar relação".
 ---
 
-# SolidWorks Assembly Design & Constraint Management via MCP
+# SolidWorks assemblies
 
-## When this skill applies
-Use this skill when building multi-component SolidWorks assemblies (`.sldasm`):
-- Inserting parts or subassemblies into an assembly document (`add_component`).
-- Constraining components using standard mates: coincident, concentric, parallel, perpendicular, tangent, distance, angle (`add_mate`).
-- Selecting mating surfaces deterministically using `select` (`"by": "geometry"`) (filtering cylindrical hole/shaft faces or planar reference surfaces).
-- Actuating kinematic strokes parametrically.
-- Checking assembly collisions and physical clearances (`check_interference`).
-- Managing assembly-level configurations and Bill of Materials metadata (`manage_configuration`, `manage_custom_properties`).
-- Verifying overall assembly envelope and component count (`inspect_model`, `verify_model`, `list_components`).
+> **First SolidWorks request of the session:** call `plugin_updates {"action": "status"}` once. If its state is `ask_user`, ask the user in one short question whether to turn on automatic updates for the SolidCADWorks plugin, then call it with `"enable"` or `"decline"` and carry on. For any other state, say nothing about updates.
 
-For individual component modeling, see `solidworks-modeling`.
-For standard hardware (bolts, nuts, washers), see `solidworks-din-parts` or `solidworks-toolbox`.
-For 2D engineering drawings and BOM generation, see `solidworks-drawings`.
-For FEA simulation of assemblies, see `solidworks-simulation`.
-For dialog and rebuild recovery, see `solidworks-diagnostics`.
+The tool schemas list every argument. This file covers how insertion, mates and checks behave, and how to
+verify them.
 
----
+Fasteners, bearings and other bought parts come from the maker's CAD. List them for download
+(`solidworks-purchased-parts`), then insert the STEP files the user downloads. Model them only if the user
+asks (`solidworks-din-parts`); use Toolbox only if they ask for it (`solidworks-toolbox`).
 
-## Tool Selection Hierarchy: Native Tools First
+Related skills: parts → `solidworks-modeling`;
+whole multi-part products → `solidworks-project`; dialogs and stuck sessions → `solidworks-diagnostics`.
+`execute_code` is consent-gated. Use it only for mate types no tool provides (rack-and-pinion, cam).
 
-> [!IMPORTANT]
-> **STRICT TOOL EXECUTION HIERARCHY**:
-> 1. **Priority 1 — Native MCP Tools (Always use first)**:
->    Always use dedicated SolidWorks MCP tools (`create_document`, `add_component`, `add_mate`, `check_interference`, `list_components`, `select` (`"by": "geometry"`), `verify_model`, `capture_viewport`).
->    - Native `add_component` automatically handles document memory pre-loading (`sw.OpenDoc6`) so external parts insert cleanly.
->    - Native `check_interference` automatically handles `InterferenceDetectionManager` COM lifecycle and releases PropertyManager pages via `Done()`.
->    - Native `add_mate` maps standard constraint types without raw VARIANT dispatch errors.
-> 2. **Priority 2 — `execute_code` (Security-Gated Fallback ONLY)**:
->    Do **NOT** use `execute_code` for routine assembly insertion or standard mates.
->    `execute_code` is locked by default. If required for unmapped advanced mates (e.g. rack-and-pinion, cam-follower), prompt the user for permission in chat first.
+## Inserting components
 
----
+- `add_component` takes a `.sldprt`, `.sldasm`, STEP, IGES or Parasolid path.
+  - A neutral file is imported once, saved as a native copy next to it, and reused on later calls. A large
+    STEP can take minutes the first time. A wireframe-only STEP cannot be imported; the error says so.
+  - `x`, `y`, `z` place the component's **origin**, not its bounding-box centre.
+  - `rotation_deg: [rx, ry, rz]` rotates about the assembly X, then Y, then Z, through the component origin.
+  - The result reports the origin, the component axes, the fixed state and the box the component occupies.
+    Check that box.
+- **Parts modelled in the assembly's own coordinate system** go in at `x = y = z = 0` with `"fixed": true`
+  and need no mates. This is the fastest and most reliable layout for designed-in-place products.
+- The first component is fixed. Others float until mated or fixed.
 
-## Key Tool Index & Schemas
+## Mates
 
-### 1. Assembly Construction
-- `create_document {"type": "assembly"}`: Creates an empty assembly from default template.
-- `add_component`:
-  - `"component_path"`: Full path to `.sldprt` or `.sldasm` on disk, or to a STEP/IGES/Parasolid file. A neutral file is imported once, a native copy with the same name is saved next to it and reused on later calls (a large STEP can take minutes the first time). A STEP that holds only wireframe curves cannot be imported; the error says so.
-  - `"x"`, `"y"`, `"z"`: Position of the component **origin** (defaults to `0.0, 0.0, 0.0`).
-  - `"rotation_deg"`: `[rx, ry, rz]` in degrees, about the assembly X axis, then Y, then Z, through the component origin.
-  - `"fixed"`: `true` fixes the component in place, `false` leaves it floating for mates. Parts modelled in the assembly's own coordinate system go in with `x = y = z = 0` and `"fixed": true`, with no mates.
-  - `"unit"`: `"mm"` (converted automatically to meters for COM).
-  - The result reports the origin, the component axes, the fixed state and the box the component occupies in the assembly.
-- `list_components {}`: Lists all components in assembly with their instance names, file paths, suppression state, and fixity (`is_fixed`).
-
-### 2. Mating & Constraints (`add_mate`)
-- `mate_type`: `"coincident"`, `"concentric"`, `"perpendicular"`, `"parallel"`, `"tangent"`, `"distance"`, `"angle"`
-- `entity1`, `entity2`: Names of the two mating entities: planes or features (e.g. `"Top Plane"`). Faces have no names, so for faces use `use_selection` instead.
-- `comp1`, `comp2`: Component instance names (e.g. `"bracket-1"`, `"shaft-1"`).
-- `use_selection`: `true` mates the two entities that are currently selected (see section 3). Omit `entity1`/`entity2` then. Clients with an older cached schema can pass `"entity1": "@selected", "entity2": "@selected"` instead.
-- `align`: `0` aligned (normals in the same direction), `1` anti-aligned (normals opposite), `2` closest
-- `distance`: Float value in `mm` (for `"distance"` mate type).
-- `angle`: Float value in degrees (for `"angle"` mate type).
-- `flip`: Boolean to reverse alignment orientation.
-- `unit`: `"mm"`
-- The result lists every component the mate moved, with its origin before and after and the box it now occupies. A distance or angle mate can solve to either side: read that box, and if it is the wrong side delete the mate (`delete_assembly_constraint`) and add it again with `"flip": true`.
-
-### 3. Precision Selection for Mates (`select` by geometry)
-Never rely on guessed entity coordinates or broken face names. Use `select` (`"by": "geometry"`) to find exact mating features.
-In an assembly it searches the component bodies and reports centroids and normals in **assembly** coordinates; add `"component": "pin-1"` to search one component only. Select the first face, select the second with `"append": true`, then call `add_mate` with `"use_selection": true`:
-- **Cylindrical Shafts & Bores (for Concentric Mates)**:
-  ```json
-  {
-    "target_type": "face",
-    "surface_type": "cylinder",
-    "radius": 12.0,
-    "radius_tolerance": 0.1
-  }
-  ```
-- **Planar Mating Pads (for Coincident Mates)**:
-  ```json
-  {
-    "target_type": "face",
-    "surface_type": "plane",
-    "normal": [0, 0, 1]
-  }
-  ```
-
-### 4. Interference & Diagnostics
-- `check_interference`:
-  - `"treat_coincidence_as_interference"`: `false` (default: only actual body intersections trigger collisions).
-  - Returns `has_interference` (bool), `interference_count` (int), and list of interfering components and volumes.
-- `inspect_model {}`: Checks overall assembly bounding box, center of mass, and rebuild status.
-- `verify_model {"expected_dx": float, "expected_dy": float, "expected_dz": float, "tolerance_mm": 0.5}`
-
-### 5. Kinematics & Mechanism States
-- `inspect_assembly_kinematics {}`: Audit of fixed vs floating components, rigid vs flexible subassemblies and mate health. Run it before driving motion.
-- `manage_subassembly_kinematics {"action": ..., "occurrence_name": str}`: `"set_grounded"` / `"set_floating"` fix or free a component; `"set_flexible"` / `"set_rigid"` let a subassembly's own mates move (or not) inside the parent; `"enforce_rigidity"` fixes every static component except names matching `"exclude_keywords"`.
-- `drive_kinematic_motion {"constraint_name": str, "start_value": float, "end_value": float, "steps": int, "unit": "mm" | "deg", "check_interference": bool}`: Steps a distance or angle mate through a range with a rebuild at each step; with `check_interference` it reports the steps where parts collide. Pass `"unit": "deg"` for angle mates.
-- `manage_positional_representations {"action": "list" | "create" | "activate" | "set_override", "name": str, "constraint_name": str, "value": float, "suppress_constraint": bool}`: Named mechanism positions (open/closed, extended/retracted) stored as configurations with mate overrides.
-- `delete_assembly_constraint {"constraint_name": str}`: Removes one mate by name (names come from `inspect_assembly_kinematics` or `get_feature_tree`).
-
----
-
-## The 5 Rules for SolidWorks Assemblies
-
-1. **Document Pre-Loading is Mandatory for Components**:
-   - In SolidWorks COM, calling `AddComponent4` fails if the referenced part document is not currently loaded into memory.
-   - The MCP tool `add_component` automatically handles `sw.OpenDoc6` pre-loading and verified insertion.
-   - `x`, `y`, `z` place the component's **origin** (not its bounding-box centre); the tool checks the result and reports an error if the origin did not land there.
-2. **Concentric Mates Require Cylindrical Faces, Never Solid Features**:
-   - When constraining pins, shafts, or holes, never attempt to select the whole feature (e.g. "Boss-Extrude1").
-   - Select the specific cylindrical face using `select {"by": "geometry", "surface_type": "cylinder", "radius": ...}`.
-3. **First Component is Fixed by Default**:
-   - The first component inserted into a new assembly is automatically fixed at the origin.
-   - Secondary components are free (floating) and must be fully constrained with 3 orthogonal mates or mate pairs.
-4. **Distance Mates Must Be Strictly Positive**:
-   - In SolidWorks COM, passing a negative distance to `AddMate3` / `AddMate5` raises an error.
-   - Always pass positive distance values and use `flip: true` to reverse side orientation.
-5. **Always Run Interference Checks Before Finalizing**:
-   - Run `check_interference {"treat_coincidence_as_interference": false}` before saving. Zero collisions ensures manufactured parts will physically assemble.
-
----
-
-## Standard Assembly Workflow Recipe
+Faces have no names, so mate faces through the selection:
 
 ```json
-// 1. Initialize Assembly
-connect_solidworks {}
-create_document {"type": "assembly"}
-set_units {"unit": "mm"}
-
-// 2. Insert Base Housing Component (Auto-fixed at origin)
-add_component {
-  "component_path": "C:/Projects/Gearbox_Housing.sldprt",
-  "x": 0, "y": 0, "z": 0,
-  "unit": "mm"
-}
-
-// 3. Insert Rotating Shaft Component (Floating)
-add_component {
-  "component_path": "C:/Projects/Drive_Shaft.sldprt",
-  "x": 0, "y": 50, "z": 100,
-  "unit": "mm"
-}
-
-// 4. Concentric Mate: Housing Bore to Shaft Journal (select both faces, then mate the selection)
 select {"by": "geometry", "target_type": "face", "surface_type": "cylinder", "radius": 12.0, "component": "Gearbox_Housing-1"}
 select {"by": "geometry", "target_type": "face", "surface_type": "cylinder", "radius": 12.0, "component": "Drive_Shaft-1", "append": true}
 add_mate {"mate_type": "concentric", "use_selection": true, "align": 0}
-
-// 5. Coincident Mate: Housing Shoulder to Shaft Thrust Face
-//    (planar faces picked by a point that lies on them, in assembly coordinates)
-select {"by": "geometry", "target_type": "face", "surface_type": "plane", "point_on_surface": [0, 0, 40], "component": "Gearbox_Housing-1"}
-select {"by": "geometry", "target_type": "face", "surface_type": "plane", "point_on_surface": [0, 50, 40], "component": "Drive_Shaft-1", "append": true}
-add_mate {"mate_type": "coincident", "use_selection": true, "align": 1}
-
-// Named planes still work directly, without selecting first:
-add_mate {"mate_type": "coincident", "entity1": "Top Plane", "comp1": "Gearbox_Housing-1", "entity2": "Top Plane", "comp2": "Drive_Shaft-1"}
-
-// 6. Collision & Interference Verification
-check_interference {"treat_coincidence_as_interference": false}
-
-// 7. Verify Model Bounding Box and Capture Isometric View
-verify_model {"expected_dx": 200, "expected_dy": 150, "expected_dz": 300, "tolerance_mm": 1.0}
-capture_viewport {"filepath": "assembly_render.png", "view_name": "*Isometric"}
 ```
+
+- In an assembly, `select` searches component bodies and reports centroids and normals in **assembly**
+  coordinates. `component` limits the search to one component.
+- Pick planar faces with `point_on_surface` (assembly coordinates) or `normal`.
+- Named planes can be mated directly:
+  `add_mate {"mate_type": "coincident", "entity1": "Top Plane", "comp1": "Housing-1", "entity2": "Top Plane", "comp2": "Shaft-1"}`.
+- Concentric mates need the cylindrical **face**, not the feature.
+- `align`: `0` aligned, `1` anti-aligned, `2` closest.
+- **Distance and angle mates** take positive values only; use `"flip": true` for the other side. They can
+  solve to either side. The result lists every component the mate moved, with its box before and after.
+  If the box is on the wrong side, `delete_assembly_constraint` and add the mate again with `flip`.
+- Fully constrain each floating part (typically three mates), or fix it.
+
+## Checks
+
+- `check_interference {"treat_coincidence_as_interference": false}` before saving. It clears the selection
+  first, so the whole assembly is checked. Explain every hit (by design, contact, or a fix needed).
+- `inspect_model {}` for the assembly box and rebuild errors. `list_components {}` for instance names,
+  paths and fixed state.
+- `verify_model` for the overall envelope.
+
+## Motion
+
+1. `inspect_assembly_kinematics {}`: fixed vs floating components, rigid vs flexible subassemblies, and mate
+   health. Run it before driving anything.
+2. `manage_subassembly_kinematics`:
+   - `set_grounded` / `set_floating` fix or free a component.
+   - `set_flexible` / `set_rigid` let a subassembly's own mates move in the parent (or not).
+   - `enforce_rigidity` fixes everything except names matching `exclude_keywords`.
+3. `drive_kinematic_motion {"constraint_name": "Angle1", "start_value": 0, "end_value": 110, "steps": 12, "unit": "deg", "check_interference": true}`
+   steps a distance or angle mate through its range and reports the steps that collide. Angle mates need
+   `"unit": "deg"`.
+4. `manage_positional_representations` stores named states (open/closed) as configurations with mate
+   overrides.
+
+Mate names come from `inspect_assembly_kinematics` or `get_feature_tree`.

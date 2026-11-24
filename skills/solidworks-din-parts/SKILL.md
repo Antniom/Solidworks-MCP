@@ -1,187 +1,143 @@
 ---
 name: solidworks-din-parts
 description: >-
-  Build standard DIN/ISO hardware from scratch in SolidWorks (no Toolbox licence needed) with exact
-  dimension tables: hex nuts (DIN 934), hex bolts (DIN 933/931), washers (DIN 125/127) and flanges
-  (DIN 2573). Use for requests like "DIN 933 M8x40 bolt", "M16 nut", "ISO 4032", "pipe flange", or
-  "parafuso DIN", "porca sextavada", "anilha".
+  Models standard DIN/ISO hardware from scratch as native SolidWorks parts, using exact dimension tables:
+  hex nuts (DIN 934 / ISO 4032), hex bolts (DIN 933/931, ISO 4017/4014), washers (DIN 125 / ISO 7089, DIN 127)
+  and flat welding flanges (DIN 2573). Use only when the user explicitly wants the standard part itself
+  modeled, e.g. "model a DIN 933 M8x40 bolt", "I need the M16 nut as a part file", "we can't download CAD,
+  build the DN50 flange", or "modelar parafuso DIN", "desenhar porca sextavada". Otherwise standard parts are
+  listed for download (solidworks-purchased-parts).
 ---
 
-# DIN/ISO Standard Mechanical Hardware — Parametric Templates for SolidWorks
+# DIN/ISO hardware built from scratch
 
-## When this skill applies
-Use this skill whenever a user requests a standard mechanical component by DIN/ISO specification:
-- DIN 934 / ISO 4032 Hexagon Nut.
-- DIN 933 / ISO 4017 Fully Threaded Hexagon Bolt.
-- DIN 931 / ISO 4014 Partially Threaded Hexagon Bolt.
-- DIN 125 / ISO 7089 Flat Washer (Form A).
-- DIN 127 Helical Spring Lock Washer.
-- DIN 2573 / EN 1092-1 Flat Welding Flange (PN6 / PN10 / PN16).
+> **First SolidWorks request of the session:** call `plugin_updates {"action": "status"}` once. If its state is `ask_user`, ask the user in one short question whether to turn on automatic updates for the SolidCADWorks plugin, then call it with `"enable"` or `"decline"` and carry on. For any other state, say nothing about updates.
 
-This skill generates native, clean parametric `.sldprt` solid models **from scratch** using SolidWorks MCP and Python COM. It does **not** depend on SolidWorks Toolbox, making it portable across all SolidWorks licenses.
+**Only when the user asked for the part to be modeled.** By default, standard parts are listed for download
+from TraceParts or the maker instead; see `solidworks-purchased-parts`. If the request is ambiguous (e.g.
+"add an M16 nut"), follow that skill and mention that you can model the part if they prefer.
 
-For inserting hardware from the official SolidWorks Toolbox database, see `solidworks-toolbox`.
-For general custom parts, see `solidworks-modeling`.
-For dialogs, rebuild errors or a stuck session, see `solidworks-diagnostics`.
+These parts are modelled with the ordinary modeling tools, so they work on any SolidWorks licence. To insert
+library parts from an installed Toolbox instead, use `solidworks-toolbox`. For general modeling rules, see
+`solidworks-modeling`.
 
-> [!NOTE]
-> New dimension tables or fastener recipes you work out belong in the **Learned Quirks, Workarounds & Recipes**
-> section at the bottom of this file (`skills/solidworks-din-parts/SKILL.md` in the repository, the single source
-> for every client) and can be persisted for later sessions with `record_knowledge`.
+Threads are not modelled. Holes use the tap-drill diameter (nuts) or the nominal diameter (bolt shanks).
+A real helical thread is only worth it when the user asks for one explicitly; it needs `execute_code`,
+which is consent-gated.
 
----
+## Hex geometry
 
-## Tool Selection Hierarchy: Native Tools First
+Use `draw_polygon` with `"flats": true` and `radius = s/2` (s = across flats). The first flat then faces
++X, so the part measures `s` along X and `2s/√3` (across corners) along Y. Without `flats`, `radius` is the
+corner radius `s/√3`. Passing `s/2` without `flats` gives a hexagon 13 % too small.
 
-> [!IMPORTANT]
-> **STRICT TOOL EXECUTION HIERARCHY**:
-> 1. **Priority 1 — Native MCP Tools (Always use first)**:
->    Build DIN/ISO hardware using the dedicated native MCP tools (`create_document`, `set_units`, `create_sketch`, `draw_polygon`, `draw_circle`, `extrude_sketch`, `create_sketch` with `face_point`, `cut_extrude`, `verify_model`, `capture_viewport`).
->    - Native tools provide robust transactional modeling with zero COM boilerplate.
-> 2. **Priority 2 — `execute_code` (Security-Gated Fallback ONLY)**:
->    Do **NOT** write raw Python COM scripts when standard MCP sketch/extrude/cut/revolve tools can build the fastener.
->    `execute_code` is locked by default and requires explicit human user consent in chat.
->    Use `execute_code` **ONLY IF**:
->    - High-fidelity physical helical cosmetic threads (via `FeatureManager.InsertHelix` / swept cut) are explicitly requested.
->    - A native tool encounters an unhandled geometry exception.
+## Dimension tables (mm)
 
----
+### DIN 934 / ISO 4032 hex nut
+| Thread | s | m | Pitch | Tap drill |
+| :--- | :--- | :--- | :--- | :--- |
+| M5 | 8 | 4 | 0.8 | 4.2 |
+| M6 | 10 | 5 | 1.0 | 5.0 |
+| M8 | 13 | 6.5 | 1.25 | 6.8 |
+| M10 | 16 | 8 | 1.5 | 8.5 |
+| M12 | 18 | 10 | 1.75 | 10.2 |
+| M16 | 24 | 13 | 2.0 | 14.0 |
+| M20 | 30 | 16 | 2.5 | 17.5 |
+| M24 | 36 | 19 | 3.0 | 21.0 |
+| M30 | 46 | 24 | 3.5 | 26.5 |
 
-## Core Geometric Equations
-
-For regular 6-sided hex geometry across flats $s$:
-- **Circumradius**: $R = \frac{s}{\sqrt{3}} \approx s \times 0.57735$
-- **Apothem** (radius to flat midpoint): $a = \frac{s}{2}$
-- **30° Revolve Chamfer**:
-  - Inner chamfer radius: $r_{\text{in}} = \frac{s}{2} - 0.5\text{ mm}$
-  - Outer chamfer radius: $r_{\text{out}} = R + 1.0\text{ mm}$
-  - Chamfer axial cut depth: $\Delta z = (r_{\text{out}} - r_{\text{in}}) \times \tan(30^\circ)$
-
----
-
-## Authoritative Dimension Tables
-
-### 1. DIN 934 (ISO 4032) — Hex Nut
-| Thread | Across Flats $s$ (mm) | Height $m$ (mm) | Coarse Pitch $p$ (mm) | Tap Drill $d_{\text{hole}}$ (mm) | Circumradius $R$ (mm) |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **M5**  | 8.0  | 4.0  | 0.8  | 4.2  | 4.62  |
-| **M6**  | 10.0 | 5.0  | 1.0  | 5.0  | 5.77  |
-| **M8**  | 13.0 | 6.5  | 1.25 | 6.8  | 7.51  |
-| **M10** | 16.0 | 8.0  | 1.5  | 8.5  | 9.24  |
-| **M12** | 18.0 | 10.0 | 1.75 | 10.2 | 10.39 |
-| **M16** | 24.0 | 13.0 | 2.0  | 14.0 | 13.86 |
-| **M20** | 30.0 | 16.0 | 2.5  | 17.5 | 17.32 |
-| **M24** | 36.0 | 19.0 | 3.0  | 21.0 | 20.78 |
-| **M30** | 46.0 | 24.0 | 3.5  | 26.5 | 26.56 |
-
-### 2. DIN 933 (ISO 4017) — Hex Bolt
-| Thread | Across Flats $s$ (mm) | Head Height $k$ (mm) | Standard Lengths $L$ (mm) |
+### DIN 933 / ISO 4017 hex bolt (fully threaded)
+| Thread | s | Head k | Standard lengths L |
 | :--- | :--- | :--- | :--- |
-| **M6**  | 10.0 | 4.0  | 12, 16, 20, 25, 30, 40, 50 |
-| **M8**  | 13.0 | 5.3  | 16, 20, 25, 30, 40, 50, 60 |
-| **M10** | 16.0 | 6.4  | 20, 25, 30, 40, 50, 60, 80 |
-| **M12** | 18.0 | 7.5  | 25, 30, 40, 50, 60, 80, 100 |
-| **M16** | 24.0 | 10.0 | 30, 40, 50, 60, 80, 100, 120 |
-| **M20** | 30.0 | 12.5 | 40, 50, 60, 80, 100, 120, 150 |
-| **M24** | 36.0 | 15.0 | 50, 60, 80, 100, 120, 160 |
+| M6 | 10 | 4.0 | 12, 16, 20, 25, 30, 40, 50 |
+| M8 | 13 | 5.3 | 16, 20, 25, 30, 40, 50, 60 |
+| M10 | 16 | 6.4 | 20, 25, 30, 40, 50, 60, 80 |
+| M12 | 18 | 7.5 | 25, 30, 40, 50, 60, 80, 100 |
+| M16 | 24 | 10.0 | 30, 40, 50, 60, 80, 100, 120 |
+| M20 | 30 | 12.5 | 40, 50, 60, 80, 100, 120, 150 |
+| M24 | 36 | 15.0 | 50, 60, 80, 100, 120, 160 |
 
-### 3. DIN 125 (ISO 7089) — Flat Washer
-| For Thread | Inner Diameter $d_1$ (mm) | Outer Diameter $d_2$ (mm) | Thickness $t$ (mm) |
+DIN 931 / ISO 4014 (partly threaded) has the same head; the geometry is identical when threads are not
+modelled.
+
+### DIN 125 / ISO 7089 flat washer
+| For | d1 | d2 | t |
 | :--- | :--- | :--- | :--- |
-| **M5**  | 5.3  | 10.0 | 1.0 |
-| **M6**  | 6.4  | 12.0 | 1.6 |
-| **M8**  | 8.4  | 16.0 | 1.6 |
-| **M10** | 10.5 | 20.0 | 2.0 |
-| **M12** | 13.0 | 24.0 | 2.5 |
-| **M16** | 17.0 | 30.0 | 3.0 |
-| **M20** | 21.0 | 37.0 | 3.0 |
-| **M24** | 25.0 | 44.0 | 4.0 |
+| M5 | 5.3 | 10 | 1.0 |
+| M6 | 6.4 | 12 | 1.6 |
+| M8 | 8.4 | 16 | 1.6 |
+| M10 | 10.5 | 20 | 2.0 |
+| M12 | 13 | 24 | 2.5 |
+| M16 | 17 | 30 | 3.0 |
+| M20 | 21 | 37 | 3.0 |
+| M24 | 25 | 44 | 4.0 |
 
-### 4. DIN 2573 (EN 1092-1 PN6) — Flat Steel Welding Flange
-| Nominal Size | Pipe OD (mm) | Flange OD $D$ (mm) | PCD $K$ (mm) | Thickness $b$ (mm) | Bolt Holes ($n \times d_2$) |
+### DIN 2573 (EN 1092-1, PN6) flat welding flange
+| DN | Pipe OD | Flange OD D | PCD K | Thickness b | Holes |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **DN25**  | 33.7  | 100 | 75  | 12 | $4 \times 11\text{ mm}$ |
-| **DN50**  | 60.3  | 140 | 110 | 14 | $4 \times 14\text{ mm}$ |
-| **DN80**  | 88.9  | 190 | 150 | 16 | $4 \times 18\text{ mm}$ |
-| **DN100** | 114.3 | 210 | 170 | 16 | $4 \times 18\text{ mm}$ |
-| **DN150** | 168.3 | 265 | 225 | 18 | $8 \times 18\text{ mm}$ |
+| DN25 | 33.7 | 100 | 75 | 12 | 4 × Ø11 |
+| DN50 | 60.3 | 140 | 110 | 14 | 4 × Ø14 |
+| DN80 | 88.9 | 190 | 150 | 16 | 4 × Ø18 |
+| DN100 | 114.3 | 210 | 170 | 16 | 4 × Ø18 |
+| DN150 | 168.3 | 265 | 225 | 18 | 8 × Ø18 |
 
----
+A size or standard not listed here: say so and ask for the values, or cite a source. Don't extrapolate.
 
-## Parametric Generation Scripts
+## Recipes
 
-### Script 1: DIN 934 Hex Nut via MCP Tools
+Each recipe ends with `verify_model` against the table values. If it fails, fix the part before reporting.
+
+### M16 nut (DIN 934)
 ```json
-// Parameters for M16 nut: s = 24 mm, m = 13 mm, R = 13.856 mm, tap drill = 14 mm
-connect_solidworks {}
 create_document {"type": "part"}
 set_units {"unit": "mm"}
-
-// 1. Hexagon polygon on Front Plane
 create_sketch {"plane": "Front"}
-draw_polygon {"cx": 0, "cy": 0, "radius": 13.8564, "sides": 6, "unit": "mm"}
+draw_polygon {"cx": 0, "cy": 0, "radius": 12.0, "sides": 6, "flats": true, "unit": "mm"}
 extrude_sketch {"depth": 13.0, "unit": "mm"}
-
-// 2. Center tap bore
 create_sketch {"face_point": [0, 0, 13.0], "unit": "mm"}
-draw_circle {"x": 0, "y": 0, "radius": 7.0, "unit": "mm"} // d = 14mm
+draw_circle {"x": 0, "y": 0, "radius": 7.0, "unit": "mm"}
 cut_extrude {"depth": 13.0, "through_all": true, "unit": "mm"}
-
-// 3. Verify final geometry
-verify_model {"expected_dx": 24.0, "expected_dy": 27.7, "expected_dz": 13.0, "tolerance_mm": 0.5}
-capture_viewport {"filepath": "screenshots/hex_nut_m16.png", "view_name": "*Isometric"}
+verify_model {"expected_dx": 24.0, "expected_dy": 27.71, "expected_dz": 13.0, "tolerance_mm": 0.2}
 ```
 
-### Script 2: DIN 933 Hex Bolt via MCP Tools
+### M12 × 50 bolt (DIN 933)
+The head sits on z = 0…7.5; the shank goes the other way, z = −50…0.
 ```json
-// Parameters for M12 x 50 bolt: s = 18 mm, k = 7.5 mm, R = 10.392 mm, L = 50 mm
-connect_solidworks {}
 create_document {"type": "part"}
 set_units {"unit": "mm"}
-
-// 1. Hexagon head
 create_sketch {"plane": "Front"}
-draw_polygon {"cx": 0, "cy": 0, "radius": 10.392, "sides": 6, "unit": "mm"}
+draw_polygon {"cx": 0, "cy": 0, "radius": 9.0, "sides": 6, "flats": true, "unit": "mm"}
 extrude_sketch {"depth": 7.5, "unit": "mm"}
-
-// 2. Cylindrical shank from underside of head (z = 0)
 create_sketch {"plane": "Front"}
-draw_circle {"x": 0, "y": 0, "radius": 6.0, "unit": "mm"} // D12
-extrude_sketch {"depth": 50.0, "both_directions": true, "unit": "mm"}
-
-verify_model {"expected_dx": 18.0, "expected_dy": 20.8, "expected_dz": 57.5, "tolerance_mm": 0.5}
-capture_viewport {"filepath": "screenshots/hex_bolt_m12x50.png", "view_name": "*Isometric"}
+draw_circle {"x": 0, "y": 0, "radius": 6.0, "unit": "mm"}
+extrude_sketch {"depth": 50.0, "reverse_dir": true, "unit": "mm"}
+verify_model {"expected_dx": 18.0, "expected_dy": 20.78, "expected_dz": 57.5, "expected_bodies": 1, "tolerance_mm": 0.2}
 ```
 
-### Script 3: DIN 125 Flat Washer
+### M16 washer (DIN 125)
 ```json
-// Parameters for M16 washer: d1 = 17 mm, d2 = 30 mm, t = 3 mm
-connect_solidworks {}
 create_document {"type": "part"}
 set_units {"unit": "mm"}
-
 create_sketch {"plane": "Front"}
-draw_circle {"x": 0, "y": 0, "radius": 15.0, "unit": "mm"} // OD 30mm
+draw_circle {"x": 0, "y": 0, "radius": 15.0, "unit": "mm"}
 extrude_sketch {"depth": 3.0, "unit": "mm"}
-
 create_sketch {"face_point": [0, 0, 3.0], "unit": "mm"}
-draw_circle {"x": 0, "y": 0, "radius": 8.5, "unit": "mm"} // ID 17mm
+draw_circle {"x": 0, "y": 0, "radius": 8.5, "unit": "mm"}
 cut_extrude {"depth": 3.0, "through_all": true, "unit": "mm"}
-
 verify_model {"expected_dx": 30.0, "expected_dy": 30.0, "expected_dz": 3.0, "tolerance_mm": 0.2}
-capture_viewport {"filepath": "screenshots/washer_din125_m16.png", "view_name": "*Isometric"}
 ```
 
----
+### Flange (DIN 2573)
+1. Extrude a disc of diameter D and thickness b.
+2. Cut the bore at the pipe OD.
+3. Cut one bolt hole at (0, K/2) on the face.
+4. Make a circular pattern of that cut with the hole count.
+5. Verify D × D × b and the volume.
 
-## Escalation & Diagnostics
-- For high-precision cosmetic threads or thread spirals via helix features, use `execute_code` with COM scripting.
-- If a tool reports a dialog, timeout or rebuild error, follow `solidworks-diagnostics`.
+## Finishing
 
----
+Name the file by its designation (e.g. `DIN933_M12x50.SLDPRT`). Set custom properties `Description`
+(e.g. "Hex bolt DIN 933 M12x50") and `Material` with `manage_custom_properties`, then `save_document`.
 
-## Learned Quirks, Workarounds & Recipes (Continuously Evolving)
-<!-- Add new hardware templates, tables and pitch standards below. -->
-1. **Circumradius vs Apothem in `draw_polygon`**: `draw_polygon` expects circumradius $R = s / \sqrt{3}$, NOT half the width across flats $s/2$. Passing $s/2$ produces an undersized hex nut that fails socket fit.
-2. **Bolt Head to Shank Centering**: When extruding the shank from the head, sketching on the head's base plane and extruding with `both_directions=True` or placing the sketch on the underside planar face ensures exact axial alignment.
-
+If you work out a new table or a reliable recipe, add it to this file in the repository
+(`skills/solidworks-din-parts/SKILL.md`) and save it for later sessions with `record_knowledge`.

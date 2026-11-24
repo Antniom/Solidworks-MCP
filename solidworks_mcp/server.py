@@ -44,6 +44,7 @@ from .constants import SwErrors
 from .config import get_config
 from .tool_schemas import tool_definitions, validate_tool_arguments, length_unit_arguments
 from .utils import get_solidworks_info
+from .core import plugin_updates as _plugin_updates
 from .core import (
     create_envelope,
     error_envelope,
@@ -910,6 +911,8 @@ _TOOL_HANDLERS: Dict[str, Callable[[dict], Dict[str, Any]]] = {
     }, default='list'),
     'execute_code': _execute_code,
     'report_issue': _report_issue,
+    # Normally answered in call_tool without the STA worker; kept here so every tool has a handler.
+    'plugin_updates': lambda a: _plugin_updates.plugin_updates(a.get('action', 'status')),
     # Tools with custom glue
     'close_sketch': lambda a: _close_sketch_handler(),
     'get_sketch_status': lambda a: _get_sketch_status_handler(),
@@ -1007,7 +1010,8 @@ _NO_COMMAND_IN_PROGRESS_TOOLS = {
 
 # Tools after which no memory warning is appended (they report memory themselves or have no SolidWorks).
 _NO_MEMORY_WARNING_TOOLS = {"restart_solidworks", "list_open_documents", "get_capabilities",
-                            "inspect_dialogs", "dismiss_dialog", "supervisor_clean_processes", "report_issue"}
+                            "inspect_dialogs", "dismiss_dialog", "supervisor_clean_processes", "report_issue",
+                            "plugin_updates"}
 
 _SUBTRACTIVE_TOOLS = {
     "cut_extrude",
@@ -1200,6 +1204,12 @@ async def call_tool(
             sw_ver = None
             act_doc = None
             tid = None
+        elif name == "plugin_updates":
+            # Only reads/writes Claude Code's own config files: never waits on SolidWorks.
+            result = await asyncio.to_thread(_plugin_updates.plugin_updates, arguments.get("action", "status"))
+            sw_ver = None
+            act_doc = None
+            tid = None
         elif name == "reset_sta_worker":
             # Administrative recovery tool - execute directly (never blocked by STA queue)
             from .core.com_worker import reset_sta_worker as do_reset_worker
@@ -1245,7 +1255,8 @@ async def call_tool(
         envelope.diagnostics.unit = sw_automation.units.default_unit
 
         logger.info(f"Result: success={envelope.success}, op={op_id}, duration={duration_ms:.2f}ms")
-        if isinstance(result, dict) and not result.get("success", True):
+        # plugin_updates failures are about the user's own Claude config, not server defects: never auto-report.
+        if isinstance(result, dict) and not result.get("success", True) and name != "plugin_updates":
             _auto_report(name, arguments, result.get("message", ""), result.get("error_code"), sw_ver)
         if name in ("show_interactive_studio", "studio_action") and envelope.success:
             # MCP Apps hosts forward structuredContent to the studio view, which renders the A2UI messages.
@@ -1401,8 +1412,20 @@ def _server_icons() -> list:
         return []
 
 
+# Sent to the client at connect time; clients that support MCP server instructions add it to Claude's context.
+SERVER_INSTRUCTIONS = (
+    "SolidCADWorks drives SolidWorks on this computer. Use the dedicated tools for everything they cover; "
+    "execute_code needs the user's explicit consent in chat.\n"
+    "First use in a session: before the first SolidWorks task, call plugin_updates with action 'status' once. "
+    "If its state is 'ask_user', ask the user in one short question whether to turn on automatic updates for "
+    "the SolidCADWorks plugin (new versions then install by themselves at the start of a later session). On "
+    "yes call plugin_updates action 'enable', on no action 'decline', then continue with their request. For "
+    "any other state, say nothing about updates."
+)
+
 _server_kwargs = dict(
     version=__version__,
+    instructions=SERVER_INSTRUCTIONS,
     on_list_tools=list_tools,
     on_call_tool=call_tool,
     on_list_resources=list_resources,
@@ -1417,7 +1440,10 @@ try:
         **_server_kwargs,
     )
 except TypeError:  # an older mcp SDK without title/icons
-    server = Server("solidworks-mcp-server", **_server_kwargs)
+    try:
+        server = Server("solidworks-mcp-server", **_server_kwargs)
+    except TypeError:  # ... or without instructions: the skills carry the same first-use rule
+        server = Server("solidworks-mcp-server", **{k: v for k, v in _server_kwargs.items() if k != "instructions"})
 
 
 # ============================================================================

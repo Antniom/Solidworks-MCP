@@ -1,162 +1,76 @@
 ---
 name: solidworks-simulation
 description: >-
-  FEA in SolidWorks Simulation through the `solidworks` MCP server: static studies, materials, fixtures,
-  loads, meshing, solving and reading von Mises stress, displacement and factor of safety. Use for requests
-  like "stress analysis", "run FEA", "factor of safety", "apply 500 N load", or "análise de tensões",
-  "simulação estática".
+  FEA in SolidWorks Simulation through the `solidworks` MCP server: static, frequency, buckling and thermal
+  studies, study materials, fixtures, force and pressure loads, meshing, solving, and reading von Mises stress,
+  displacement and factor of safety. Use for any request to check strength or stiffness of a SolidWorks part,
+  even without the word FEA, e.g. "stress analysis", "will this bracket hold 500 N", "factor of safety",
+  "how much does it bend", or "análise de tensões", "simulação estática".
 ---
 
-# SolidWorks FEA Simulation & Stress Analysis via MCP
+# SolidWorks Simulation (FEA)
 
-## When this skill applies
-Use this skill for conducting engineering FEA simulation studies inside SolidWorks:
-- Creating Static, Frequency, Buckling, or Thermal simulation studies (`create_simulation_study`).
-- Assigning physical engineering materials from standard or custom databases (`set_study_material`).
-- Applying boundary restraints and fixtures: fixed faces, roller/slider, hinge, symmetry (`add_study_fixture`).
-- Applying mechanical loads: uniform pressure, concentrated normal forces, directional transverse loads (`add_study_load`).
-- Declarative selection of load and restraint faces using `select` (`"by": "geometry"`) (e.g. `normal: [-1, 0, 0]` for cantilever fixed end).
-- Generating solid parabolic tetrahedral meshes with custom element sizes (`mesh_and_run_simulation`).
-- Solving the FEA system and extracting maximum von Mises stress (MPa), resultant displacement (mm), and Factor of Safety (`get_simulation_results`).
+> **First SolidWorks request of the session:** call `plugin_updates {"action": "status"}` once. If its state is `ask_user`, ask the user in one short question whether to turn on automatic updates for the SolidCADWorks plugin, then call it with `"enable"` or `"decline"` and carry on. For any other state, say nothing about updates.
 
-For CAD part modeling, see `solidworks-modeling`.
-For assembly structure and mates, see `solidworks-assemblies`.
-For 2D manufacturing drawings, see `solidworks-drawings`.
-For dialog and rebuild recovery, see `solidworks-diagnostics`.
+The tool schemas list every argument. This file covers how the tools pick faces, which units they use, and
+how to judge the result.
 
----
+Related skills: modeling → `solidworks-modeling`; dialogs, add-in loading, a stuck solve →
+`solidworks-diagnostics`. `execute_code` is consent-gated. Use it only for study types or loads no tool
+provides.
 
-## Tool Selection Hierarchy: Native Tools First
+## How fixtures and loads find their face
 
-> [!IMPORTANT]
-> **STRICT TOOL EXECUTION HIERARCHY**:
-> 1. **Priority 1 — Native MCP Tools (Always use first)**:
->    Always use dedicated SolidWorks MCP tools (`set_study_material`, `create_simulation_study`, `add_study_fixture`, `add_study_load`, `mesh_and_run_simulation`, `get_simulation_results`, `select` (`"by": "geometry"`), `capture_viewport`).
->    - Native tools automatically initialize and dynamically load `cosworks.dll`.
->    - They execute on the dedicated STA COM thread, preventing threading apartments collisions.
->    - They handle complex COSMOSWorks VARIANT wrapping (e.g. null dispatch for `RefGeom`) automatically.
->    - They handle unit parsing ($N/m^2$ to Pa, mm to m) safely.
-> 2. **Priority 2 — `execute_code` (Security-Gated Fallback ONLY)**:
->    Do **NOT** write raw COSMOSWorks Python scripts for standard static studies, loads, fixtures, or results.
->    `execute_code` is locked by default and requires explicit human user consent in chat.
+`add_study_fixture` and `add_study_load` resolve the face themselves. **They ignore anything selected
+beforehand with `select`.** Name the face in the call with one of these:
 
----
+- `face_point: [x, y, z]`: a point on the face, in the call's `unit` (default mm). This is the most reliable.
+  Read the coordinates from `inspect_model` (bounding box) or `list_topology {"kind": "faces"}`.
+- `direction`: the outermost face whose normal points that way (`"left"` = −X, `"right"` = +X,
+  `"bottom"` = −Y, `"top"` = +Y, `"back"` = −Z, `"front"` = +Z).
+- `face_name`: a named face or entity.
 
-## Complete Simulation Tool Inventory & Schemas
+For a **force** load, `direction` is also the force direction ("bottom" pushes towards −Y). So give the
+face with `face_point` and the direction separately. With `direction` alone, the same word picks the face
+and the force direction, which is rarely what you want. If no directional reference can be found, the tool
+falls back to a force normal to the face. Pressure always acts normal to the face.
 
-### 1. Study Setup & Materials
-- `create_simulation_study`:
-  - `"study_name"`: String name (e.g. `"Static-1"`).
-  - `"study_type"`: `"static"` (0), `"frequency"` (1), `"buckling"` (2), `"thermal"` (3).
-- `set_study_material`:
-  - `"material_name"`: Material name matching database (e.g. `"AISI 1020"`, `"6061-T6"`, `"Plain Carbon Steel"`, `"Stainless Steel 304"`).
-  - `"database_path"`: Optional path to `.sldmat` file (auto-detected dynamically from SolidWorks install if omitted).
-  - `"config_name"`: Target configuration (empty string for active).
+Fixture types: `fixed` (all DOF), `immovable` (translations only), `roller`, `hinge`, `symmetric`.
 
-### 2. Boundary Restraints (`add_study_fixture`)
-- `"fixture_type"`:
-  - `"fixed"`: Fixes all translational and rotational degrees of freedom (6 DOF).
-  - `"immovable"`: Zero translation, rotation free (3 DOF).
-  - `"roller"`: Translates freely along surface plane; constrained normal to face.
-  - `"hinge"`: Constrains radial and axial displacement; permits rotation around cylindrical axis.
-  - `"symmetry"`: Normal displacement and in-plane rotations zero.
-- `"face_name"`: Optional face name or entity identifier. Prefer selecting faces via `select` (`"by": "geometry"`) before calling.
-- `"face_point"`: Optional 3D coordinate on target face `[x, y, z]`.
-- `"study_name"`: Target study name (empty for active study).
+## Units and defaults
 
-### 3. Structural Loads (`add_study_load`)
-- `"load_type"`: `"force"` or `"pressure"` (default: `"force"`).
-- `"value"`: **Required** magnitude of load.
-- `"unit"`:
-  - For pressure: `"N/m^2"` (or `"Pa"`), `"psi"`, `"MPa"`
-  - For force: `"N"`, `"lbf"`
-- `"direction"`: One of `"top"`, `"bottom"`, `"left"`, `"right"`, `"front"`, `"back"`.
-- `"face_name"`: Optional face name. Prefer selecting faces via `select` (`"by": "geometry"`) before calling.
-- `"face_point"`: Optional 3D coordinate on target face `[x, y, z]`.
-- `"study_name"`: Target study name (empty for active study).
+- `add_study_load` defaults to `load_type: "pressure"` in `N/m^2`. For a force, pass `"load_type": "force"`
+  and `"unit": "N"` explicitly.
+- Pressure units: `N/m^2`, `Pa`, `psi`, `MPa`. Force units: `N`, `lbf`.
+- Results come back in MPa (stress) and mm (displacement).
 
-### 4. Meshing, Solving & Results
-- `mesh_and_run_simulation`:
-  - Automatically meshes the solid body with parabolic 10-node tetrahedral elements and executes the COSMOSWorks FEA solver:
-  - `"element_size_mm"`: Nominal element edge length in `mm` (defaults to auto-calculated curvature size).
-  - `"tolerance_mm"`: Mesh tolerance in `mm`.
-  - `"study_name"`: Target study name.
-- `get_simulation_results`:
-  - Solves or queries the active study and extracts engineering metrics:
-  - `"study_name"`: Target study name (empty for active study).
-  - Returns `max_von_mises_mpa`, `max_displacement_mm`, `min_factor_of_safety`, and node/element counts.
+## Workflow
 
----
+1. The part must have a material. Use `set_study_material` (e.g. `"AISI 1020"`, `"6061-T6"`); the factor
+   of safety depends on it.
+2. `create_simulation_study`, then fixtures, then loads.
+3. `mesh_and_run_simulation`. It uses parabolic (10-node) tetrahedra. Set `element_size_mm` to about a third
+   of the thinnest wall, or leave it to the automatic size.
+4. `get_simulation_results`: `max_von_mises_mpa`, `max_displacement_mm`, `min_factor_of_safety`.
+5. Sanity-check before reporting:
+   - Compare the displacement with a hand estimate (cantilever: δ = F·L³ / (3·E·I)). If it is off by 10×,
+     a fixture or load landed on the wrong face; re-read the `target` each call reported.
+   - Stress peaks at sharp re-entrant corners are mesh singularities. Report them as such rather than as
+     the part's real stress.
+   - For ductile metals, the part passes when σ_max ≤ σ_yield / FOS_target. FOS ≥ 1.5 is a common static
+     target; ask the user if they have their own.
 
-## The 5 Rules for SolidWorks FEA
-
-1. **Always Use Parabolic Tetrahedral Elements**:
-   - First-order linear tetrahedra exhibit severe shear locking in bending. The MCP mesher automatically requests high-quality parabolic (10-node) solid elements.
-2. **Deterministic Restraint Selection**:
-   - Never guess face names for boundary conditions. Use `select` (`"by": "geometry"`) with normal vectors (e.g. `normal: [-1, 0, 0]` for the cantilever fixed root face).
-3. **Reference Geometry Null Dispatch Requirement**:
-   - In raw COM, `ICWLoadsAndRestraintsManager.AddRestraint` fails if `RefGeom` is passed as empty integer `0` instead of `None` / `pythoncom.Empty`. The native MCP tool encapsulates this bug fix permanently.
-4. **Stress Output Units**:
-   - COSMOSWorks raw COM returns stress in $N/m^2$ (Pascals). The MCP tool automatically converts to **MPa** ($N/mm^2$) for standard mechanical engineering interpretation.
-5. **Yield Strength & Factor of Safety (FOS)**:
-   - For ductile metals (steels, aluminum alloys), ensure maximum von Mises stress $\sigma_{\text{max}} \le \sigma_{\text{yield}} / \text{FOS}_{\text{target}}$ (typically $\text{FOS} \ge 1.5$ for static structures).
-
----
-
-## Standard Static FEA Workflow Recipe
+## Example: 200 × 20 × 20 mm steel cantilever, root at x = 0, tip at x = 200, 500 N downward at the tip
 
 ```json
-// 1. Initialize SolidWorks and Part Model
-connect_solidworks {}
-
-// 2. Initialize Static Simulation Study
-create_simulation_study {
-  "study_name": "Cantilever_Bending_Analysis",
-  "study_type": "static"
-}
-
-// 3. Assign Structural Steel Material
-set_study_material {
-  "material_name": "AISI 1020"
-}
-
-// 4. Select Cantilever Root Face and Apply Fixed Support Fixture
-select {
-  "by": "geometry",
-  "target_type": "face",
-  "surface_type": "plane",
-  "normal": [-1, 0, 0]
-}
-add_study_fixture {
-  "fixture_type": "fixed"
-}
-
-// 5. Select Tip Face and Apply Downward Transverse Load (5000 N)
-select {
-  "by": "geometry",
-  "target_type": "face",
-  "surface_type": "plane",
-  "normal": [0, 1, 0]
-}
-add_study_load {
-  "load_type": "force",
-  "value": 5000.0,
-  "unit": "N",
-  "direction": "bottom"
-}
-
-// 6. Mesh Solid and Run Analysis
-mesh_and_run_simulation {
-  "element_size_mm": 5.0,
-  "tolerance_mm": 0.25
-}
-
-// 7. Extract von Mises Stress and Resultant Deflection
+create_simulation_study {"study_name": "Cantilever", "study_type": "static"}
+set_study_material {"material_name": "AISI 1020"}
+add_study_fixture {"fixture_type": "fixed", "face_point": [0, 10, 10]}
+add_study_load {"load_type": "force", "value": 500.0, "unit": "N", "face_point": [200, 10, 10], "direction": "bottom"}
+mesh_and_run_simulation {"element_size_mm": 4.0, "tolerance_mm": 0.2}
 get_simulation_results {}
-
-// 8. Capture Rendered Stress Contour Viewport
-capture_viewport {
-  "filepath": "stress_contour_plot.png",
-  "view_name": "*Isometric"
-}
+capture_viewport {"filepath": "cantilever_stress.png", "view_name": "*Isometric"}
 ```
+
+Hand check for this beam: I = 20⁴/12 ≈ 13 333 mm⁴, E ≈ 200 000 MPa, so δ ≈ 500·200³ / (3·200 000·13 333)
+≈ 0.5 mm, and σ = M·c / I ≈ 500·200·10 / 13 333 ≈ 75 MPa.

@@ -1,22 +1,30 @@
 ---
 name: solidworks-dfm
 description: >-
-  Design-for-manufacturing rules and checks for SolidWorks parts: CNC milling/turning, sheet metal
-  bending, injection molding and 3D printing limits (corner radii, wall thickness, bend radii, draft,
-  overhangs). Use for requests like "DFM check", "can this be machined", "is this printable", "review for
-  injection molding", or "verificar fabricabilidade".
+  Design-for-manufacturing rules and checks for SolidWorks parts: CNC milling and turning, sheet metal
+  bending, injection molding and 3D printing (FDM, SLS, SLA, metal) limits such as inside corner radii, wall
+  thickness, pocket depth, bend radii, hole-to-bend distance, draft, ribs and overhangs. Use when designing a
+  part for a known process or reviewing one, e.g. "DFM check", "can this be machined", "is this printable",
+  "review for injection molding", "will this bend", or "verificar fabricabilidade".
 ---
 
-# Design for Manufacturing (DFM) & Additive (DfAM) in SolidWorks
+# Design for manufacturing (DFM) in SolidWorks
 
-## When this skill applies
-Use this skill whenever designing, modifying, or reviewing SolidWorks CAD parts to ensure they can be economically and reliably manufactured using standard industrial processes:
-- **CNC Milling & Turning**: Tool clearances, internal pocket corner radii, aspect ratios, standard thread profiles.
-- **Sheet Metal Bending**: Minimum bend radii, hole-to-bend keepout zones, bend relief cutouts.
-- **Additive Manufacturing (3D Printing / DfAM)**: Self-supporting overhang limits ($45^\circ$ rule), minimum wall thicknesses, bridging spans, and horizontal hole diameter compensation.
-- **Plastic Injection Molding**: Nominal wall thickness uniformity, draft angles for mold release, core-out strategies, and rib-to-wall thickness ratios to prevent sink marks.
+> **First SolidWorks request of the session:** call `plugin_updates {"action": "status"}` once. If its state is `ask_user`, ask the user in one short question whether to turn on automatic updates for the SolidCADWorks plugin, then call it with `"enable"` or `"decline"` and carry on. For any other state, say nothing about updates.
 
----
+These are rules of thumb for a first design or review. A specific supplier's limits override them: ask the
+user whether they have a shop or printer spec.
+
+How to review a part:
+1. Measure it:
+   - wall thickness from the positions of opposite faces (`list_topology {"kind": "faces"}`) or from
+     `inspect_topology`;
+   - inside radii and hole sizes with `select` by geometry (each cylinder reports `radius_mm`);
+   - body count and rebuild state with `inspect_model`.
+2. Compare the measurements with the section below for the process.
+3. Report each violation with the measured value, the limit, and a concrete fix.
+
+Fixes are modelled with `solidworks-modeling`.
 
 ## 1. CNC Milling & Turning Rules
 
@@ -114,30 +122,31 @@ Use this skill whenever designing, modifying, or reviewing SolidWorks CAD parts 
 
 ---
 
-## 5. DFM Audit Checklist & Inspection Recipes
+## 5. Review checklist
 
-Before finalizing or releasing any SolidWorks model, execute this DFM inspection checklist:
+Copy this list into your answer and tick each item off:
 
-```mermaid
-flowchart TD
-    Inspect["1. inspect_model\nVerify volume, bbox, 1 body, zero rebuild errors"] --> CheckGeometry["2. select by geometry\nCheck cylindrical faces, minimum radii, wall thickness"]
-    CheckGeometry --> CheckHoles["3. inspect Hole Wizard & Patterns\nVerify standard drill/tap diameters & pitch clearances"]
-    CheckHoles --> CheckDraft["4. Verify Draft / Reliefs\nEnsure mold draft or sheet metal bend reliefs"]
-    CheckDraft --> Finish["5. Final Verification Pass\nverify_model + capture_viewport"]
-```
+- [ ] One body, no rebuild errors (`inspect_model`, `inspect_rebuild_errors`)
+- [ ] Inside corner radii meet the tool limit for the process
+- [ ] Walls within the process minimum and uniform where the process needs it
+- [ ] Holes at standard drill or tap sizes, and far enough from edges and bends
+- [ ] Draft (moulding) or bend reliefs (sheet metal) present
+- [ ] Final size matches the spec (`verify_model`), and the capture has been looked at
 
-### DFM Verification Script Example:
+### Example: first checks
 ```json
 // 1. Check Body Count and Bounding Box Integrity
 inspect_model {}
 
-// 2. Verify Internal Radii on Vertical Pockets (e.g. radius >= 3.5mm)
+// 2. Cylinder faces along Z with radius 0-4 mm (small holes and inside corners): an inside corner
+//    whose radius_mm is below R_tool + 0.5 is a violation
 select {
   "by": "geometry",
   "target_type": "face",
   "surface_type": "cylinder",
-  "radius": 3.5,
-  "radius_tolerance": 0.5
+  "axis": [0, 0, 1],
+  "radius": 2.0,
+  "radius_tolerance": 2.0
 }
 
 // 3. Confirm Model has Zero Feature Rebuild Errors

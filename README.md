@@ -3,7 +3,7 @@
 Design in SolidWorks by talking to Claude. SolidCADWorks connects Claude to the SolidWorks running on your
 Windows PC, so you can ask for a part, an assembly, a drawing or a stress check and watch it being built.
 
-It bundles a local MCP connector (about 80 SolidWorks tools) with nine skills that teach Claude standard
+It bundles a local MCP connector (about 80 SolidWorks tools) with twelve skills that teach Claude standard
 mechanical-engineering workflows, plus an interactive studio for adjusting dimensions with sliders.
 
 ## What you can ask for
@@ -53,9 +53,14 @@ mechanical-engineering workflows, plus an interactive studio for adjusting dimen
 | `solidworks-drawings` | Views, sections, model dimensions, BOM tables, PDF/DXF/DWG export |
 | `solidworks-simulation` | Static FEA: materials, fixtures, loads, mesh, results |
 | `solidworks-dfm` | Design-for-manufacturing rules for CNC, sheet metal, molding and 3D printing |
-| `solidworks-din-parts` | DIN/ISO fasteners modeled from dimension tables |
+| `solidworks-purchased-parts` | Default for fasteners, bearings and other catalogue parts: models only their holes and seats, and lists the parts to download from TraceParts or the maker |
+| `solidworks-din-parts` | DIN/ISO fasteners modeled from dimension tables, when you ask for the part itself |
 | `solidworks-toolbox` | SolidWorks Toolbox hardware |
 | `solidworks-diagnostics` | Dialogs, rebuild errors, checkpoints, transactions and recovery |
+| `solidworks-welcome-demo` | First-run check and a small demo part after installing |
+
+Trigger test sets for each skill's description are in `evals/skill-triggers/` (regenerate with
+`python scripts/make_trigger_evals.py`). They use the format of the skill-creator description optimiser.
 
 ## Interactive studio
 

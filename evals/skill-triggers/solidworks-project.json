@@ -1,0 +1,58 @@
+[
+  {
+    "query": "let's model the whole coffee machine, the spec and renders are in D:/CAD/Brewer",
+    "should_trigger": true
+  },
+  {
+    "query": "continue the CAD project, read the context file first",
+    "should_trigger": true
+  },
+  {
+    "query": "I want to build the complete product in SolidWorks, about 40 parts, where do we start",
+    "should_trigger": true
+  },
+  {
+    "query": "continuar o projeto da máquina, pasta C:/Projetos/Maquina",
+    "should_trigger": true
+  },
+  {
+    "query": "set up AGENT_CONTEXT.md for my robot arm project",
+    "should_trigger": true
+  },
+  {
+    "query": "pick up where the last agent stopped on the fridge model",
+    "should_trigger": true
+  },
+  {
+    "query": "put the motor STEP into the frame assembly and mate the shaft to the coupler",
+    "should_trigger": false
+  },
+  {
+    "query": "model a 120x80x10 mm aluminium mounting plate with four M6 holes",
+    "should_trigger": false
+  },
+  {
+    "query": "make a manufacturing drawing of the bracket on A3",
+    "should_trigger": false
+  },
+  {
+    "query": "check if anything collides in the gearbox assembly",
+    "should_trigger": false
+  },
+  {
+    "query": "write a python script that renames all .sldprt files in a folder to lowercase",
+    "should_trigger": false
+  },
+  {
+    "query": "explain the difference between von Mises and Tresca yield criteria",
+    "should_trigger": false
+  },
+  {
+    "query": "model this bracket in Fusion 360",
+    "should_trigger": false
+  },
+  {
+    "query": "what's the tap drill size for M10x1.5?",
+    "should_trigger": false
+  }
+]

@@ -1,0 +1,66 @@
+[
+  {
+    "query": "can this pocketed part be machined on a 3-axis mill with a 6 mm cutter?",
+    "should_trigger": true
+  },
+  {
+    "query": "check the enclosure for injection moulding problems: draft, wall thickness, ribs",
+    "should_trigger": true
+  },
+  {
+    "query": "is this bracket printable on an FDM printer without supports",
+    "should_trigger": true
+  },
+  {
+    "query": "review the sheet metal part, are the holes too close to the bends",
+    "should_trigger": true
+  },
+  {
+    "query": "verificar fabricabilidade da peça para CNC",
+    "should_trigger": true
+  },
+  {
+    "query": "what bend radius should I use for 2 mm stainless",
+    "should_trigger": true
+  },
+  {
+    "query": "make this housing moldable, it has no draft",
+    "should_trigger": true
+  },
+  {
+    "query": "is a 0.8 mm wall ok for SLS nylon",
+    "should_trigger": true
+  },
+  {
+    "query": "will this bracket hold 500 N hanging from the end?",
+    "should_trigger": false
+  },
+  {
+    "query": "export the plate drawing as DXF for the laser cutter",
+    "should_trigger": false
+  },
+  {
+    "query": "make the wall of this enclosure 3 mm instead of 2",
+    "should_trigger": false
+  },
+  {
+    "query": "check if anything collides in the gearbox assembly",
+    "should_trigger": false
+  },
+  {
+    "query": "write a python script that renames all .sldprt files in a folder to lowercase",
+    "should_trigger": false
+  },
+  {
+    "query": "explain the difference between von Mises and Tresca yield criteria",
+    "should_trigger": false
+  },
+  {
+    "query": "model this bracket in Fusion 360",
+    "should_trigger": false
+  },
+  {
+    "query": "what's the tap drill size for M10x1.5?",
+    "should_trigger": false
+  }
+]
