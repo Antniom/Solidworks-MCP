@@ -886,9 +886,9 @@ def _build_tools() -> List[Tool]:
         Tool(
             name="show_interactive_studio",
             description=(
-                "Open the interactive studio for the active model: dimension sliders plus a live viewport, "
-                "rendered from A2UI 1.0 messages. The Claude app shows it inline; otherwise give the user the "
-                "returned studioUrl to open in a browser. Slider moves rebuild the model in SolidWorks."
+                "Open the interactive studio for the active model: an MCP App with dimension sliders and a live "
+                "viewport, shown inline by clients that support MCP Apps (Claude, Codex, Antigravity, ...). "
+                "Slider moves rebuild the model in SolidWorks. In clients without MCP Apps, use set_dimension."
             ),
             inputSchema={
                 "type": "object",
@@ -925,18 +925,25 @@ def _build_tools() -> List[Tool]:
             name="studio_action",
             description=(
                 "Internal to the interactive studio view: applies one user action (slider move, view change, reset) "
-                "sent by the studio UI as an A2UI renderer-to-agent message. Not for direct use; change dimensions "
-                "with set_dimension instead."
+                "and returns the updated studio state. Not for direct use; change dimensions with set_dimension instead."
             ),
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "message": {
-                        "type": "object",
-                        "description": "A2UI 1.0 renderer-to-agent message: {version, action: {name, surfaceId, sourceComponentId, timestamp, context}}"
+                    "action": {
+                        "type": "string",
+                        "enum": ["set_dimension", "capture", "reset"],
+                        "description": "set_dimension: move one slider; capture: refresh the viewport image; reset: restore original values"
+                    },
+                    "key": {"type": "string", "description": "Studio dimension key (d0, d1, ...) for set_dimension"},
+                    "value": {"type": "number", "description": "New value in the dimension's units, for set_dimension"},
+                    "view": {
+                        "type": "string",
+                        "enum": ["*Isometric", "*Front", "*Top", "*Right", "*Back", "*Left", "*Bottom"],
+                        "description": "View orientation for the refreshed viewport image"
                     }
                 },
-                "required": ["message"]
+                "required": ["action"]
             },
             meta={
                 "ui": {

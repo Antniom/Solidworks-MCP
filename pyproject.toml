@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "solidworks-mcp"
 dynamic = ["version"]
-description = "Model Context Protocol (MCP) server for Dassault Systèmes SolidWorks: part modeling, assemblies, drawings, FEA, diagnostics and an A2UI interactive studio."
+description = "Model Context Protocol (MCP) server for Dassault Systèmes SolidWorks: part modeling, assemblies, drawings, FEA, diagnostics and an interactive studio (MCP App)."
 readme = "README.md"
 license = { text = "MIT" }
 authors = [
@@ -67,7 +67,7 @@ path = "solidworks_mcp/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["solidworks_mcp"]
-exclude = ["solidworks_mcp/ui/host", "**/.bundle_cache", "*.log"]
+exclude = ["**/.bundle_cache", "*.log"]
 
 # Skills, agent rules and the Antigravity plugin template have one home at the
 # repo root; the wheel carries copies so `solidworks-mcp-install` can stage them.

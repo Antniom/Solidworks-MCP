@@ -1259,12 +1259,11 @@ async def call_tool(
         if isinstance(result, dict) and not result.get("success", True) and name != "plugin_updates":
             _auto_report(name, arguments, result.get("message", ""), result.get("error_code"), sw_ver)
         if name in ("show_interactive_studio", "studio_action") and envelope.success:
-            # MCP Apps hosts forward structuredContent to the studio view, which renders the A2UI messages.
+            # MCP Apps: the host forwards structuredContent to the studio view (ui://solidworks/studio.html).
             return CallToolResult(
                 content=[TextContent(type="text", text=result.get("message", ""))],
                 structured_content=result.get("data"),
                 is_error=False,
-                meta={"ui": {"resourceUri": STUDIO_RESOURCE_URI}},
             )
         return envelope.to_call_tool_result()
 
@@ -1368,7 +1367,7 @@ async def list_resources(
             Resource(
                 uri=STUDIO_RESOURCE_URI,
                 name="SolidWorks Interactive Studio",
-                description="A2UI studio with live dimension sliders and a SolidWorks viewport preview.",
+                description="MCP App with live dimension sliders and a SolidWorks viewport preview.",
                 mime_type=STUDIO_MIME_TYPE,
             )
         ]
@@ -1379,19 +1378,20 @@ async def read_resource(
     ctx: Optional[ServerRequestContext],
     params: ReadResourceRequestParams,
 ) -> ReadResourceResult:
-    """Serve the studio page. It is static: the surface arrives as A2UI messages in the tool result."""
+    """Serve the studio view. It is static: the studio state arrives in the tool result."""
     uri_str = str(getattr(params, "uri", ""))
     if uri_str != STUDIO_RESOURCE_URI:
         raise ValueError(f"Resource not found: {uri_str}")
-    from .ui import bridge
+    from .ui import studio
     return ReadResourceResult(
         contents=[
             TextResourceContents(
                 uri=STUDIO_RESOURCE_URI,
                 mime_type=STUDIO_MIME_TYPE,
-                # No network access: images are data URIs and actions go through the host.
-                meta={"ui": {"csp": {"resourceDomains": ["data:"]}}},
-                text=bridge.render_page(with_bridge=False),
+                # No ui.csp: the view needs no network access, and the host's default CSP
+                # already allows the data: viewport images. Actions go through the host.
+                meta={"ui": {"prefersBorder": True}},
+                text=studio.render_page(),
             )
         ]
     )
@@ -2131,43 +2131,40 @@ def _get_sketch_status_handler() -> Dict:
 
 
 # ============================================================================
-# Interactive Studio (A2UI surface served through ui/bridge.py)
+# Interactive Studio (MCP App: ui://solidworks/studio.html, state in ui/studio.py)
 # ============================================================================
 
-def _studio_action_handler(arguments: dict) -> Dict[str, Any]:
-    """Apply one A2UI renderer-to-agent action sent by the studio view through the MCP host."""
-    from .ui import bridge
+STUDIO_ACTIONS = ("set_dimension", "capture", "reset")
 
-    message = arguments.get("message") or {}
-    action = message.get("action") if isinstance(message, dict) else None
-    if not isinstance(action, dict) or not isinstance(action.get("name"), str):
-        return sw_automation._result(False, "message.action.name is required", SwErrors.swInvalidInput)
-    bridge.set_automation_instance(sw_automation)
-    messages = bridge.handle_action(action)
-    return _ok(bridge.get_session().status, {"a2ui": {"messages": messages}})
+
+def _studio_action_handler(arguments: dict) -> Dict[str, Any]:
+    """Apply one user action sent by the studio view (through the MCP Apps host)."""
+    from .ui import studio
+
+    action = arguments.get("action")
+    if action not in STUDIO_ACTIONS:
+        return sw_automation._result(
+            False, f"action must be one of {', '.join(STUDIO_ACTIONS)}", SwErrors.swInvalidInput
+        )
+    if action == "set_dimension" and (not arguments.get("key") or arguments.get("value") is None):
+        return sw_automation._result(False, "set_dimension needs key and value", SwErrors.swInvalidInput)
+    studio.set_automation_instance(sw_automation)
+    state = studio.handle_action(
+        action, key=arguments.get("key"), value=arguments.get("value"), view=arguments.get("view")
+    )
+    return _ok(state["status"], {"studio": state})
 
 
 def _show_interactive_studio_handler(arguments: dict) -> Dict[str, Any]:
-    """
-    Describe the active model as an A2UI surface (dimension sliders + viewport) and
-    publish it through the local studio bridge.
-    """
+    """Collect the active model's driving dimensions and a viewport image for the studio view."""
     try:
-        from .ui import a2ui, bridge
+        from .ui import studio
 
         doc, err = sw_automation.get_active_doc()
         if err:
             return err
 
-        bridge.set_automation_instance(sw_automation)
-        # The bridge only backs the open-in-browser link. In the Claude app the studio is
-        # shown inline and talks to this server through the host, so a bridge failure is not fatal.
-        try:
-            bridge.start_bridge()
-            studio_url = bridge.get_studio_url()
-        except Exception as e:
-            logger.warning(f"Studio bridge unavailable: {e}")
-            studio_url = None
+        studio.set_automation_instance(sw_automation)
 
         try:
             model_title = str(get_attr_or_call(doc, "GetTitle") or "SolidWorks Model")
@@ -2178,25 +2175,24 @@ def _show_interactive_studio_handler(arguments: dict) -> Dict[str, Any]:
         raw_dims: Any = []
         if isinstance(dims_res, dict) and dims_res.get("success"):
             raw_dims = dims_res.get("data") or []
-        dims = a2ui.build_dimension_model(
+        dims = studio.build_dimension_model(
             raw_dims,
             feature_labels=arguments.get("feature_labels") or {},
             dimension_labels=arguments.get("dimension_labels") or {},
         )
 
         view_name = arguments.get("view_name", "*Isometric")
-        session = bridge.set_session(
+        session = studio.set_session(
             title=model_title,
             dims=dims,
-            image=bridge.capture_viewport_data_uri(view_name),
-            bbox=bridge.model_bounds(),
+            image=studio.capture_viewport_data_uri(view_name),
+            bbox=studio.model_bounds(),
             view=view_name,
         )
 
         lines = [
             f"Interactive studio ready for `{model_title}` with {len(dims)} adjustable dimension(s).",
-            (f"If it is not shown inline, open it in a browser: {studio_url}" if studio_url
-             else "It is shown inline in clients that support MCP Apps (no browser link is available)."),
+            "Clients that support MCP Apps show it inline; elsewhere use set_dimension for changes.",
             "",
         ]
         for dim in list(dims.values())[:10]:
@@ -2213,12 +2209,11 @@ def _show_interactive_studio_handler(arguments: dict) -> Dict[str, Any]:
             "error_name": "swSuccess",
             "data": {
                 "modelTitle": model_title,
-                "studioUrl": studio_url,
                 "dimensions": [
                     {k: d[k] for k in ("name", "label", "feature", "value", "units")} for d in dims.values()
                 ],
-                # A2UI 1.0 payload consumed by the studio view (and by any other A2UI renderer).
-                "a2ui": {"messages": session.messages()},
+                # Drawn by the studio view (MCP App).
+                "studio": session.state(),
             },
         }
     except Exception as e:

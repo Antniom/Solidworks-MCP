@@ -66,12 +66,13 @@ Trigger test sets for each skill's description are in `evals/skill-triggers/` (r
 
 `show_interactive_studio` shows the active model's driving dimensions as sliders next to a viewport image.
 Moving a slider rebuilds the model in SolidWorks; if the rebuild fails, the slider returns to the last good
-value. The studio is described with [A2UI](https://github.com/a2ui-project/a2ui) 1.0 messages (basic
-catalog) and drawn by the A2UI web renderer, so it has no hand-written layout.
+value. You can also type an exact value, switch between standard views, reset, or send a summary of the
+changes back to the chat.
 
-Where the app supports MCP Apps the studio appears inline and talks to the connector through Claude.
-Elsewhere Claude gives you a link that opens it in your browser from a small server on `127.0.0.1`; that
-server accepts only requests carrying a per-session token, so other web pages cannot use it.
+The studio is an [MCP App](https://github.com/modelcontextprotocol/ext-apps): one self-contained HTML
+view (`ui://solidworks/studio.html`) that clients supporting MCP Apps (Claude, Codex, Antigravity and
+others) show inline. It has no network access of its own and talks to the connector only through the
+client. In clients without MCP Apps, ask Claude to change dimensions with `set_dimension` instead.
 
 ## What runs on your computer, and your data
 
@@ -137,15 +138,13 @@ uv run pytest
 ```
 
 Tool schemas are in `solidworks_mcp/tool_schemas.py` and the dispatch table in `solidworks_mcp/server.py`.
-The studio page is `solidworks_mcp/ui/host/studio.js`, bundled (unminified) into
-`solidworks_mcp/ui/static/studio.bundle.js` with `npm install && npm run build` in `solidworks_mcp/ui/host`.
+The studio view is `solidworks_mcp/ui/studio.html` (plain HTML and JavaScript, no build step) and its
+state lives in `solidworks_mcp/ui/studio.py`.
 To use the same server with other MCP clients, see [docs/other-clients.md](docs/other-clients.md).
 
 ## License
 
-MIT for this project's own code, see [LICENSE](LICENSE). The bundled studio renderer includes A2UI
-(Apache-2.0) and its dependencies; their notices are in `solidworks_mcp/ui/static/studio.bundle.js.LEGAL.txt`.
-The files in `solidworks_mcp/bin/mecagent_runner` are third-party binaries (the MecAgent runner, Microsoft
+MIT for this project's own code, see [LICENSE](LICENSE). The files in `solidworks_mcp/bin/mecagent_runner` are third-party binaries (the MecAgent runner, Microsoft
 Roslyn, Newtonsoft.Json and SolidWorks interop assemblies) and remain under their owners' licences.
 
 SolidWorks is a trademark of Dassault Systèmes SolidWorks Corporation. This is an independent project and is

@@ -1,23 +1,17 @@
-"""Interactive studio: A2UI surface builder and the local bridge that serves it."""
+"""Interactive studio: an MCP App view (studio.html) and the state behind it (studio.py)."""
 
-from .bridge import (
-    start_bridge,
-    stop_bridge,
-    get_bridge_port,
-    get_studio_url,
-    is_bridge_running,
+from .studio import (
+    get_session,
+    handle_action,
+    render_page,
     set_automation_instance,
     set_session,
-    render_page,
 )
 
 __all__ = [
-    "start_bridge",
-    "stop_bridge",
-    "get_bridge_port",
-    "get_studio_url",
-    "is_bridge_running",
+    "get_session",
+    "handle_action",
+    "render_page",
     "set_automation_instance",
     "set_session",
-    "render_page",
 ]

@@ -1,8 +1,8 @@
 ---
 name: solidworks-interactive
 description: >-
-  Interactive studio for the active SolidWorks model: dimension sliders and a live viewport, described in
-  A2UI and opened with `show_interactive_studio`. Use when the user wants to tweak or explore dimensions
+  Interactive studio for the active SolidWorks model: dimension sliders and a live viewport, an MCP App
+  opened with `show_interactive_studio`. Use when the user wants to tweak or explore dimensions
   of an existing part or assembly visually, or try sizes after modelling, e.g. "show sliders", "let me adjust
   the size", "interactive view", or "estúdio interativo", "ajustar dimensões com sliders". Also use when a
   message starts "I have adjusted the SolidWorks model parameters via the interactive studio".
@@ -15,8 +15,8 @@ description: >-
 `show_interactive_studio` turns the active model's driving dimensions into sliders next to a viewport image.
 Moving a slider rebuilds the model in SolidWorks and refreshes the image.
 
-The studio is described with [A2UI](https://github.com/a2ui-project/a2ui) 1.0 messages (basic catalog) and
-drawn by the stock A2UI web renderer, so the same payload works in any A2UI-capable client.
+The studio is an [MCP App](https://github.com/modelcontextprotocol/ext-apps) (`ui://solidworks/studio.html`),
+so any client that supports MCP Apps (Claude, Codex, Antigravity, ...) shows it inline next to the tool result.
 
 For a single known change ("make it 60 mm long"), call `set_dimension` directly instead.
 
@@ -41,11 +41,10 @@ from `get_dimensions`.
 
 ## Showing it to the user
 
-- Where the Claude app supports MCP Apps, the studio appears inline as soon as the tool returns. Nothing
+- Where the client supports MCP Apps, the studio appears inline as soon as the tool returns. Nothing
   more is needed.
-- If it does not appear, give the user the `studioUrl` from the result. It is a `http://127.0.0.1:...` link
-  that works only on their machine and carries a per-session access token, so pass it on exactly as returned.
-  If `studioUrl` is null, the browser fallback is unavailable; use `set_dimension` for the changes instead.
+- If it does not appear (for example in a terminal client), there is no browser fallback: list the
+  dimensions from the result and make the changes the user asks for with `set_dimension`.
 
 Do not paste the raw JSON into the chat, and never call `studio_action` yourself: it belongs to the studio
 view. Say what the sliders control and let the user drive.
@@ -54,12 +53,13 @@ view. Say what the sliders control and let the user drive.
 
 - Drag a slider: the dimension changes in SolidWorks and the viewport image updates. If the rebuild fails,
   the slider returns to its previous value and the status line says why.
-- Pick a standard view (Isometric, Front, Top, Right, Back, Left, Bottom) and refresh the image.
+- Type an exact value in the number field next to a slider (clamped to the slider's range).
+- Pick a standard view (Isometric, Front, Top, Right, Back, Left, Bottom); the image refreshes.
 - **Reset** restores every dimension to its value when the studio was opened.
 - **Prompt Agent** sends (or copies to the clipboard) a summary of what changed.
 
-Sliders step by 0.5 to 5 mm depending on the size of the dimension (1 degree for angles). For an exact
-value in between, use `set_dimension`.
+Sliders step by 0.5 to 5 mm depending on the size of the dimension (1 degree for angles). For a value
+outside the slider's range, use `set_dimension`.
 
 ## After a Prompt Agent message
 

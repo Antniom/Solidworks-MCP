@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SolidWorks Interactive Studio</title>
+<!--
+  SolidWorks Interactive Studio - an MCP App view (MCP Apps extension, SEP-1865).
+
+  The host renders this page next to the show_interactive_studio result and forwards
+  that result's structuredContent.studio to it (ui/notifications/tool-result). User
+  actions go back as tools/call requests for the app-only studio_action tool, whose
+  result carries the updated studio state. No network access and no dependencies:
+  the viewport image is a data: URI inside the state.
+-->
+<style>
+  :root {
+    color-scheme: light dark;
+    --sw-accent: #c8102e;
+    --sw-bg: var(--color-background-primary, Canvas);
+    --sw-panel: var(--color-background-secondary, color-mix(in srgb, CanvasText 5%, Canvas));
+    --sw-text: var(--color-text-primary, CanvasText);
+    --sw-muted: var(--color-text-secondary, color-mix(in srgb, CanvasText 60%, Canvas));
+    --sw-border: var(--color-border-primary, color-mix(in srgb, CanvasText 15%, Canvas));
+    --sw-radius: var(--border-radius-md, 8px);
+    --sw-font: var(--font-sans, "Segoe UI", system-ui, -apple-system, sans-serif);
+  }
+  html, body { margin: 0; background: var(--sw-bg); color: var(--sw-text); font: 14px/1.4 var(--sw-font); }
+  body { padding: 12px; box-sizing: border-box; }
+  *, *::before, *::after { box-sizing: inherit; }
+  [hidden] { display: none !important; }
+
+  header { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+  h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  .muted { color: var(--sw-muted); font-size: 12px; }
+
+  #waiting { color: var(--sw-muted); padding: 24px 0; }
+  #banner { margin: 0 0 10px; padding: 6px 10px; border-radius: var(--sw-radius); font-size: 13px; background: var(--sw-panel); }
+  #banner[data-kind="error"] { background: #fde8e8; color: #8a1c1c; }
+
+  main { display: grid; grid-template-columns: minmax(0, 3fr) minmax(240px, 2fr); gap: 12px; align-items: start; }
+  @media (max-width: 620px) { main { grid-template-columns: 1fr; } }
+
+  .card { background: var(--sw-panel); border: 1px solid var(--sw-border); border-radius: var(--sw-radius); padding: 10px; }
+  .viewport { position: relative; aspect-ratio: 4 / 3; display: grid; place-items: center; background: var(--sw-bg); border-radius: calc(var(--sw-radius) - 2px); overflow: hidden; }
+  .viewport img { width: 100%; height: 100%; object-fit: contain; }
+  .viewport .empty { color: var(--sw-muted); font-size: 13px; }
+  .viewport .spinner { position: absolute; top: 8px; right: 8px; width: 16px; height: 16px; border: 2px solid var(--sw-border); border-top-color: var(--sw-accent); border-radius: 50%; animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .views { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  button { font: inherit; font-size: 13px; color: var(--sw-text); background: var(--sw-bg); border: 1px solid var(--sw-border); border-radius: 999px; padding: 4px 12px; cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--sw-accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  button[aria-pressed="true"] { background: var(--sw-accent); border-color: var(--sw-accent); color: #fff; }
+  button.primary { background: var(--sw-accent); border-color: var(--sw-accent); color: #fff; }
+
+  #controls { display: flex; flex-direction: column; gap: 10px; max-height: 560px; overflow-y: auto; }
+  .group h2 { font-size: 13px; margin: 0 0 6px; font-weight: 600; }
+  .dim { padding: 6px 0; border-top: 1px solid var(--sw-border); }
+  .dim:first-of-type { border-top: 0; }
+  .dim .row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .dim label { font-size: 13px; }
+  .dim input[type="number"] { width: 84px; font: inherit; font-size: 13px; padding: 2px 4px; text-align: right; color: var(--sw-text); background: var(--sw-bg); border: 1px solid var(--sw-border); border-radius: 4px; }
+  .dim input[type="range"] { width: 100%; accent-color: var(--sw-accent); margin: 4px 0 0; }
+  .dim.changed label::after { content: " \2022"; color: var(--sw-accent); }
+  .dim.busy { opacity: .6; }
+
+  footer { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+  footer .actions { display: flex; gap: 6px; }
+</style>
+</head>
+<body>
+<div id="banner" role="status" hidden></div>
+<div id="waiting">Waiting for SolidWorks&#8230;</div>
+
+<div id="app" hidden>
+  <header>
+    <h1 id="title"></h1>
+    <span id="info" class="muted"></span>
+  </header>
+  <main>
+    <section class="card">
+      <div class="viewport">
+        <img id="viewport" alt="SolidWorks viewport" hidden>
+        <span id="noimage" class="empty">No viewport image</span>
+        <span id="spinner" class="spinner" hidden></span>
+      </div>
+      <div class="views" id="views" role="group" aria-label="View"></div>
+    </section>
+    <section class="card" id="controls" aria-label="Dimensions"></section>
+  </main>
+  <footer>
+    <span id="status" class="muted" aria-live="polite"></span>
+    <div class="actions">
+      <button id="reset" type="button">Reset</button>
+      <button id="prompt" type="button" class="primary">Prompt Agent</button>
+    </div>
+  </footer>
+</div>
+
+<script>
+(() => {
+  'use strict';
+
+  const PROTOCOL_VERSION = '2026-01-26';
+  const ACTION_TIMEOUT_MS = 120000;
+  const $ = id => document.getElementById(id);
+
+  let state = null;
+  let busy = 0;
+  let hostConnected = false;
+
+  // -------------------------------------------------------------------------
+  // JSON-RPC over postMessage with the MCP Apps host
+  // -------------------------------------------------------------------------
+  let rpcId = 0;
+  const pending = new Map();
+
+  function send(message) {
+    window.parent.postMessage(Object.assign({jsonrpc: '2.0'}, message), '*');
+  }
+
+  function request(method, params, timeoutMs = 10000) {
+    return new Promise((resolve, reject) => {
+      const id = ++rpcId;
+      const timer = setTimeout(() => {
+        if (pending.delete(id)) reject(new Error(`${method} timed out`));
+      }, timeoutMs);
+      pending.set(id, {
+        resolve: v => { clearTimeout(timer); resolve(v); },
+        reject: e => { clearTimeout(timer); reject(e); },
+      });
+      send({id, method, params});
+    });
+  }
+
+  function notify(method, params) {
+    send(params === undefined ? {method} : {method, params});
+  }
+
+  window.addEventListener('message', ev => {
+    if (ev.source !== window.parent) return;
+    const msg = ev.data;
+    if (!msg || msg.jsonrpc !== '2.0') return;
+
+    if (msg.id !== undefined && !msg.method) {           // response to one of our requests
+      const p = pending.get(msg.id);
+      if (!p) return;
+      pending.delete(msg.id);
+      if (msg.error) p.reject(new Error(msg.error.message || 'request failed'));
+      else p.resolve(msg.result);
+      return;
+    }
+
+    const params = msg.params || {};
+    switch (msg.method) {
+      case 'ui/notifications/tool-result':
+        if (params.structuredContent && params.structuredContent.studio) render(params.structuredContent.studio);
+        else if (params.isError) setBanner(textOf(params) || 'The studio could not be opened.', 'error');
+        break;
+      case 'ui/notifications/tool-cancelled':
+        setBanner('The studio request was cancelled.', 'error');
+        break;
+      case 'ui/notifications/host-context-changed':
+        applyHostContext(params);
+        break;
+      case 'ui/resource-teardown':
+        if (msg.id !== undefined) send({id: msg.id, result: {}});
+        break;
+      case 'ping':
+        if (msg.id !== undefined) send({id: msg.id, result: {}});
+        break;
+      default:
+        if (msg.id !== undefined) send({id: msg.id, error: {code: -32601, message: `Method not found: ${msg.method}`}});
+    }
+  });
+
+  function textOf(result) {
+    return ((result && result.content) || []).filter(c => c && c.type === 'text').map(c => c.text).join('\n');
+  }
+
+  function applyHostContext(ctx) {
+    if (!ctx) return;
+    if (ctx.theme === 'light' || ctx.theme === 'dark') document.documentElement.style.colorScheme = ctx.theme;
+    const vars = ctx.styles && ctx.styles.variables;
+    if (vars) {
+      for (const [name, value] of Object.entries(vars)) {
+        if (name.startsWith('--') && typeof value === 'string') document.documentElement.style.setProperty(name, value);
+      }
+    }
+  }
+
+  // Measure the content, not the frame: documentElement.scrollHeight never drops below the
+  // iframe's own height, so the view could grow but never shrink.
+  let lastSize = '';
+  function reportSize() {
+    if (!hostConnected) return;
+    const style = getComputedStyle(document.body);
+    const height = Math.ceil(document.body.getBoundingClientRect().height +
+      parseFloat(style.marginTop) + parseFloat(style.marginBottom));
+    const width = Math.ceil(document.documentElement.scrollWidth);
+    const key = `${width}x${height}`;
+    if (key === lastSize) return;
+    lastSize = key;
+    notify('ui/notifications/size-changed', {width, height});
+  }
+
+  // -------------------------------------------------------------------------
+  // Studio actions -> studio_action tool
+  // -------------------------------------------------------------------------
+  async function act(args, dimKey) {
+    if (!hostConnected) {
+      setBanner('This view needs an MCP Apps host to talk to SolidWorks.', 'error');
+      return;
+    }
+    setBusy(+1, dimKey);
+    try {
+      const result = await request('tools/call', {name: 'studio_action', arguments: args}, ACTION_TIMEOUT_MS);
+      const next = result && result.structuredContent && result.structuredContent.studio;
+      if (!next) throw new Error(textOf(result) || 'the server returned no studio update');
+      setBanner('', '');
+      render(next);
+    } catch (err) {
+      setBanner(`Could not reach SolidWorks: ${err.message || err}`, 'error');
+      if (state) render(state);    // put sliders back to the last confirmed values
+    } finally {
+      setBusy(-1, dimKey);
+    }
+  }
+
+  // One rebuild at a time per slider: keep only the newest value while one is in flight.
+  const inflight = new Map();
+  function setDimension(key, value) {
+    const entry = inflight.get(key);
+    if (entry) { entry.next = value; return; }
+    const slot = {next: null};
+    inflight.set(key, slot);
+    act({action: 'set_dimension', key, value, view: state && state.view}, key).finally(() => {
+      inflight.delete(key);
+      if (slot.next !== null) setDimension(key, slot.next);
+      else syncRow(key);   // show what SolidWorks accepted (clamped, or reverted after a failed rebuild)
+    });
+  }
+
+  function setBusy(delta, dimKey) {
+    busy = Math.max(0, busy + delta);
+    $('spinner').hidden = busy === 0;
+    $('reset').disabled = busy > 0;
+    if (dimKey) {
+      const row = document.querySelector(`.dim[data-key="${dimKey}"]`);
+      if (row) row.classList.toggle('busy', inflight.has(dimKey) && delta > 0);
+    }
+  }
+
+  function promptAgent() {
+    const text = (state && state.summary) ||
+      'I adjusted the SolidWorks model in the interactive studio. Please verify the model and update any dependent drawings or simulations.';
+    if (navigator.clipboard) navigator.clipboard.writeText(text).catch(() => {});
+    if (!hostConnected) {
+      setBanner('Prompt copied to the clipboard - paste it into the chat.', 'info');
+      return;
+    }
+    request('ui/message', {role: 'user', content: [{type: 'text', text}]})
+      .then(() => setBanner('Sent to the agent.', 'info'))
+      .catch(() => setBanner('Prompt copied to the clipboard - paste it into the chat.', 'info'));
+  }
+
+  // -------------------------------------------------------------------------
+  // Rendering
+  // -------------------------------------------------------------------------
+  function setBanner(text, kind) {
+    const banner = $('banner');
+    banner.textContent = text || '';
+    banner.dataset.kind = kind || '';
+    banner.hidden = !text;
+  }
+
+  function fmt(value) {
+    return String(Math.round(value * 1000) / 1000);
+  }
+
+  function el(tag, props, children) {
+    const node = document.createElement(tag);
+    Object.assign(node, props || {});
+    for (const child of children || []) node.append(child);
+    return node;
+  }
+
+  function render(next) {
+    const rebuild = !state || dimsSignature(state) !== dimsSignature(next);
+    state = next;
+    $('waiting').hidden = true;
+    $('app').hidden = false;
+    $('title').textContent = next.title || 'SolidWorks Model';
+    $('info').textContent = next.info || '';
+    $('status').textContent = next.status || '';
+
+    const img = $('viewport');
+    if (next.image && next.image.startsWith('data:image/')) {
+      if (img.getAttribute('src') !== next.image) img.src = next.image;
+      img.hidden = false;
+      $('noimage').hidden = true;
+    } else {
+      img.hidden = true;
+      $('noimage').hidden = false;
+    }
+
+    renderViews(next);
+    if (rebuild) renderControls(next);
+    else updateControls(next);
+    $('prompt').disabled = !next.summary;
+  }
+
+  function dimsSignature(s) {
+    return (s.dims || []).map(d => `${d.key}|${d.name}|${d.min}|${d.max}|${d.step}`).join(';');
+  }
+
+  function renderViews(s) {
+    const box = $('views');
+    box.replaceChildren(...(s.views || []).map(view => {
+      const b = el('button', {type: 'button', textContent: view.replace(/^\*/, '')});
+      b.setAttribute('aria-pressed', String(view === s.view));
+      b.addEventListener('click', () => act({action: 'capture', view}));
+      return b;
+    }));
+  }
+
+  function renderControls(s) {
+    const box = $('controls');
+    const dims = s.dims || [];
+    if (!dims.length) {
+      box.replaceChildren(el('div', {className: 'muted', textContent: 'No driving dimensions were found in this model.'}));
+      return;
+    }
+    const groups = new Map();
+    for (const d of dims) {
+      if (!groups.has(d.feature)) groups.set(d.feature, []);
+      groups.get(d.feature).push(d);
+    }
+    box.replaceChildren(...[...groups].map(([feature, items]) =>
+      el('div', {className: 'group'}, [el('h2', {textContent: feature}), ...items.map(dimRow)])));
+    updateControls(s);
+  }
+
+  function dimRow(d) {
+    const id = `dim_${d.key}`;
+    const range = el('input', {type: 'range', id, min: d.min, max: d.max, step: d.step});
+    const number = el('input', {type: 'number', min: d.min, max: d.max, step: 'any', title: d.name});
+    number.setAttribute('aria-label', `${d.label} value`);
+    const label = el('label', {htmlFor: id, textContent: `${d.label} (${d.units})`, title: d.name});
+    const row = el('div', {className: 'dim'}, [el('div', {className: 'row'}, [label, number]), range]);
+    row.dataset.key = d.key;
+
+    range.addEventListener('input', () => { number.value = fmt(+range.value); });
+    range.addEventListener('change', () => commit(d.key, +range.value));
+    number.addEventListener('change', () => {
+      const v = parseFloat(number.value);
+      if (Number.isFinite(v)) commit(d.key, v);
+    });
+    return row;
+  }
+
+  function commit(key, value) {
+    const d = (state.dims || []).find(x => x.key === key);
+    if (!d || Math.abs(d.value - value) < 1e-9) return;
+    setDimension(key, value);
+  }
+
+  function syncRow(key) {
+    const d = state && (state.dims || []).find(x => x.key === key);
+    const row = document.querySelector(`.dim[data-key="${key}"]`);
+    if (!d || !row) return;
+    row.querySelector('input[type="range"]').value = d.value;
+    row.querySelector('input[type="number"]').value = fmt(d.value);
+  }
+
+  function updateControls(s) {
+    for (const d of s.dims || []) {
+      const row = document.querySelector(`.dim[data-key="${d.key}"]`);
+      if (!row) continue;
+      const [range, number] = [row.querySelector('input[type="range"]'), row.querySelector('input[type="number"]')];
+      if (document.activeElement !== number) number.value = fmt(d.value);
+      if (!inflight.has(d.key)) range.value = d.value;
+      row.classList.toggle('changed', Math.abs(d.value - d.original) > 1e-6);
+    }
+  }
+
+  $('reset').addEventListener('click', () => act({action: 'reset', view: state && state.view}));
+  $('prompt').addEventListener('click', promptAgent);
+
+  // -------------------------------------------------------------------------
+  // Handshake
+  // -------------------------------------------------------------------------
+  if (window.parent && window.parent !== window) {
+    request('ui/initialize', {
+      protocolVersion: PROTOCOL_VERSION,
+      appInfo: {name: 'solidworks-studio', version: '2.0.0'},
+      appCapabilities: {availableDisplayModes: ['inline']},
+    })
+      .then(result => {
+        hostConnected = true;
+        applyHostContext(result && result.hostContext);
+        notify('ui/notifications/initialized');
+        new ResizeObserver(reportSize).observe(document.body);
+        reportSize();
+      })
+      .catch(err => setBanner(`Could not connect to the MCP Apps host: ${err.message || err}`, 'error'));
+  } else {
+    $('waiting').textContent = 'This is an MCP App: open it through show_interactive_studio in a client that supports MCP Apps.';
+  }
+})();
+</script>
+</body>
+</html>
