@@ -45,6 +45,9 @@ def find_dispatch_violations():
 
     for d in target_dirs:
         for py_file in d.rglob("*.py"):
+            # Local snapshots (backup_*/, gitignored) and bytecode caches are not shipped code.
+            if any(part.startswith("backup_") or part == "__pycache__" for part in py_file.relative_to(d).parts):
+                continue
             try:
                 content = py_file.read_text(encoding="utf-8")
                 tree = ast.parse(content, filename=str(py_file))
