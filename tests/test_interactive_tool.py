@@ -25,22 +25,28 @@ def test_resource_is_listed_and_readable_through_the_sdk():
     async def go():
         async with Client(srv.server) as client:
             listed = await client.list_resources()
-            assert [str(r.uri) for r in listed.resources] == [srv.STUDIO_RESOURCE_URI]
-            read = await client.read_resource(srv.STUDIO_RESOURCE_URI)
-            content = read.contents[0]
-            assert content.mime_type == "text/html;profile=mcp-app"
-            assert "ui/initialize" in content.text and "studio_action" in content.text
+            assert {str(r.uri) for r in listed.resources} == {srv.STUDIO_RESOURCE_URI, srv.FEA_RESOURCE_URI}
+            for uri, action_tool in ((srv.STUDIO_RESOURCE_URI, "studio_action"), (srv.FEA_RESOURCE_URI, "fea_action")):
+                read = await client.read_resource(uri)
+                content = read.contents[0]
+                assert content.mime_type == "text/html;profile=mcp-app"
+                assert "ui/initialize" in content.text and action_tool in content.text
+                assert "__MCP_APP_BRIDGE__" not in content.text, "the shared bridge must be inlined"
             tools = await client.list_tools()
             by_name = {t.name: t for t in tools.tools}
             assert by_name["show_interactive_studio"].meta["ui"]["resourceUri"] == srv.STUDIO_RESOURCE_URI
             assert by_name["studio_action"].meta["ui"]["visibility"] == ["app"]
+            assert by_name["show_fea_results"].meta["ui"]["resourceUri"] == srv.FEA_RESOURCE_URI
+            assert by_name["fea_action"].meta["ui"]["visibility"] == ["app"]
 
     anyio.run(go)
 
 
-def test_view_is_self_contained():
+@pytest.mark.parametrize("uri", [srv.STUDIO_RESOURCE_URI, srv.FEA_RESOURCE_URI])
+def test_views_are_self_contained(uri):
     """MCP Apps views run under a strict CSP: nothing may be loaded from the network."""
-    page = studio.render_page()
+    from solidworks_mcp.ui import apps
+    page = apps.render(uri)
     for marker in ("<script src", "<link ", "http://", "https://cdn", "fetch(", "EventSource", "@import"):
         assert marker not in page, marker
 

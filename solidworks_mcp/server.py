@@ -65,7 +65,10 @@ from .core import (
 )
 
 STUDIO_RESOURCE_URI = "ui://solidworks/studio.html"
+FEA_RESOURCE_URI = "ui://solidworks/fea.html"
 STUDIO_MIME_TYPE = "text/html;profile=mcp-app"
+# Tools whose result structuredContent feeds an MCP Apps view.
+_APP_VIEW_TOOLS = ("show_interactive_studio", "studio_action", "show_fea_results", "fea_action")
 
 
 def _configure_logging() -> Optional[Path]:
@@ -919,6 +922,8 @@ _TOOL_HANDLERS: Dict[str, Callable[[dict], Dict[str, Any]]] = {
     'set_units': _auto('set_units', ('unit', 'mm')),
     'show_interactive_studio': lambda a: _show_interactive_studio_handler(a),
     'studio_action': lambda a: _studio_action_handler(a),
+    'show_fea_results': lambda a: _show_fea_results_handler(a),
+    'fea_action': lambda a: _fea_action_handler(a),
     'search_knowledge': _search_knowledge,
     'record_knowledge': _record_knowledge,
     'supervisor_clean_processes': lambda a: sw_automation.supervisor_clean_processes(
@@ -1004,6 +1009,8 @@ _NO_COMMAND_IN_PROGRESS_TOOLS = {
     "mesh_and_run_simulation",
     "show_interactive_studio",
     "studio_action",
+    "show_fea_results",
+    "fea_action",
     "supervisor_clean_processes",
     "restart_solidworks",
 }
@@ -1157,7 +1164,9 @@ def get_tool_timeout(tool_name: str, cfg: Any, arguments: Optional[dict] = None)
         return wait + 240.0  # exit wait + terminate + launch of a fresh SolidWorks
     elif tool_name in ("export_drawing",):
         return float(getattr(cfg, "export_timeout", 180.0))
-    elif tool_name in ("mesh_and_run_simulation",):
+    elif tool_name in ("mesh_and_run_simulation",) or (
+        tool_name == "fea_action" and (arguments or {}).get("action") == "rerun"
+    ):
         return float(getattr(cfg, "simulation_timeout", 600.0))
     else:
         return float(getattr(cfg, "default_timeout", 60.0))
@@ -1258,8 +1267,8 @@ async def call_tool(
         # plugin_updates failures are about the user's own Claude config, not server defects: never auto-report.
         if isinstance(result, dict) and not result.get("success", True) and name != "plugin_updates":
             _auto_report(name, arguments, result.get("message", ""), result.get("error_code"), sw_ver)
-        if name in ("show_interactive_studio", "studio_action") and envelope.success:
-            # MCP Apps: the host forwards structuredContent to the studio view (ui://solidworks/studio.html).
+        if name in _APP_VIEW_TOOLS and envelope.success:
+            # MCP Apps: the host forwards structuredContent to the tool's view (ui://solidworks/*.html).
             return CallToolResult(
                 content=[TextContent(type="text", text=result.get("message", ""))],
                 structured_content=result.get("data"),
@@ -1361,15 +1370,12 @@ async def list_resources(
     ctx: Optional[ServerRequestContext] = None,
     params: Optional[PaginatedRequestParams] = None,
 ) -> ListResourcesResult:
-    """Advertise the interactive studio view (MCP Apps)."""
+    """Advertise the MCP Apps views (interactive studio, FEA results)."""
+    from .ui import apps
     return ListResourcesResult(
         resources=[
-            Resource(
-                uri=STUDIO_RESOURCE_URI,
-                name="SolidWorks Interactive Studio",
-                description="MCP App with live dimension sliders and a SolidWorks viewport preview.",
-                mime_type=STUDIO_MIME_TYPE,
-            )
+            Resource(uri=uri, name=name, description=description, mime_type=apps.MIME_TYPE)
+            for uri, (_file, name, description) in apps.VIEWS.items()
         ]
     )
 
@@ -1378,20 +1384,20 @@ async def read_resource(
     ctx: Optional[ServerRequestContext],
     params: ReadResourceRequestParams,
 ) -> ReadResourceResult:
-    """Serve the studio view. It is static: the studio state arrives in the tool result."""
+    """Serve a view. Views are static: their data arrives in the tool result."""
+    from .ui import apps
     uri_str = str(getattr(params, "uri", ""))
-    if uri_str != STUDIO_RESOURCE_URI:
+    if uri_str not in apps.VIEWS:
         raise ValueError(f"Resource not found: {uri_str}")
-    from .ui import studio
     return ReadResourceResult(
         contents=[
             TextResourceContents(
-                uri=STUDIO_RESOURCE_URI,
-                mime_type=STUDIO_MIME_TYPE,
-                # No ui.csp: the view needs no network access, and the host's default CSP
+                uri=uri_str,
+                mime_type=apps.MIME_TYPE,
+                # No ui.csp: the views need no network access, and the host's default CSP
                 # already allows the data: viewport images. Actions go through the host.
                 meta={"ui": {"prefersBorder": True}},
-                text=studio.render_page(),
+                text=apps.render(uri_str),
             )
         ]
     )
@@ -2153,6 +2159,54 @@ def _studio_action_handler(arguments: dict) -> Dict[str, Any]:
         action, key=arguments.get("key"), value=arguments.get("value"), view=arguments.get("view")
     )
     return _ok(state["status"], {"studio": state})
+
+
+FEA_ACTIONS = ("rerun", "capture", "set_yield")
+
+
+def _show_fea_results_handler(arguments: dict) -> Dict[str, Any]:
+    """Collect a solved Simulation study's results for the FEA results view."""
+    from .ui import fea
+
+    fea.set_automation_instance(sw_automation)
+    res = fea.load(
+        study_name=arguments.get("study_name"),
+        yield_mpa=arguments.get("yield_strength_mpa"),
+        view=arguments.get("view_name", "*Isometric"),
+    )
+    if not res["success"]:
+        return sw_automation._result(False, res["message"], SwErrors.swSimulationError)
+    state = res["data"]
+    lines = [
+        f"FEA results view ready for study '{state['study']}'.",
+        "Clients that support MCP Apps show it inline.",
+        "",
+        state["summary"] or "No results.",
+    ]
+    if state["yield_mpa"] is None:
+        lines.append("Yield strength unknown: pass yield_strength_mpa to show the factor of safety.")
+    return _ok("\n".join(lines), {"fea": state})
+
+
+def _fea_action_handler(arguments: dict) -> Dict[str, Any]:
+    """Apply one action sent by the FEA results view (through the MCP Apps host)."""
+    from .ui import fea
+
+    action = arguments.get("action")
+    if action not in FEA_ACTIONS:
+        return sw_automation._result(
+            False, f"action must be one of {', '.join(FEA_ACTIONS)}", SwErrors.swInvalidInput
+        )
+    if not fea.get_session().study:
+        return sw_automation._result(False, "Open the view with show_fea_results first.", SwErrors.swInvalidInput)
+    fea.set_automation_instance(sw_automation)
+    state = fea.handle_action(
+        action,
+        view=arguments.get("view"),
+        element_size_mm=arguments.get("element_size_mm"),
+        yield_mpa=arguments.get("yield_mpa"),
+    )
+    return _ok(state["status"], {"fea": state})
 
 
 def _show_interactive_studio_handler(arguments: dict) -> Dict[str, Any]:

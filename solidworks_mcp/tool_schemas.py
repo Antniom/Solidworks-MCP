@@ -1274,6 +1274,58 @@ def _build_tools() -> List[Tool]:
                 "required": []
             }
         ),
+        Tool(
+            name="show_fea_results",
+            description=(
+                "Show a solved Simulation study as an MCP App: result plot image, max von Mises stress, max "
+                "displacement, factor of safety against yield, a linear load what-if slider and a Re-solve button. "
+                "Call after mesh_and_run_simulation. Clients without MCP Apps get the same numbers as text."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "study_name": {"type": "string", "description": "Optional study name (default: active study)"},
+                    "yield_strength_mpa": {
+                        "type": "number",
+                        "description": "Material yield strength in MPa for the factor of safety. Omit to read it from the study material."
+                    },
+                    "view_name": {
+                        "type": "string",
+                        "default": "*Isometric",
+                        "enum": ["*Isometric", "*Front", "*Top", "*Right", "*Back", "*Left", "*Bottom"],
+                        "description": "View orientation for the result plot image"
+                    }
+                },
+                "required": []
+            },
+            meta={"ui": {"resourceUri": "ui://solidworks/fea.html"}}
+        ),
+        Tool(
+            name="fea_action",
+            description=(
+                "Internal to the FEA results view: re-solve the study, change the view or set the yield strength, "
+                "and return the updated results. Not for direct use; use mesh_and_run_simulation instead."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["rerun", "capture", "set_yield"],
+                        "description": "rerun: mesh and solve again; capture: refresh the plot image; set_yield: change the yield strength"
+                    },
+                    "element_size_mm": {"type": "number", "description": "Element size for rerun (default: previous size or 2 mm)"},
+                    "yield_mpa": {"type": "number", "description": "Yield strength in MPa for set_yield"},
+                    "view": {
+                        "type": "string",
+                        "enum": ["*Isometric", "*Front", "*Top", "*Right", "*Back", "*Left", "*Bottom"],
+                        "description": "View orientation for the plot image"
+                    }
+                },
+                "required": ["action"]
+            },
+            meta={"ui": {"resourceUri": "ui://solidworks/fea.html", "visibility": ["app"]}}
+        ),
 
         # Knowledge & Operational Hardening Tools (Phase 5)
         Tool(

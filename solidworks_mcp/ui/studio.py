@@ -22,12 +22,10 @@ import math
 import os
 import tempfile
 import threading
-from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger("SolidWorksMCP.Studio")
 
-PAGE_PATH = Path(__file__).parent / "studio.html"
 VIEW_NAMES = ["*Isometric", "*Front", "*Top", "*Right", "*Back", "*Left", "*Bottom"]
 READY_STATUS = "Drag a slider to rebuild the model in SolidWorks."
 
@@ -248,9 +246,13 @@ def set_session(
     return _session
 
 
+RESOURCE_URI = "ui://solidworks/studio.html"
+
+
 def render_page() -> str:
     """The MCP App view: one self-contained HTML file, no network access needed."""
-    return PAGE_PATH.read_text(encoding="utf-8")
+    from .apps import render
+    return render(RESOURCE_URI)
 
 
 # ============================================================================

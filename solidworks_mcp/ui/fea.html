@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SolidWorks FEA Results</title>
+<!--
+  SolidWorks FEA Results - an MCP App view (MCP Apps extension, SEP-1865).
+
+  The host renders this page next to the show_fea_results result and forwards its
+  structuredContent.fea. Re-solve and view changes go back through the app-only
+  fea_action tool. The load what-if is computed here, assuming a linear static study.
+-->
+<style>
+  :root {
+    color-scheme: light dark;
+    --sw-accent: #c8102e;
+    --sw-bg: var(--color-background-primary, Canvas);
+    --sw-panel: var(--color-background-secondary, color-mix(in srgb, CanvasText 5%, Canvas));
+    --sw-text: var(--color-text-primary, CanvasText);
+    --sw-muted: var(--color-text-secondary, color-mix(in srgb, CanvasText 60%, Canvas));
+    --sw-border: var(--color-border-primary, color-mix(in srgb, CanvasText 15%, Canvas));
+    --sw-radius: var(--border-radius-md, 8px);
+    --sw-font: var(--font-sans, "Segoe UI", system-ui, -apple-system, sans-serif);
+    --ok: #1a7f37; --warn: #b7791f; --bad: #c8102e;
+  }
+  html, body { margin: 0; background: var(--sw-bg); color: var(--sw-text); font: 14px/1.4 var(--sw-font); }
+  body { padding: 12px; box-sizing: border-box; }
+  *, *::before, *::after { box-sizing: inherit; }
+  [hidden] { display: none !important; }
+
+  header { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+  h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  h2 { font-size: 13px; margin: 0 0 8px; font-weight: 600; }
+  .muted { color: var(--sw-muted); font-size: 12px; }
+  #waiting { color: var(--sw-muted); padding: 24px 0; }
+  #banner { margin: 0 0 10px; padding: 6px 10px; border-radius: var(--sw-radius); font-size: 13px; background: var(--sw-panel); }
+  #banner[data-kind="error"] { background: #fde8e8; color: #8a1c1c; }
+
+  main { display: grid; grid-template-columns: minmax(0, 3fr) minmax(260px, 2fr); gap: 12px; align-items: start; }
+  @media (max-width: 640px) { main { grid-template-columns: 1fr; } }
+  .stack { display: flex; flex-direction: column; gap: 12px; }
+  .card { background: var(--sw-panel); border: 1px solid var(--sw-border); border-radius: var(--sw-radius); padding: 10px; }
+
+  .viewport { position: relative; aspect-ratio: 4 / 3; display: grid; place-items: center; background: var(--sw-bg); border-radius: calc(var(--sw-radius) - 2px); overflow: hidden; }
+  .viewport img { width: 100%; height: 100%; object-fit: contain; }
+  .viewport .empty { color: var(--sw-muted); font-size: 13px; }
+  .spinner { position: absolute; top: 8px; right: 8px; width: 16px; height: 16px; border: 2px solid var(--sw-border); border-top-color: var(--sw-accent); border-radius: 50%; animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .views { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  button { font: inherit; font-size: 13px; color: var(--sw-text); background: var(--sw-bg); border: 1px solid var(--sw-border); border-radius: 999px; padding: 4px 12px; cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--sw-accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  button[aria-pressed="true"], button.primary { background: var(--sw-accent); border-color: var(--sw-accent); color: #fff; }
+
+  .tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .tile { background: var(--sw-bg); border: 1px solid var(--sw-border); border-radius: calc(var(--sw-radius) - 2px); padding: 8px; }
+  .tile .k { font-size: 11px; color: var(--sw-muted); }
+  .tile .v { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .tile .u { font-size: 12px; color: var(--sw-muted); margin-left: 2px; }
+  .verdict { display: inline-block; margin-top: 2px; font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 999px; color: #fff; }
+  .verdict[data-level="ok"] { background: var(--ok); } .verdict[data-level="warn"] { background: var(--warn); } .verdict[data-level="bad"] { background: var(--bad); }
+
+  .legend { position: relative; height: 12px; border-radius: 6px; margin: 18px 0 4px;
+            background: linear-gradient(to right, #1f3bb3, #1fa2d6, #2fbf71, #e6d21c, #e8731b, #c8102e); }
+  .legend .marker { position: absolute; top: -2px; width: 0; height: 16px; }
+  .legend .marker::after { content: ""; position: absolute; left: -1px; top: 0; width: 2px; height: 16px; background: var(--sw-text); }
+  .legend .marker span { position: absolute; bottom: 18px; transform: translateX(-50%); font-size: 11px; white-space: nowrap; }
+  .legend-scale { display: flex; justify-content: space-between; font-size: 11px; color: var(--sw-muted); font-variant-numeric: tabular-nums; }
+
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 6px 0; }
+  input[type="number"] { width: 90px; font: inherit; font-size: 13px; padding: 2px 4px; text-align: right; color: var(--sw-text); background: var(--sw-bg); border: 1px solid var(--sw-border); border-radius: 4px; }
+  input[type="range"] { width: 100%; accent-color: var(--sw-accent); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+  td { padding: 3px 0; } td:last-child { text-align: right; }
+  .warnings { margin: 8px 0 0; padding-left: 18px; font-size: 12px; color: var(--warn); }
+
+  footer { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+</style>
+</head>
+<body>
+<div id="banner" role="status" hidden></div>
+<div id="waiting">Waiting for SolidWorks Simulation&#8230;</div>
+
+<div id="app" hidden>
+  <header>
+    <h1 id="title"></h1>
+    <span id="subtitle" class="muted"></span>
+  </header>
+  <main>
+    <section class="card">
+      <div class="viewport">
+        <img id="viewport" alt="SolidWorks result plot" hidden>
+        <span id="noimage" class="empty">No result plot image</span>
+        <span id="spinner" class="spinner" hidden></span>
+      </div>
+      <div class="views" id="views" role="group" aria-label="View"></div>
+    </section>
+
+    <div class="stack">
+      <section class="card">
+        <div class="tiles">
+          <div class="tile"><div class="k">Max von Mises</div><div><span class="v" id="t-stress">-</span><span class="u">MPa</span></div></div>
+          <div class="tile"><div class="k">Max displacement</div><div><span class="v" id="t-disp">-</span><span class="u">mm</span></div></div>
+          <div class="tile"><div class="k">Min factor of safety</div><div><span class="v" id="t-fos">-</span></div><span class="verdict" id="t-verdict" hidden></span></div>
+        </div>
+        <div class="legend" id="legend" aria-hidden="true"><span class="marker" id="yield-marker" hidden><span id="yield-label"></span></span></div>
+        <div class="legend-scale"><span id="l-min">0</span><span id="l-max">0</span></div>
+        <div class="row">
+          <label for="yield">Yield strength (MPa)</label>
+          <input type="number" id="yield" min="0" step="any">
+        </div>
+        <div class="muted" id="yield-source"></div>
+        <ul class="warnings" id="warnings" hidden></ul>
+      </section>
+
+      <section class="card">
+        <h2>What if the load changes?</h2>
+        <div class="row"><span>Load scale</span><strong id="scale-label">1.00 &times;</strong></div>
+        <input type="range" id="scale" min="0.25" max="3" step="0.05" value="1" aria-label="Load scale">
+        <table>
+          <tr><td>Max von Mises</td><td id="w-stress">-</td></tr>
+          <tr><td>Max displacement</td><td id="w-disp">-</td></tr>
+          <tr><td>Factor of safety</td><td id="w-fos">-</td></tr>
+          <tr><td>Load at yield (FoS = 1)</td><td id="w-limit">-</td></tr>
+        </table>
+        <div class="muted">Linear estimate (stress and displacement scale with load in a linear static study). Re-solve to confirm.</div>
+      </section>
+
+      <section class="card">
+        <h2>Re-solve in SolidWorks</h2>
+        <div class="row">
+          <label for="esize">Element size (mm)</label>
+          <input type="number" id="esize" min="0.05" step="any" value="2">
+        </div>
+        <div class="row"><span class="muted" id="mesh-info"></span><button id="rerun" type="button">Re-solve</button></div>
+      </section>
+    </div>
+  </main>
+  <footer>
+    <span id="status" class="muted" aria-live="polite"></span>
+    <button id="prompt" type="button" class="primary">Send to agent</button>
+  </footer>
+</div>
+
+<script>/*__MCP_APP_BRIDGE__*/</script>
+<script>
+(() => {
+  'use strict';
+
+  const SOLVE_TIMEOUT_MS = 15 * 60 * 1000;
+  const $ = id => document.getElementById(id);
+  let state = null;
+  let busy = 0;
+
+  const num = (v, digits = 4) => (typeof v === 'number' && Number.isFinite(v)) ? Number(v.toPrecision(digits)).toString() : '-';
+
+  function setBanner(text, kind) {
+    const b = $('banner');
+    b.textContent = text || '';
+    b.dataset.kind = kind || '';
+    b.hidden = !text;
+  }
+
+  function setBusy(delta) {
+    busy = Math.max(0, busy + delta);
+    $('spinner').hidden = busy === 0;
+    $('rerun').disabled = busy > 0;
+  }
+
+  function verdict(fos) {
+    if (fos == null) return null;
+    if (fos < 1) return {level: 'bad', text: 'Yields'};
+    if (fos < 1.5) return {level: 'warn', text: 'Low margin'};
+    return {level: 'ok', text: 'OK'};
+  }
+
+  async function act(args, timeoutMs) {
+    if (!McpApp.connected()) { setBanner('This view needs an MCP Apps host to talk to SolidWorks.', 'error'); return; }
+    setBusy(+1);
+    try {
+      const result = await McpApp.callTool('fea_action', args, timeoutMs || 120000);
+      const next = result && result.structuredContent && result.structuredContent.fea;
+      if (!next) throw new Error(McpApp.text(result) || 'the server returned no results');
+      setBanner('', '');
+      render(next);
+    } catch (err) {
+      setBanner(`Could not reach SolidWorks: ${err.message || err}`, 'error');
+    } finally {
+      setBusy(-1);
+    }
+  }
+
+  function currentYield() {
+    const typed = parseFloat($('yield').value);
+    return Number.isFinite(typed) && typed > 0 ? typed : (state && state.yield_mpa) || null;
+  }
+
+  function renderWhatIf() {
+    if (!state || !state.stress) return;
+    const k = parseFloat($('scale').value);
+    const stress = state.stress.max * k;
+    const disp = state.displacement ? state.displacement.max * k : null;
+    const y = currentYield();
+    $('scale-label').textContent = `${k.toFixed(2)} ×`;
+    $('w-stress').textContent = `${num(stress)} MPa`;
+    $('w-disp').textContent = disp == null ? '-' : `${num(disp)} mm`;
+    const fos = y && stress > 0 ? y / stress : null;
+    $('w-fos').textContent = fos == null ? '-' : num(fos, 3);
+    const v = verdict(fos);
+    $('w-fos').style.color = v ? `var(--${v.level})` : '';
+    $('w-fos').style.fontWeight = v && v.level !== 'ok' ? '600' : '';
+    $('w-limit').textContent = y && state.stress.max > 0 ? `${num(y / state.stress.max, 3)} × current load` : '-';
+  }
+
+  function renderSafety() {
+    const y = currentYield();
+    const peak = state.stress && state.stress.max;
+    const fos = y && peak > 0 ? y / peak : null;
+    $('t-fos').textContent = fos == null ? '-' : num(fos, 3);
+    const v = verdict(fos);
+    const badge = $('t-verdict');
+    badge.hidden = !v;
+    if (v) { badge.dataset.level = v.level; badge.textContent = v.text; }
+
+    // Legend: 0 .. max(peak stress, yield); the marker shows where yield sits.
+    const top = Math.max(peak || 0, y || 0) || 1;
+    $('l-min').textContent = `${num(state.stress ? state.stress.min : 0, 3)} MPa`;
+    $('l-max').textContent = `${num(top, 3)} MPa`;
+    const marker = $('yield-marker');
+    marker.hidden = !y;
+    if (y) {
+      const pct = Math.min(100, (y / top) * 100);
+      marker.style.left = `${pct}%`;
+      // Keep the label inside the card near either end of the scale.
+      const label = $('yield-label');
+      label.style.transform = pct > 85 ? 'translateX(-100%)' : pct < 15 ? 'translateX(0)' : 'translateX(-50%)';
+      label.textContent = `yield ${num(y, 3)}`;
+    }
+
+    const sources = {given: 'Yield strength entered by you or the agent.',
+                     material: `Yield strength of ${state.material || 'the study material'} (from SolidWorks).`,
+                     library: `Yield strength of ${state.material} from the SolidWorks material library.`};
+    $('yield-source').textContent = y ? (sources[state.yield_source] || '') : 'Enter the material yield strength to see the factor of safety.';
+    renderWhatIf();
+  }
+
+  function render(next) {
+    state = next;
+    $('waiting').hidden = true;
+    $('app').hidden = false;
+    $('title').textContent = `${next.study || 'Simulation study'}`;
+    $('subtitle').textContent = [next.model, next.material].filter(Boolean).join(' | ');
+    $('status').textContent = next.status || '';
+
+    const img = $('viewport');
+    if (next.image && next.image.startsWith('data:image/')) {
+      if (img.getAttribute('src') !== next.image) img.src = next.image;
+      img.hidden = false; $('noimage').hidden = true;
+    } else {
+      img.hidden = true; $('noimage').hidden = false;
+    }
+
+    $('views').replaceChildren(...(next.views || []).map(view => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = view.replace(/^\*/, '');
+      b.setAttribute('aria-pressed', String(view === next.view));
+      b.addEventListener('click', () => act({action: 'capture', view}));
+      return b;
+    }));
+
+    $('t-stress').textContent = next.stress ? num(next.stress.max) : '-';
+    $('t-disp').textContent = next.displacement ? num(next.displacement.max) : '-';
+    if (document.activeElement !== $('yield')) $('yield').value = next.yield_mpa ? num(next.yield_mpa, 6) : '';
+    if (next.mesh && next.mesh.element_size_mm) $('esize').value = next.mesh.element_size_mm;
+    $('mesh-info').textContent = next.mesh && next.mesh.elements
+      ? `${next.mesh.elements.toLocaleString()} elements, ${(next.mesh.nodes || 0).toLocaleString()} nodes` : '';
+
+    const warn = $('warnings');
+    warn.replaceChildren(...(next.warnings || []).map(w => { const li = document.createElement('li'); li.textContent = w; return li; }));
+    warn.hidden = !(next.warnings || []).length;
+    renderSafety();
+  }
+
+  function summary() {
+    let text = (state && state.summary) || '';
+    const k = parseFloat($('scale').value);
+    if (state && state.stress && Math.abs(k - 1) > 1e-9) {
+      const y = currentYield();
+      text += `\nI also looked at scaling the load by ${k.toFixed(2)}x: linear estimate ${num(state.stress.max * k)} MPa max stress` +
+        (y ? `, factor of safety ${num(y / (state.stress.max * k), 3)}` : '') + '.';
+    }
+    return text;
+  }
+
+  $('scale').addEventListener('input', renderWhatIf);
+  $('yield').addEventListener('input', () => state && renderSafety());
+  $('yield').addEventListener('change', () => {
+    const y = parseFloat($('yield').value);
+    if (Number.isFinite(y) && y > 0) act({action: 'set_yield', yield_mpa: y});
+  });
+  $('rerun').addEventListener('click', () => {
+    const size = parseFloat($('esize').value);
+    setBanner('Meshing and solving in SolidWorks. This can take a few minutes.', 'info');
+    act({action: 'rerun', element_size_mm: Number.isFinite(size) && size > 0 ? size : undefined, view: state && state.view}, SOLVE_TIMEOUT_MS);
+  });
+  $('prompt').addEventListener('click', () => {
+    McpApp.sendMessage(summary())
+      .then(() => setBanner('Sent to the agent.', 'info'))
+      .catch(() => setBanner('Summary copied to the clipboard - paste it into the chat.', 'info'));
+  });
+
+  McpApp.connect({
+    name: 'solidworks-fea',
+    version: '1.0.0',
+    onToolResult(result) {
+      const fea = result.structuredContent && result.structuredContent.fea;
+      if (fea) render(fea);
+      else if (result.isError) setBanner(McpApp.text(result) || 'No simulation results to show.', 'error');
+    },
+    onToolCancelled() { setBanner('The request was cancelled.', 'error'); },
+  }).catch(err => {
+    if (McpApp.embedded) setBanner(`Could not connect to the MCP Apps host: ${err.message || err}`, 'error');
+    else $('waiting').textContent = 'This is an MCP App: open it through show_fea_results in a client that supports MCP Apps.';
+  });
+})();
+</script>
+</body>
+</html>

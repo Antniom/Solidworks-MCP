@@ -5,7 +5,7 @@ description: >-
   studies, study materials, fixtures, force and pressure loads, meshing, solving, and reading von Mises stress,
   displacement and factor of safety. Use for any request to check strength or stiffness of a SolidWorks part,
   even without the word FEA, e.g. "stress analysis", "will this bracket hold 500 N", "factor of safety",
-  "how much does it bend", or "análise de tensões", "simulação estática".
+  "how much does it bend", "show the FEA results", or "análise de tensões", "simulação estática".
 ---
 
 # SolidWorks Simulation (FEA)
@@ -51,8 +51,15 @@ Fixture types: `fixed` (all DOF), `immovable` (translations only), `roller`, `hi
 2. `create_simulation_study`, then fixtures, then loads.
 3. `mesh_and_run_simulation`. It uses parabolic (10-node) tetrahedra. Set `element_size_mm` to about a third
    of the thinnest wall, or leave it to the automatic size.
-4. `get_simulation_results`: `max_von_mises_mpa`, `max_displacement_mm`, `min_factor_of_safety`.
-5. Sanity-check before reporting:
+4. `get_simulation_results`: `von_mises_stress_mpa` and `resultant_displacement_mm` (each with `max`,
+   `min` and the node), plus `sanity_check`. The factor of safety is yield strength / max stress.
+5. Show the result with `show_fea_results` (pass `yield_strength_mpa` if you know it; otherwise it is read
+   from the study material). In clients with MCP Apps the user gets the result plot, stress, displacement,
+   factor of safety with a pass/low-margin/yields badge, a linear "what if the load changes" slider, and a
+   Re-solve button with an element-size field. Elsewhere the same numbers come back as text. Never call
+   `fea_action` yourself: it belongs to the view. A message starting "FEA results for study" comes from its
+   **Send to agent** button: review the numbers against the requirements and suggest changes.
+6. Sanity-check before reporting:
    - Compare the displacement with a hand estimate (cantilever: δ = F·L³ / (3·E·I)). If it is off by 10×,
      a fixture or load landed on the wrong face; re-read the `target` each call reported.
    - Stress peaks at sharp re-entrant corners are mesh singularities. Report them as such rather than as
@@ -69,7 +76,7 @@ add_study_fixture {"fixture_type": "fixed", "face_point": [0, 10, 10]}
 add_study_load {"load_type": "force", "value": 500.0, "unit": "N", "face_point": [200, 10, 10], "direction": "bottom"}
 mesh_and_run_simulation {"element_size_mm": 4.0, "tolerance_mm": 0.2}
 get_simulation_results {}
-capture_viewport {"filepath": "cantilever_stress.png", "view_name": "*Isometric"}
+show_fea_results {"yield_strength_mpa": 351.6}
 ```
 
 Hand check for this beam: I = 20⁴/12 ≈ 13 333 mm⁴, E ≈ 200 000 MPa, so δ ≈ 500·200³ / (3·200 000·13 333)

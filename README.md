@@ -12,6 +12,7 @@ mechanical-engineering workflows, plus an interactive studio for adjusting dimen
 | :--- | :--- |
 | Parts | "Model a flanged mounting bracket with four M6 counterbored holes." |
 | Interactive studio | "Open the studio so I can adjust the dimensions with sliders." |
+| FEA results | "Run a static study with 500 N on the tip and show me the results." |
 | Standard hardware | "Create a DIN 933 M12 hex bolt with a 45 mm shaft." |
 | Assemblies | "Insert bracket.sldprt and pin.sldprt and mate the pin into the hole." |
 | Drawings | "Make an A3 drawing with front, top and isometric views and a BOM, then export a PDF." |
@@ -73,6 +74,15 @@ The studio is an [MCP App](https://github.com/modelcontextprotocol/ext-apps): on
 view (`ui://solidworks/studio.html`) that clients supporting MCP Apps (Claude, Codex, Antigravity and
 others) show inline. It has no network access of its own and talks to the connector only through the
 client. In clients without MCP Apps, ask Claude to change dimensions with `set_dimension` instead.
+
+## FEA results view
+
+`show_fea_results` shows a solved SolidWorks Simulation study as a second MCP App
+(`ui://solidworks/fea.html`): the result plot, max von Mises stress, max displacement and the factor of
+safety against yield, with a pass / low-margin / yields badge and a stress scale marking the yield
+strength. A "what if the load changes" slider gives an instant linear estimate (valid for linear static
+studies), and **Re-solve** meshes and solves again in SolidWorks with the element size you choose, for
+example after changing dimensions in the studio. **Send to agent** hands the numbers back to Claude.
 
 ## What runs on your computer, and your data
 
@@ -138,8 +148,10 @@ uv run pytest
 ```
 
 Tool schemas are in `solidworks_mcp/tool_schemas.py` and the dispatch table in `solidworks_mcp/server.py`.
-The studio view is `solidworks_mcp/ui/studio.html` (plain HTML and JavaScript, no build step) and its
-state lives in `solidworks_mcp/ui/studio.py`.
+The MCP App views are plain HTML and JavaScript with no build step: `solidworks_mcp/ui/studio.html` and
+`solidworks_mcp/ui/fea.html`, with their state in `studio.py` and `fea.py`. The host handshake they share is
+`solidworks_mcp/ui/bridge.js`, inlined into each page by `solidworks_mcp/ui/apps.py`, which also lists the
+`ui://` resources.
 To use the same server with other MCP clients, see [docs/other-clients.md](docs/other-clients.md).
 
 ## License
