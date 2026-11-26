@@ -24,6 +24,16 @@ VIEWS: Dict[str, tuple] = {
         "SolidWorks FEA Results",
         "Stress, displacement and factor of safety of a solved Simulation study, with a load what-if and re-solve.",
     ),
+    "ui://solidworks/motion.html": (
+        "motion.html",
+        "SolidWorks Motion Scrubber",
+        "Drag an assembly mate through its range with a live viewport and a collision map.",
+    ),
+    "ui://solidworks/project.html": (
+        "project.html",
+        "SolidWorks Project Board",
+        "The TRACKLIST of a solidworks-project folder as a board, with open questions and decisions.",
+    ),
 }
 
 

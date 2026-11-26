@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SolidWorks Project Board</title>
+<!--
+  SolidWorks Project Board - an MCP App view (MCP Apps extension, SEP-1865).
+
+  Shows the TRACKLIST of a solidworks-project folder (AGENT_CONTEXT.md) as a board.
+  The host forwards show_project_board's structuredContent.project; status changes,
+  opening a module and refreshing go back through the app-only project_action tool.
+-->
+<style>
+  :root {
+    color-scheme: light dark;
+    --sw-accent: #c8102e;
+    --sw-bg: var(--color-background-primary, Canvas);
+    --sw-panel: var(--color-background-secondary, color-mix(in srgb, CanvasText 5%, Canvas));
+    --sw-text: var(--color-text-primary, CanvasText);
+    --sw-muted: var(--color-text-secondary, color-mix(in srgb, CanvasText 60%, Canvas));
+    --sw-border: var(--color-border-primary, color-mix(in srgb, CanvasText 15%, Canvas));
+    --sw-radius: var(--border-radius-md, 8px);
+    --sw-font: var(--font-sans, "Segoe UI", system-ui, -apple-system, sans-serif);
+    --c-todo: color-mix(in srgb, CanvasText 45%, Canvas); --c-progress: #1f6feb; --c-blocked: #b7791f; --c-done: #1a7f37;
+  }
+  html, body { margin: 0; background: var(--sw-bg); color: var(--sw-text); font: 14px/1.4 var(--sw-font); }
+  body { padding: 12px; box-sizing: border-box; }
+  *, *::before, *::after { box-sizing: inherit; }
+  [hidden] { display: none !important; }
+
+  header { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+  h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  h2 { font-size: 13px; margin: 0 0 8px; font-weight: 600; display: flex; justify-content: space-between; }
+  .muted { color: var(--sw-muted); font-size: 12px; }
+  #waiting { color: var(--sw-muted); padding: 24px 0; }
+  #banner { margin: 0 0 10px; padding: 6px 10px; border-radius: var(--sw-radius); font-size: 13px; background: var(--sw-panel); }
+  #banner[data-kind="error"] { background: #fde8e8; color: #8a1c1c; }
+
+  .progress { display: flex; height: 10px; border-radius: 5px; overflow: hidden; background: var(--sw-panel); border: 1px solid var(--sw-border); margin: 4px 0 2px; }
+  .progress span { display: block; height: 100%; }
+  .counts { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--sw-muted); margin-bottom: 12px; }
+  .counts i, .col h2 i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; }
+
+  .board { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; align-items: start; }
+  @media (max-width: 760px) { .board { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 420px) { .board { grid-template-columns: 1fr; } }
+  .col { background: var(--sw-panel); border: 1px solid var(--sw-border); border-radius: var(--sw-radius); padding: 8px; min-height: 60px; }
+  .cards { display: flex; flex-direction: column; gap: 8px; }
+  .card { background: var(--sw-bg); border: 1px solid var(--sw-border); border-radius: calc(var(--sw-radius) - 2px); padding: 8px; }
+  .card .thumb { display: block; width: 100%; height: 96px; object-fit: contain; background: var(--sw-panel); border-radius: 4px; margin-bottom: 6px; }
+  .card .name { font-weight: 600; font-size: 13px; }
+  .card .meta { font-size: 11px; color: var(--sw-muted); margin-top: 2px; word-break: break-word; }
+  .card .detail { font-size: 12px; margin-top: 4px; word-break: break-word; }
+  .card .blocked { color: var(--c-blocked); }
+  .card .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; align-items: center; }
+  .card select, .card input { font: inherit; font-size: 12px; color: var(--sw-text); background: var(--sw-bg); border: 1px solid var(--sw-border); border-radius: 4px; padding: 2px 4px; }
+  .card input { width: 100%; margin-top: 6px; }
+
+  button { font: inherit; font-size: 12px; color: var(--sw-text); background: var(--sw-bg); border: 1px solid var(--sw-border); border-radius: 999px; padding: 3px 10px; cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--sw-accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  button.primary { background: var(--sw-accent); border-color: var(--sw-accent); color: #fff; }
+
+  .side { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
+  @media (max-width: 620px) { .side { grid-template-columns: 1fr; } }
+  .panel { background: var(--sw-panel); border: 1px solid var(--sw-border); border-radius: var(--sw-radius); padding: 10px; }
+  .panel ul { margin: 0; padding-left: 18px; font-size: 13px; }
+  .panel li { margin: 3px 0; word-break: break-word; }
+  footer { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+</style>
+</head>
+<body>
+<div id="banner" role="status" hidden></div>
+<div id="waiting">Reading the project&#8230;</div>
+
+<div id="app" hidden>
+  <header>
+    <div>
+      <h1 id="title"></h1>
+      <div class="muted" id="folder"></div>
+    </div>
+    <div style="display:flex;gap:6px;align-items:center">
+      <span class="muted" id="updated"></span>
+      <button id="refresh" type="button">Refresh</button>
+    </div>
+  </header>
+  <div class="progress" id="progress" aria-hidden="true"></div>
+  <div class="counts" id="counts"></div>
+  <div class="board" id="board"></div>
+  <div class="side">
+    <section class="panel"><h2><span>Open questions</span><span class="muted" id="q-count"></span></h2><ul id="questions"></ul></section>
+    <section class="panel"><h2><span>Recent decisions</span><span class="muted" id="d-count"></span></h2><ul id="decisions"></ul></section>
+  </div>
+  <footer>
+    <span id="status" class="muted" aria-live="polite"></span>
+    <button id="next" type="button" class="primary">Continue the project</button>
+  </footer>
+</div>
+
+<script>/*__MCP_APP_BRIDGE__*/</script>
+<script>
+(() => {
+  'use strict';
+
+  const COLUMNS = [
+    {key: 'todo', label: 'To do', color: 'var(--c-todo)'},
+    {key: 'in progress', label: 'In progress', color: 'var(--c-progress)'},
+    {key: 'blocked', label: 'Blocked', color: 'var(--c-blocked)'},
+    {key: 'done', label: 'Done', color: 'var(--c-done)'},
+  ];
+  const $ = id => document.getElementById(id);
+  let state = null;
+  let busy = 0;
+
+  function setBanner(text, kind) {
+    const b = $('banner');
+    b.textContent = text || '';
+    b.dataset.kind = kind || '';
+    b.hidden = !text;
+  }
+
+  function el(tag, props, children) {
+    const node = document.createElement(tag);
+    Object.assign(node, props || {});
+    for (const c of children || []) if (c != null) node.append(c);
+    return node;
+  }
+
+  async function act(args) {
+    if (!McpApp.connected()) { setBanner('This view needs an MCP Apps host.', 'error'); return; }
+    busy++;
+    $('refresh').disabled = true;
+    try {
+      const result = await McpApp.callTool('project_action', args, 180000);
+      const next = result && result.structuredContent && result.structuredContent.project;
+      if (!next) throw new Error(McpApp.text(result) || 'the server returned no board');
+      setBanner('', '');
+      render(next);
+    } catch (err) {
+      setBanner(err.message || String(err), 'error');
+      if (state) render(state);
+    } finally {
+      busy--;
+      $('refresh').disabled = busy > 0;
+    }
+  }
+
+  function ask(text) {
+    McpApp.sendMessage(text)
+      .then(() => setBanner('Sent to the agent.', 'info'))
+      .catch(() => setBanner('Copied to the clipboard - paste it into the chat.', 'info'));
+  }
+
+  function moduleLabel(m) {
+    return `${m.number ? '#' + m.number + ' ' : ''}${m.name}`;
+  }
+
+  function card(m) {
+    const files = m.files || {};
+    const counts = [['assemblies', 'asm'], ['parts', 'parts'], ['drawings', 'drw']]
+      .filter(([k]) => files[k]).map(([k, l]) => `${files[k]} ${l}`).join(', ');
+    const meta = [m.folder, counts, m.modified ? 'changed ' + m.modified.replace('T', ' ') : ''].filter(Boolean).join(' | ');
+
+    const select = el('select');
+    select.setAttribute('aria-label', `Status of ${m.name}`);
+    for (const c of COLUMNS) select.append(el('option', {value: c.key, textContent: c.label, selected: c.key === m.status}));
+    const reason = el('input', {type: 'text', placeholder: 'Why is it blocked?', value: m.status === 'blocked' ? m.status_detail : '', hidden: true});
+    const save = el('button', {type: 'button', textContent: 'Save', hidden: true});
+    select.addEventListener('change', () => {
+      if (select.value === 'blocked') { reason.hidden = false; save.hidden = false; reason.focus(); return; }
+      act({action: 'set_status', row: m.row, status: select.value});
+    });
+    save.addEventListener('click', () => act({action: 'set_status', row: m.row, status: 'blocked', detail: reason.value}));
+
+    const open = m.main_file ? el('button', {type: 'button', textContent: 'Open', title: m.main_file}) : null;
+    if (open) open.addEventListener('click', () => act({action: 'open', row: m.row}));
+    const work = m.status !== 'done' ? el('button', {type: 'button', textContent: 'Work on this'}) : null;
+    if (work) work.addEventListener('click', () => ask(
+      `Continue the SolidWorks project in ${state.folder} with module ${moduleLabel(m)}` +
+      (m.folder ? ` (folder ${m.folder})` : '') + '. Read AGENT_CONTEXT.md and DECISIONS_LOG.md first.'));
+
+    return el('div', {className: 'card'}, [
+      m.thumbnail ? el('img', {className: 'thumb', src: m.thumbnail, alt: `${m.name} preview`}) : null,
+      el('div', {className: 'name', textContent: moduleLabel(m)}),
+      meta ? el('div', {className: 'meta', textContent: meta}) : null,
+      m.status === 'blocked' && m.status_detail ? el('div', {className: 'detail blocked', textContent: m.status_detail}) : null,
+      m.evidence ? el('div', {className: 'detail', textContent: m.evidence}) : null,
+      m.notes ? el('div', {className: 'meta', textContent: m.notes}) : null,
+      el('div', {className: 'actions'}, [select, open, work]),
+      reason, save,
+    ]);
+  }
+
+  function render(next) {
+    state = next;
+    $('waiting').hidden = true;
+    $('app').hidden = false;
+    $('title').textContent = next.title || 'Project';
+    $('folder').textContent = next.folder || '';
+    $('updated').textContent = next.updated ? `AGENT_CONTEXT.md ${next.updated.replace('T', ' ')}` : '';
+    $('status').textContent = next.status || '';
+
+    const modules = next.modules || [];
+    const total = modules.length || 1;
+    const counts = next.counts || {};
+    $('progress').replaceChildren(...COLUMNS.slice().reverse().map(c =>
+      el('span', {title: `${c.label}: ${counts[c.key] || 0}`, style: `width:${((counts[c.key] || 0) / total) * 100}%;background:${c.color}`})));
+    $('counts').replaceChildren(...COLUMNS.map(c =>
+      el('span', {}, [el('i', {style: `background:${c.color}`}), `${c.label} ${counts[c.key] || 0}`])));
+
+    $('board').replaceChildren(...COLUMNS.map(c => {
+      const items = modules.filter(m => m.status === c.key);
+      return el('section', {className: 'col'}, [
+        el('h2', {}, [el('span', {}, [el('i', {style: `background:${c.color}`}), c.label]), el('span', {className: 'muted', textContent: String(items.length)})]),
+        el('div', {className: 'cards'}, items.length ? items.map(card) : [el('div', {className: 'muted', textContent: '-'})]),
+      ]);
+    }));
+
+    const qs = next.open_questions || [];
+    $('q-count').textContent = String(qs.length);
+    $('questions').replaceChildren(...(qs.length ? qs : ['None recorded']).map(q => el('li', {textContent: q})));
+    const ds = next.decisions || {count: 0, recent: []};
+    $('d-count').textContent = String(ds.count || 0);
+    $('decisions').replaceChildren(...((ds.recent || []).length ? ds.recent : ['None logged']).map(d => el('li', {textContent: d})));
+
+    const nextModule = modules.find(m => m.status === 'in progress') || modules.find(m => m.status === 'todo');
+    $('next').disabled = !nextModule;
+    $('next').textContent = nextModule ? `Continue: ${moduleLabel(nextModule)}` : 'All modules done';
+    $('next').onclick = nextModule ? () => ask(
+      `Continue the SolidWorks project in ${next.folder} with module ${moduleLabel(nextModule)}` +
+      (nextModule.folder ? ` (folder ${nextModule.folder})` : '') + '. Read AGENT_CONTEXT.md and DECISIONS_LOG.md first.') : null;
+  }
+
+  $('refresh').addEventListener('click', () => act({action: 'refresh'}));
+
+  McpApp.connect({
+    name: 'solidworks-project',
+    version: '1.0.0',
+    onToolResult(result) {
+      const project = result.structuredContent && result.structuredContent.project;
+      if (project) render(project);
+      else if (result.isError) setBanner(McpApp.text(result) || 'The project could not be read.', 'error');
+    },
+    onToolCancelled() { setBanner('The request was cancelled.', 'error'); },
+  }).catch(err => {
+    if (McpApp.embedded) setBanner(`Could not connect to the MCP Apps host: ${err.message || err}`, 'error');
+    else $('waiting').textContent = 'This is an MCP App: open it through show_project_board in a client that supports MCP Apps.';
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SolidWorks Motion Scrubber</title>
+<!--
+  SolidWorks Motion Scrubber - an MCP App view (MCP Apps extension, SEP-1865).
+
+  The host renders this page next to the show_motion_scrubber result and forwards its
+  structuredContent.motion. Moves, sweeps and view changes go back through the
+  app-only motion_action tool; each move rebuilds the assembly in SolidWorks.
+-->
+<style>
+  :root {
+    color-scheme: light dark;
+    --sw-accent: #c8102e;
+    --sw-bg: var(--color-background-primary, Canvas);
+    --sw-panel: var(--color-background-secondary, color-mix(in srgb, CanvasText 5%, Canvas));
+    --sw-text: var(--color-text-primary, CanvasText);
+    --sw-muted: var(--color-text-secondary, color-mix(in srgb, CanvasText 60%, Canvas));
+    --sw-border: var(--color-border-primary, color-mix(in srgb, CanvasText 15%, Canvas));
+    --sw-radius: var(--border-radius-md, 8px);
+    --sw-font: var(--font-sans, "Segoe UI", system-ui, -apple-system, sans-serif);
+    --ok: #1a7f37; --bad: #c8102e; --na: color-mix(in srgb, CanvasText 25%, Canvas);
+  }
+  html, body { margin: 0; background: var(--sw-bg); color: var(--sw-text); font: 14px/1.4 var(--sw-font); }
+  body { padding: 12px; box-sizing: border-box; }
+  *, *::before, *::after { box-sizing: inherit; }
+  [hidden] { display: none !important; }
+
+  header { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+  h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  h2 { font-size: 13px; margin: 0 0 8px; font-weight: 600; }
+  .muted { color: var(--sw-muted); font-size: 12px; }
+  #waiting { color: var(--sw-muted); padding: 24px 0; }
+  #banner { margin: 0 0 10px; padding: 6px 10px; border-radius: var(--sw-radius); font-size: 13px; background: var(--sw-panel); }
+  #banner[data-kind="error"] { background: #fde8e8; color: #8a1c1c; }
+
+  main { display: grid; grid-template-columns: minmax(0, 3fr) minmax(260px, 2fr); gap: 12px; align-items: start; }
+  @media (max-width: 640px) { main { grid-template-columns: 1fr; } }
+  .stack { display: flex; flex-direction: column; gap: 12px; }
+  .card { background: var(--sw-panel); border: 1px solid var(--sw-border); border-radius: var(--sw-radius); padding: 10px; }
+
+  .viewport { position: relative; aspect-ratio: 4 / 3; display: grid; place-items: center; background: var(--sw-bg); border-radius: calc(var(--sw-radius) - 2px); overflow: hidden; }
+  .viewport img { width: 100%; height: 100%; object-fit: contain; }
+  .viewport .empty { color: var(--sw-muted); font-size: 13px; }
+  .viewport .badge { position: absolute; left: 8px; top: 8px; font-size: 12px; font-weight: 600; padding: 2px 10px; border-radius: 999px; color: #fff; }
+  .badge[data-level="ok"] { background: var(--ok); } .badge[data-level="bad"] { background: var(--bad); }
+  .spinner { position: absolute; top: 8px; right: 8px; width: 16px; height: 16px; border: 2px solid var(--sw-border); border-top-color: var(--sw-accent); border-radius: 50%; animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .views { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  button { font: inherit; font-size: 13px; color: var(--sw-text); background: var(--sw-bg); border: 1px solid var(--sw-border); border-radius: 999px; padding: 4px 12px; cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--sw-accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  button[aria-pressed="true"], button.primary { background: var(--sw-accent); border-color: var(--sw-accent); color: #fff; }
+
+  .value { font-size: 28px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .value .u { font-size: 14px; color: var(--sw-muted); margin-left: 4px; }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 6px 0; }
+  input[type="number"] { width: 90px; font: inherit; font-size: 13px; padding: 2px 4px; text-align: right; color: var(--sw-text); background: var(--sw-bg); border: 1px solid var(--sw-border); border-radius: 4px; }
+  input[type="range"] { width: 100%; accent-color: var(--sw-accent); }
+  .ends { display: flex; justify-content: space-between; font-size: 11px; color: var(--sw-muted); font-variant-numeric: tabular-nums; }
+  label.check { display: flex; gap: 6px; align-items: center; font-size: 13px; }
+
+  .map { position: relative; display: flex; height: 22px; border-radius: 4px; overflow: hidden; border: 1px solid var(--sw-border); }
+  .map .seg { flex: 1; border: 0; border-radius: 0; padding: 0; min-width: 0; }
+  .map .seg[data-k="ok"] { background: var(--ok); } .map .seg[data-k="bad"] { background: var(--bad); } .map .seg[data-k="na"] { background: var(--na); }
+  .map .seg:hover { filter: brightness(1.2); }
+  .map .cursor { position: absolute; top: -2px; bottom: -2px; width: 3px; background: var(--sw-text); transform: translateX(-50%); pointer-events: none; }
+  .legend { display: flex; gap: 12px; font-size: 11px; color: var(--sw-muted); margin-top: 4px; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+  ul.hits { margin: 6px 0 0; padding-left: 18px; font-size: 13px; }
+  ul.hits li { margin: 2px 0; }
+
+  footer { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+</style>
+</head>
+<body>
+<div id="banner" role="status" hidden></div>
+<div id="waiting">Waiting for SolidWorks&#8230;</div>
+
+<div id="app" hidden>
+  <header>
+    <h1 id="title"></h1>
+    <span id="subtitle" class="muted"></span>
+  </header>
+  <main>
+    <section class="card">
+      <div class="viewport">
+        <img id="viewport" alt="SolidWorks assembly" hidden>
+        <span id="noimage" class="empty">No viewport image</span>
+        <span id="clash-badge" class="badge" hidden></span>
+        <span id="spinner" class="spinner" hidden></span>
+      </div>
+      <div class="views" id="views" role="group" aria-label="View"></div>
+    </section>
+
+    <div class="stack">
+      <section class="card">
+        <div class="row">
+          <span class="value"><span id="value">-</span><span class="u" id="unit"></span></span>
+          <input type="number" id="exact" step="any" aria-label="Exact position">
+        </div>
+        <input type="range" id="slider" aria-label="Position">
+        <div class="ends"><span id="min"></span><span id="max"></span></div>
+        <div class="row">
+          <label class="check"><input type="checkbox" id="check"> Check collisions on every move</label>
+          <button id="restore" type="button" title="Go back to where the mechanism was when the view opened">Start position</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Collision map</h2>
+        <div class="map" id="map" hidden></div>
+        <div class="legend" id="map-legend" hidden><span><i style="background:var(--ok)"></i>clear</span><span><i style="background:var(--bad)"></i>collision</span><span><i style="background:var(--na)"></i>not reachable</span></div>
+        <div class="muted" id="map-empty">Sweep the range to see where parts collide. Click the map to jump to a position.</div>
+        <div class="row">
+          <label for="steps">Positions</label>
+          <input type="number" id="steps" min="2" max="60" step="1" value="12">
+        </div>
+        <div class="row"><span class="muted" id="clash-summary"></span><button id="sweep" type="button">Sweep range</button></div>
+      </section>
+
+      <section class="card" id="hits-card" hidden>
+        <h2>Interference here</h2>
+        <ul class="hits" id="hits"></ul>
+      </section>
+    </div>
+  </main>
+  <footer>
+    <span id="status" class="muted" aria-live="polite"></span>
+    <button id="prompt" type="button" class="primary">Send to agent</button>
+  </footer>
+</div>
+
+<script>/*__MCP_APP_BRIDGE__*/</script>
+<script>
+(() => {
+  'use strict';
+
+  const MOVE_TIMEOUT_MS = 120000;
+  const SWEEP_TIMEOUT_MS = 15 * 60 * 1000;
+  const $ = id => document.getElementById(id);
+  let state = null;
+  let busy = 0;
+  let pendingMove = null;
+  let moving = false;
+
+  const fmt = v => (typeof v === 'number' && Number.isFinite(v)) ? String(Math.round(v * 1000) / 1000) : '-';
+
+  function setBanner(text, kind) {
+    const b = $('banner');
+    b.textContent = text || '';
+    b.dataset.kind = kind || '';
+    b.hidden = !text;
+  }
+
+  function setBusy(delta) {
+    busy = Math.max(0, busy + delta);
+    $('spinner').hidden = busy === 0;
+    $('sweep').disabled = busy > 0;
+    $('restore').disabled = busy > 0;
+  }
+
+  async function act(args, timeoutMs) {
+    if (!McpApp.connected()) { setBanner('This view needs an MCP Apps host to talk to SolidWorks.', 'error'); return; }
+    setBusy(+1);
+    try {
+      const result = await McpApp.callTool('motion_action', args, timeoutMs || MOVE_TIMEOUT_MS);
+      const next = result && result.structuredContent && result.structuredContent.motion;
+      if (!next) throw new Error(McpApp.text(result) || 'the server returned no update');
+      setBanner('', '');
+      render(next);
+    } catch (err) {
+      setBanner(`Could not reach SolidWorks: ${err.message || err}`, 'error');
+      if (state) render(state);
+    } finally {
+      setBusy(-1);
+    }
+  }
+
+  // One move at a time; while one runs keep only the newest target.
+  function moveTo(value) {
+    if (moving) { pendingMove = value; return; }
+    moving = true;
+    act({action: 'move', value, view: state && state.view}).finally(() => {
+      moving = false;
+      if (pendingMove !== null) { const v = pendingMove; pendingMove = null; moveTo(v); }
+    });
+  }
+
+  function render(next) {
+    state = next;
+    $('waiting').hidden = true;
+    $('app').hidden = false;
+    $('title').textContent = next.constraint || 'Mechanism';
+    $('subtitle').textContent = [next.assembly, next.dimension].filter(Boolean).join(' | ');
+    $('status').textContent = next.status || '';
+
+    const img = $('viewport');
+    if (next.image && next.image.startsWith('data:image/')) {
+      if (img.getAttribute('src') !== next.image) img.src = next.image;
+      img.hidden = false; $('noimage').hidden = true;
+    } else {
+      img.hidden = true; $('noimage').hidden = false;
+    }
+
+    $('views').replaceChildren(...(next.views || []).map(view => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = view.replace(/^\*/, '');
+      b.setAttribute('aria-pressed', String(view === next.view));
+      b.addEventListener('click', () => act({action: 'capture', view}));
+      return b;
+    }));
+
+    const slider = $('slider');
+    slider.min = next.min; slider.max = next.max; slider.step = next.step || 'any';
+    if (!moving && next.value != null) slider.value = next.value;
+    $('value').textContent = fmt(next.value);
+    $('unit').textContent = next.unit;
+    $('min').textContent = `${fmt(next.min)} ${next.unit}`;
+    $('max').textContent = `${fmt(next.max)} ${next.unit}`;
+    const exact = $('exact');
+    exact.min = next.min; exact.max = next.max;
+    if (document.activeElement !== exact) exact.value = fmt(next.value);
+    $('check').checked = !!next.check_collisions;
+
+    const hits = next.interferences || [];
+    const badge = $('clash-badge');
+    badge.hidden = !next.check_collisions;
+    badge.dataset.level = hits.length ? 'bad' : 'ok';
+    badge.textContent = hits.length ? `${hits.length} collision${hits.length > 1 ? 's' : ''}` : 'Clear';
+    $('hits-card').hidden = !hits.length;
+    $('hits').replaceChildren(...hits.map(h => {
+      const li = document.createElement('li');
+      li.textContent = `${(h.components || []).join(' ↔ ') || 'unknown components'}: ${fmt(h.volume_mm3)} mm³`;
+      return li;
+    }));
+
+    renderMap(next);
+    $('prompt').disabled = !next.summary;
+  }
+
+  function renderMap(s) {
+    const map = $('map');
+    const sweep = s.sweep || [];
+    map.hidden = !sweep.length;
+    $('map-legend').hidden = !sweep.length;
+    $('map-empty').hidden = !!sweep.length;
+    const segs = sweep.map(p => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'seg';
+      b.dataset.k = p.count == null ? 'na' : p.count ? 'bad' : 'ok';
+      const pairs = (p.pairs || []).map(x => x.join(' ↔ ')).join('; ');
+      b.title = `${fmt(p.value)} ${s.unit}: ` + (p.count == null ? (p.error || 'not reachable') : p.count ? `${p.count} collision(s) ${pairs}` : 'clear');
+      b.setAttribute('aria-label', b.title);
+      b.addEventListener('click', () => moveTo(p.value));
+      return b;
+    });
+    const cursor = document.createElement('span');
+    cursor.className = 'cursor';
+    if (s.value != null && s.max > s.min) cursor.style.left = `${((s.value - s.min) / (s.max - s.min)) * 100}%`;
+    map.replaceChildren(...segs, cursor);
+
+    const bad = sweep.filter(p => p.count);
+    $('clash-summary').textContent = sweep.length
+      ? (bad.length ? `${bad.length} of ${sweep.length} positions collide` : `All ${sweep.length} positions clear`) : '';
+  }
+
+  $('slider').addEventListener('input', () => { $('value').textContent = fmt(+$('slider').value); });
+  $('slider').addEventListener('change', () => moveTo(+$('slider').value));
+  $('exact').addEventListener('change', () => {
+    const v = parseFloat($('exact').value);
+    if (Number.isFinite(v)) moveTo(v);
+  });
+  $('check').addEventListener('change', () => act({action: 'set_check', check_collisions: $('check').checked}));
+  $('restore').addEventListener('click', () => act({action: 'restore', view: state && state.view}));
+  $('sweep').addEventListener('click', () => {
+    const n = parseInt($('steps').value, 10);
+    setBanner('Sweeping the range in SolidWorks with an interference check at each position. This can take a while.', 'info');
+    act({action: 'sweep', steps: Number.isFinite(n) ? n : 12, view: state && state.view}, SWEEP_TIMEOUT_MS);
+  });
+  $('prompt').addEventListener('click', () => {
+    McpApp.sendMessage(state.summary)
+      .then(() => setBanner('Sent to the agent.', 'info'))
+      .catch(() => setBanner('Summary copied to the clipboard - paste it into the chat.', 'info'));
+  });
+
+  McpApp.connect({
+    name: 'solidworks-motion',
+    version: '1.0.0',
+    onToolResult(result) {
+      const motion = result.structuredContent && result.structuredContent.motion;
+      if (motion) render(motion);
+      else if (result.isError) setBanner(McpApp.text(result) || 'The mechanism could not be opened.', 'error');
+    },
+    onToolCancelled() { setBanner('The request was cancelled.', 'error'); },
+  }).catch(err => {
+    if (McpApp.embedded) setBanner(`Could not connect to the MCP Apps host: ${err.message || err}`, 'error');
+    else $('waiting').textContent = 'This is an MCP App: open it through show_motion_scrubber in a client that supports MCP Apps.';
+  });
+})();
+</script>
+</body>
+</html>

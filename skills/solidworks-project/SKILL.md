@@ -132,6 +132,9 @@ Status values: `todo`, `in progress`, `blocked (reason)`, `done`. Only "done" wh
 saved, its interference check has no unexplained hits, its checks from the checks section pass, and its captures
 have been looked at.
 
+Keep the tracklist in exactly this table form (columns `#`, `Module / step`, `Folder`, `Status`, `Evidence`,
+`Notes`) and the open questions as a list under `## Open questions`: `show_project_board` reads both.
+
 Show the user a short summary (modules, build order, key `[USER]` values, open questions) and get a "go" before
 modelling.
 
@@ -169,6 +172,21 @@ modelling.
   - save before anything risky.
 - **Report at each milestone:** what was built (paths, boxes, volumes, how verified), interference and check
   results, new decisions, `[VERIFY]` items, open questions, and the next step. The tracklist must match the report.
+
+## Project board
+
+`show_project_board {"project_folder": "<project>"}` shows the tracklist as a board: one column per status,
+each module with its preview thumbnail, file counts and last change, plus the open questions and the latest
+`CAD-nnn` decisions. Open it when the user asks where the project stands, at the start of a session on an
+existing project, and after each milestone report. In clients with MCP Apps the user can:
+
+- change a module's status, which rewrites only that Status cell in AGENT_CONTEXT.md. **Re-read the file
+  before your next edit**, and if the user marked something `done` that lacks evidence, say so;
+- open a module's main assembly in SolidWorks;
+- press **Work on this** / **Continue**, which sends "Continue the SolidWorks project in <folder> with module
+  …". Treat that as the go for that module: Step 1, then Step 6.
+
+Never call `project_action` yourself: it belongs to the view. Elsewhere the same tracklist comes back as text.
 
 ## Rules that save time
 

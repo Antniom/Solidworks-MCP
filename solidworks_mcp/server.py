@@ -40,7 +40,7 @@ import datetime
 
 from . import __version__
 from .automation import SolidWorksAutomation
-from .constants import SwErrors
+from .constants import SwErrors, SwDocumentTypes
 from .config import get_config
 from .tool_schemas import tool_definitions, validate_tool_arguments, length_unit_arguments
 from .utils import get_solidworks_info
@@ -66,9 +66,12 @@ from .core import (
 
 STUDIO_RESOURCE_URI = "ui://solidworks/studio.html"
 FEA_RESOURCE_URI = "ui://solidworks/fea.html"
+MOTION_RESOURCE_URI = "ui://solidworks/motion.html"
+PROJECT_RESOURCE_URI = "ui://solidworks/project.html"
 STUDIO_MIME_TYPE = "text/html;profile=mcp-app"
 # Tools whose result structuredContent feeds an MCP Apps view.
-_APP_VIEW_TOOLS = ("show_interactive_studio", "studio_action", "show_fea_results", "fea_action")
+_APP_VIEW_TOOLS = ("show_interactive_studio", "studio_action", "show_fea_results", "fea_action",
+                   "show_motion_scrubber", "motion_action", "show_project_board", "project_action")
 
 
 def _configure_logging() -> Optional[Path]:
@@ -924,6 +927,10 @@ _TOOL_HANDLERS: Dict[str, Callable[[dict], Dict[str, Any]]] = {
     'studio_action': lambda a: _studio_action_handler(a),
     'show_fea_results': lambda a: _show_fea_results_handler(a),
     'fea_action': lambda a: _fea_action_handler(a),
+    'show_motion_scrubber': lambda a: _show_motion_scrubber_handler(a),
+    'motion_action': lambda a: _motion_action_handler(a),
+    'show_project_board': lambda a: _show_project_board_handler(a),
+    'project_action': lambda a: _project_action_handler(a),
     'search_knowledge': _search_knowledge,
     'record_knowledge': _record_knowledge,
     'supervisor_clean_processes': lambda a: sw_automation.supervisor_clean_processes(
@@ -1011,6 +1018,8 @@ _NO_COMMAND_IN_PROGRESS_TOOLS = {
     "studio_action",
     "show_fea_results",
     "fea_action",
+    "show_motion_scrubber",
+    "motion_action",
     "supervisor_clean_processes",
     "restart_solidworks",
 }
@@ -1166,8 +1175,12 @@ def get_tool_timeout(tool_name: str, cfg: Any, arguments: Optional[dict] = None)
         return float(getattr(cfg, "export_timeout", 180.0))
     elif tool_name in ("mesh_and_run_simulation",) or (
         tool_name == "fea_action" and (arguments or {}).get("action") == "rerun"
+    ) or (
+        tool_name == "motion_action" and (arguments or {}).get("action") == "sweep"
     ):
         return float(getattr(cfg, "simulation_timeout", 600.0))
+    elif tool_name in ("show_project_board", "project_action", "show_motion_scrubber"):
+        return float(getattr(cfg, "open_save_timeout", 120.0))
     else:
         return float(getattr(cfg, "default_timeout", 60.0))
 
@@ -2207,6 +2220,94 @@ def _fea_action_handler(arguments: dict) -> Dict[str, Any]:
         yield_mpa=arguments.get("yield_mpa"),
     )
     return _ok(state["status"], {"fea": state})
+
+
+MOTION_ACTIONS = ("move", "sweep", "capture", "restore", "set_check")
+
+
+def _show_motion_scrubber_handler(arguments: dict) -> Dict[str, Any]:
+    """Set up the motion scrubber view for one driving mate dimension of the active assembly."""
+    from .ui import motion
+
+    doc, err = sw_automation.get_active_doc()
+    if err:
+        return err
+    if get_attr_or_call(doc, "GetType") != SwDocumentTypes.swDocASSEMBLY:
+        return sw_automation._result(False, "The motion scrubber needs an assembly as the active document.",
+                                     SwErrors.swInvalidDocumentType)
+    motion.set_automation_instance(sw_automation)
+    res = motion.open_scrubber(
+        constraint=str(arguments.get("constraint_name") or ""),
+        min_value=arguments.get("min_value"),
+        max_value=arguments.get("max_value"),
+        unit=arguments.get("unit") or "mm",
+        step=arguments.get("step"),
+        view=arguments.get("view_name", "*Isometric"),
+        check_collisions=arguments.get("check_collisions", True),
+    )
+    if not res["success"]:
+        return sw_automation._result(False, res["message"], SwErrors.swInvalidInput)
+    state = res["data"]
+    text = (f"Motion scrubber ready for '{state['constraint']}' ({state['min']:g}..{state['max']:g} {state['unit']}), "
+            f"currently at {state['value']:g} {state['unit']}. Clients that support MCP Apps show it inline; "
+            f"elsewhere use drive_kinematic_motion.")
+    return _ok(text, {"motion": state})
+
+
+def _motion_action_handler(arguments: dict) -> Dict[str, Any]:
+    """Apply one action sent by the motion scrubber view (through the MCP Apps host)."""
+    from .ui import motion
+
+    action = arguments.get("action")
+    if action not in MOTION_ACTIONS:
+        return sw_automation._result(
+            False, f"action must be one of {', '.join(MOTION_ACTIONS)}", SwErrors.swInvalidInput
+        )
+    if not motion.get_session().constraint:
+        return sw_automation._result(False, "Open the view with show_motion_scrubber first.", SwErrors.swInvalidInput)
+    motion.set_automation_instance(sw_automation)
+    state = motion.handle_action(
+        action,
+        value=arguments.get("value"),
+        view=arguments.get("view"),
+        steps=arguments.get("steps"),
+        check_collisions=arguments.get("check_collisions"),
+    )
+    return _ok(state["status"], {"motion": state})
+
+
+def _show_project_board_handler(arguments: dict) -> Dict[str, Any]:
+    """Read a solidworks-project folder (AGENT_CONTEXT.md tracklist) for the project board view."""
+    from .ui import project
+
+    project.set_automation_instance(sw_automation)
+    res = project.load(str(arguments.get("project_folder") or ""))
+    if not res["success"]:
+        return sw_automation._result(False, res["message"], SwErrors.swInvalidInput)
+    state = res["data"]
+    lines = [f"Project board for '{state['title']}': {state['status']}"]
+    for m in state["modules"]:
+        lines.append(f"- {('#' + m['number'] + ' ') if m['number'] else ''}{m['name']}: {m['status']}"
+                     + (f" ({m['status_detail']})" if m["status_detail"] else ""))
+    if state["open_questions"]:
+        lines.append(f"{len(state['open_questions'])} open question(s).")
+    return _ok("\n".join(lines), {"project": state})
+
+
+def _project_action_handler(arguments: dict) -> Dict[str, Any]:
+    """Apply one action sent by the project board view (refresh, set_status, open)."""
+    from .ui import project
+
+    project.set_automation_instance(sw_automation)
+    res = project.handle_action(
+        str(arguments.get("action") or ""),
+        row=arguments.get("row"),
+        status=arguments.get("status"),
+        detail=arguments.get("detail"),
+    )
+    if not res["success"]:
+        return sw_automation._result(False, res["message"], SwErrors.swInvalidInput)
+    return _ok(res["data"]["status"], {"project": res["data"]})
 
 
 def _show_interactive_studio_handler(arguments: dict) -> Dict[str, Any]:

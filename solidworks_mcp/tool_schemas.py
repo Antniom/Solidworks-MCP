@@ -126,6 +126,41 @@ def _build_tools() -> List[Tool]:
             }
         ),
         Tool(
+            name="show_project_board",
+            description=(
+                "Show a solidworks-project folder as a board (MCP App): the AGENT_CONTEXT.md TRACKLIST by status with "
+                "module thumbnails and file counts, open questions and recent CAD-nnn decisions. The user can change a "
+                "module's status (written back to the tracklist), open its assembly, or ask you to continue a module. "
+                "Clients without MCP Apps get the tracklist as text."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "project_folder": {"type": "string", "description": "Absolute path of the project folder that holds AGENT_CONTEXT.md"}
+                },
+                "required": ["project_folder"]
+            },
+            meta={"ui": {"resourceUri": "ui://solidworks/project.html"}}
+        ),
+        Tool(
+            name="project_action",
+            description=(
+                "Internal to the project board view: refresh it, set a module's status in the tracklist, or open a "
+                "module's main file. Not for direct use; edit AGENT_CONTEXT.md yourself instead."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["refresh", "set_status", "open"], "description": "Board action"},
+                    "row": {"type": "integer", "description": "Tracklist row (from the board) for set_status and open"},
+                    "status": {"type": "string", "enum": ["todo", "in progress", "blocked", "done"], "description": "New status for set_status"},
+                    "detail": {"type": "string", "description": "Reason, for status 'blocked'"}
+                },
+                "required": ["action"]
+            },
+            meta={"ui": {"resourceUri": "ui://solidworks/project.html", "visibility": ["app"]}}
+        ),
+        Tool(
             name="report_issue",
             description=(
                 "Report a problem with THIS SolidWorks MCP server to its developer. Call it, without asking, every "
@@ -1716,6 +1751,62 @@ def _build_tools() -> List[Tool]:
                 },
                 "required": ["constraint_name", "start_value", "end_value"]
             }
+        ),
+        Tool(
+            name="show_motion_scrubber",
+            description=(
+                "Open the motion scrubber (MCP App) for one driving mate dimension of the active assembly: the user "
+                "drags it through min_value..max_value with a live viewport and an interference check at each "
+                "position, and can sweep the range for a collision map. Get the mate name from "
+                "inspect_assembly_kinematics and the range from the design (joint limits). In clients without MCP "
+                "Apps use drive_kinematic_motion."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "constraint_name": {"type": "string", "description": "Driving mate or dimension name (e.g. 'Angle1' or 'D1@Distance1')"},
+                    "min_value": {"type": "number", "description": "Low end of the range"},
+                    "max_value": {"type": "number", "description": "High end of the range"},
+                    "unit": {"type": "string", "default": "mm", "enum": ["mm", "deg", "inch", "m", "cm"], "description": "Unit of the range"},
+                    "step": {"type": "number", "description": "Slider step (default: 1 deg, or 1/100 of the range)"},
+                    "check_collisions": {"type": "boolean", "default": True, "description": "Run interference detection after every move"},
+                    "view_name": {
+                        "type": "string",
+                        "default": "*Isometric",
+                        "enum": ["*Isometric", "*Front", "*Top", "*Right", "*Back", "*Left", "*Bottom"],
+                        "description": "Initial view orientation"
+                    }
+                },
+                "required": ["constraint_name", "min_value", "max_value"]
+            },
+            meta={"ui": {"resourceUri": "ui://solidworks/motion.html"}}
+        ),
+        Tool(
+            name="motion_action",
+            description=(
+                "Internal to the motion scrubber view: move the mechanism, sweep the range, change the view or the "
+                "collision check, and return the new state. Not for direct use; use drive_kinematic_motion instead."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["move", "sweep", "capture", "restore", "set_check"],
+                        "description": "move: go to value; sweep: check `steps` positions across the range; capture: refresh the image; restore: back to the starting position; set_check: turn the per-move collision check on or off"
+                    },
+                    "value": {"type": "number", "description": "Target position for move"},
+                    "steps": {"type": "integer", "minimum": 2, "maximum": 60, "description": "Number of intervals for sweep"},
+                    "check_collisions": {"type": "boolean", "description": "For set_check"},
+                    "view": {
+                        "type": "string",
+                        "enum": ["*Isometric", "*Front", "*Top", "*Right", "*Back", "*Left", "*Bottom"],
+                        "description": "View orientation for the image"
+                    }
+                },
+                "required": ["action"]
+            },
+            meta={"ui": {"resourceUri": "ui://solidworks/motion.html", "visibility": ["app"]}}
         ),
         Tool(
             name="manage_positional_representations",

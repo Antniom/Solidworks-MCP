@@ -687,6 +687,7 @@ class AssemblyOperations:
                 {
                     "has_interference": has_interference,
                     "interference_count": len(interference_list),
+                    "interferences": sorted(interference_list, key=lambda d: -d["volume_mm3"]),
                     "selection_cleared": cleared,
                 },
             )

@@ -13,6 +13,8 @@ mechanical-engineering workflows, plus an interactive studio for adjusting dimen
 | Parts | "Model a flanged mounting bracket with four M6 counterbored holes." |
 | Interactive studio | "Open the studio so I can adjust the dimensions with sliders." |
 | FEA results | "Run a static study with 500 N on the tip and show me the results." |
+| Motion | "Let me move the lid hinge from 0 to 110 degrees and show where it collides." |
+| Project board | "Where does the feeder project stand?" |
 | Standard hardware | "Create a DIN 933 M12 hex bolt with a 45 mm shaft." |
 | Assemblies | "Insert bracket.sldprt and pin.sldprt and mate the pin into the hole." |
 | Drawings | "Make an A3 drawing with front, top and isometric views and a BOM, then export a PDF." |
@@ -84,6 +86,21 @@ strength. A "what if the load changes" slider gives an instant linear estimate (
 studies), and **Re-solve** meshes and solves again in SolidWorks with the element size you choose, for
 example after changing dimensions in the studio. **Send to agent** hands the numbers back to Claude.
 
+## Motion scrubber
+
+`show_motion_scrubber` takes one distance or angle mate of the active assembly and its range. You drag it
+through the range (or type a position) and SolidWorks moves the mechanism, with a live picture and a
+clear / collision badge from interference detection. **Sweep range** checks evenly spaced positions and
+draws a collision map: green clear, red colliding (hover for the parts), grey unreachable; click a segment
+to jump there. **Start position** puts the mechanism back where it was.
+
+## Project board
+
+For multi-part projects run with the `solidworks-project` skill, `show_project_board` turns the
+`AGENT_CONTEXT.md` tracklist into a board: modules by status with a SolidWorks preview, file counts and
+last change, plus the open questions and recent `CAD-nnn` decisions. You can change a module's status (only
+that cell of the tracklist is rewritten), open its assembly, or ask Claude to continue with a module.
+
 ## What runs on your computer, and your data
 
 Everything this plugin does happens on your PC:
@@ -148,8 +165,8 @@ uv run pytest
 ```
 
 Tool schemas are in `solidworks_mcp/tool_schemas.py` and the dispatch table in `solidworks_mcp/server.py`.
-The MCP App views are plain HTML and JavaScript with no build step: `solidworks_mcp/ui/studio.html` and
-`solidworks_mcp/ui/fea.html`, with their state in `studio.py` and `fea.py`. The host handshake they share is
+The MCP App views are plain HTML and JavaScript with no build step, in `solidworks_mcp/ui/`
+(`studio`, `fea`, `motion`, `project`), each with its state in the `.py` file of the same name. The host handshake they share is
 `solidworks_mcp/ui/bridge.js`, inlined into each page by `solidworks_mcp/ui/apps.py`, which also lists the
 `ui://` resources.
 To use the same server with other MCP clients, see [docs/other-clients.md](docs/other-clients.md).

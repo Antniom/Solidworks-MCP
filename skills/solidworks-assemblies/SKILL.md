@@ -5,7 +5,8 @@ description: >-
   files, positioning and fixing components, standard and mechanical mates, flexible/rigid subassemblies,
   driving mates through a motion range, positional representations and interference checks. Use for any
   multi-component (.sldasm) request, e.g. "create assembly", "add mate", "insert the motor STEP", "check
-  interference", "animate the hinge", "does the lid clear when open", or "criar montagem", "adicionar relação".
+  interference", "animate the hinge", "does the lid clear when open", "let me move the mechanism", or
+  "criar montagem", "adicionar relação".
 ---
 
 # SolidWorks assemblies
@@ -77,7 +78,15 @@ add_mate {"mate_type": "concentric", "use_selection": true, "align": 0}
 3. `drive_kinematic_motion {"constraint_name": "Angle1", "start_value": 0, "end_value": 110, "steps": 12, "unit": "deg", "check_interference": true}`
    steps a distance or angle mate through its range and reports the steps that collide. Angle mates need
    `"unit": "deg"`.
-4. `manage_positional_representations` stores named states (open/closed) as configurations with mate
+4. When the user wants to see or try the motion themselves ("let me move the hinge", "show me where it
+   collides"), open the motion scrubber:
+   `show_motion_scrubber {"constraint_name": "Angle1", "min_value": 0, "max_value": 110, "unit": "deg"}`.
+   In clients with MCP Apps the user drags the mate through the range with a live viewport and a
+   collision badge, types exact positions, and sweeps the range for a collision map whose segments jump to
+   that position. Take the range from the joint limits in the design, not a guess. Never call
+   `motion_action` yourself: it belongs to the view. A message starting "Motion check of" comes from its
+   **Send to agent** button: explain each collision range and propose fixes (clearance, stop, limit mate).
+5. `manage_positional_representations` stores named states (open/closed) as configurations with mate
    overrides.
 
 Mate names come from `inspect_assembly_kinematics` or `get_feature_tree`.

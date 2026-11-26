@@ -25,8 +25,10 @@ def test_resource_is_listed_and_readable_through_the_sdk():
     async def go():
         async with Client(srv.server) as client:
             listed = await client.list_resources()
-            assert {str(r.uri) for r in listed.resources} == {srv.STUDIO_RESOURCE_URI, srv.FEA_RESOURCE_URI}
-            for uri, action_tool in ((srv.STUDIO_RESOURCE_URI, "studio_action"), (srv.FEA_RESOURCE_URI, "fea_action")):
+            views = {srv.STUDIO_RESOURCE_URI: "studio_action", srv.FEA_RESOURCE_URI: "fea_action",
+                     srv.MOTION_RESOURCE_URI: "motion_action", srv.PROJECT_RESOURCE_URI: "project_action"}
+            assert {str(r.uri) for r in listed.resources} == set(views)
+            for uri, action_tool in views.items():
                 read = await client.read_resource(uri)
                 content = read.contents[0]
                 assert content.mime_type == "text/html;profile=mcp-app"
@@ -38,11 +40,16 @@ def test_resource_is_listed_and_readable_through_the_sdk():
             assert by_name["studio_action"].meta["ui"]["visibility"] == ["app"]
             assert by_name["show_fea_results"].meta["ui"]["resourceUri"] == srv.FEA_RESOURCE_URI
             assert by_name["fea_action"].meta["ui"]["visibility"] == ["app"]
+            for show, act in (("show_motion_scrubber", "motion_action"), ("show_project_board", "project_action")):
+                assert by_name[show].meta["ui"]["resourceUri"] == by_name[act].meta["ui"]["resourceUri"]
+                assert by_name[act].meta["ui"]["visibility"] == ["app"]
+                assert "visibility" not in by_name[show].meta["ui"]
 
     anyio.run(go)
 
 
-@pytest.mark.parametrize("uri", [srv.STUDIO_RESOURCE_URI, srv.FEA_RESOURCE_URI])
+@pytest.mark.parametrize("uri", [srv.STUDIO_RESOURCE_URI, srv.FEA_RESOURCE_URI,
+                                 srv.MOTION_RESOURCE_URI, srv.PROJECT_RESOURCE_URI])
 def test_views_are_self_contained(uri):
     """MCP Apps views run under a strict CSP: nothing may be loaded from the network."""
     from solidworks_mcp.ui import apps
